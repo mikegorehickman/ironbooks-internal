@@ -222,20 +222,26 @@ Classify each vendor group. Return the structured JSON.`;
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * Patterns that should always route to "Uncategorized" (decision = flagged)
- * regardless of AI confidence. E-transfers and peer payment apps without
- * a clear vendor or memo cannot be categorized blind — human review required.
+ * Patterns that signal a TRUE peer-to-peer payment — these go to "ask_client".
+ *
+ * IMPORTANT: Do NOT match "Interac" alone. In Canada, every debit card purchase
+ * shows up with "INTERAC PURCHASE - <merchant>" in the descriptor. Matching plain
+ * "Interac" would falsely catch every retail transaction and route it to the
+ * client-confirmation queue.
+ *
+ * Real peer payments require explicit terms like "e-Transfer", "EMT", "Venmo",
+ * "Zelle", or "Cash App" — these specifically denote person-to-person transfers
+ * outside a normal merchant transaction.
  */
 const ETRANSFER_PATTERNS = [
-  /e-?transfer/i,
-  /interac/i,
-  /\be-?tfr\b/i,
-  /\bemt\b/i,
-  /venmo/i,
-  /zelle/i,
-  /cash\s*app/i,
-  /wire\s*transfer/i,
-  /etfr/i,
+  /e[\s\-]?transfer/i,              // e-Transfer, etransfer, e transfer
+  /\bemt\b/i,                       // EMT (Email Money Transfer)
+  /\be[\s\-]?tfr\b/i,               // e-tfr, etfr, e tfr
+  /\bvenmo\b/i,
+  /\bzelle\b/i,
+  /\bcash\s+app\b/i,                // Cash App (with word boundary on "cash")
+  /\bwire\s+transfer\b/i,
+  /interac\s+e[\s\-]?transfer/i,    // "Interac e-Transfer" (the peer payment product)
 ];
 
 export interface FullCategorizationLine {
@@ -290,8 +296,11 @@ SMALL TOOLS (when explicitly tools, not consumables) → Small Tools
   DeWalt, Milwaukee, Bosch, Makita, Stanley, Klein Tools — if amount suggests tool purchase
 
 FUEL → Fuel – Admin & Sales Vehicles (default) OR Direct Fuel Allocation (if clearly crew)
-  Esso, Shell, Chevron, Petro-Canada, Costco Gas, Costco Fuel, Mobil, BP, Husky,
-  7-Eleven (fuel only), Petro-Pass, Speedway, Race Trac, Pioneer (gas)
+  Esso, Shell, Chevron, Petro-Canada, Mobil, BP, Husky, Petro-Pass, Speedway, Race Trac,
+  Pioneer Gas, Hughes Petroleum, Co-op Gas, Co-op Cardlock, Domo, FasGas, Centex, Mohawk,
+  Macewen, Federated Co-op,
+  7-Eleven (convenience store — fuel by default unless amount < $15 in which case it might be Meals),
+  Costco Gas, Costco Fuel, Costco Cardlock
 
 VEHICLE REPAIRS → Vehicle Repairs – Admin/Sales
   Mr. Lube, Jiffy Lube, Mister Transmission, Canadian Tire Auto, Midas, Kal Tire,
@@ -307,10 +316,23 @@ BANK / MERCHANT FEES → Bank Charges
   Square Fee, Clover Fee, Stripe Fee (only when explicit — Stripe payouts go elsewhere)
 
 MEALS → Meals (50% deductible)
-  Tim Hortons, McDonald's, Subway, Starbucks, Earls, Boston Pizza, Joey's, Cactus Club,
-  Moxie's, A&W, Dairy Queen, Wendy's, Kelsey's, Smitty's, Denny's, IHOP,
-  Oriental Dim Sum, Sushi (any), Pho (any), Thai (any), Chinese restaurant names,
-  any name ending in "Restaurant", "Bistro", "Grill", "Pub", "Cafe", "Diner"
+  Quick-service: Tim Hortons, McDonald's, Subway, Starbucks, A&W, Dairy Queen, Wendy's,
+  Burger King, KFC, Popeyes, Taco Bell, Chipotle, Five Guys, Domino's, Pizza Hut, Panera
+  Sit-down: Earls, Boston Pizza, Joey's, Cactus Club, Moxie's, Kelsey's, Smitty's, Denny's,
+  IHOP, The Keg, Original Joe's, Montana's, State & Main, Browns Socialhouse
+  Generic ethnic: Sushi (any), Pho (any), Thai (any), Vietnamese, Chinese, Indian, Mexican
+  Costco Food Court, Costco Restaurant (NOT plain "Costco" — those are wholesale)
+
+  RESTAURANT-NAME HEURISTIC (use 0.78 confidence when amount is $5–$80):
+  Any vendor name containing one of these tokens with no other clear category match:
+    "Bowl", "Grill", "House", "Famous", "Pub", "Cafe", "Bistro", "Diner", "Eatery",
+    "Pizzeria", "Sushi", "Pho", "Ramen", "BBQ", "Bar & Grill", "Bowling" + Food,
+    possessives like "Ed's", "Mike's", "Joe's", "Mama's" when the amount fits a meal
+  Examples that should hit this heuristic:
+    "WEM Ed's Bowl" ($25) → Meals (West Edmonton Mall food/bowling)
+    "Mike's Famous" ($15) → Meals (sounds like a deli/restaurant)
+    "Joe's Pizza" ($30) → Meals
+    "Riverside House" ($45) → Meals if no other context
 
 TRAVEL → Travel – Airfare & Lodging
   Air Canada, WestJet, Porter, AC Express, Delta, United, Alaska, Hilton, Marriott,
@@ -353,7 +375,31 @@ LEGAL → Legal Fees
   Any name with "Law", "Legal", "Attorney", "Lawyer", "Solicitor", "LLP" + lawyer context
 
 OFFICE SUPPLIES → Office Supplies
-  Staples, Office Depot, Best Buy (small office items), Amazon (small consumables)
+  Staples, Office Depot, Amazon (small consumables)
+  Shoppers Drug Mart, London Drugs, Walgreens, CVS (basic supplies / small purchases)
+
+COMPUTER & TECH EQUIPMENT → Software Subscriptions (if subscription) or Office Supplies (if hardware < $300) or Small Tools (if hardware $300+)
+  Best Buy → if < $300: Office Supplies; $300+: Small Tools (treat as capital-ish equipment)
+  Apple Store, Microsoft Store → same tier rule
+
+═══ COSTCO DISAMBIGUATION (very common in CA painter books) ═══
+Look at the FULL vendor + description string:
+  "Costco Gas", "Costco Fuel", "Costco Cardlock"     → Fuel
+  "Costco Food Court", "Costco Restaurant"            → Meals
+  "Costco Whse", "Costco Wholesale", or plain "Costco" with amount > $50 → Job Supplies (default for trade clients)
+  Plain "Costco" with amount < $20                    → Meals (likely food court)
+  Plain "Costco" with amount $20–$50                  → 0.7 confidence Job Supplies (could be either)
+
+═══ INTERAC PURCHASE STRIPPING ═══
+Many Canadian bank-fed transactions show as "INTERAC PURCHASE - <merchant>" or
+"INTERAC RETAIL - <merchant>". The word "INTERAC" is just the payment network —
+ignore it and categorize based on the merchant name that follows. Do NOT
+interpret "Interac" alone as a peer payment.
+
+═══ SHOPPERS / DRUGSTORE → Job Supplies for trades clients ═══
+Painters and tradespeople often buy small consumables (gloves, tape, snacks for
+crew, basic hygiene supplies) at Shoppers Drug Mart, London Drugs, Walgreens.
+Default: Job Supplies (high confidence) for amounts $5–$100.
 
 OFFICE RENT → Office Rent
   "Rent", "Lease", "Property Management" + recurring monthly amounts → Office Rent
