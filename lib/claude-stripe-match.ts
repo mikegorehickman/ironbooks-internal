@@ -15,7 +15,7 @@ import type {
   QBOInvoice,
   QBOCustomerPayment,
 } from "./qbo-stripe-recon";
-import { getProvinceTax } from "./canadian-tax";
+import { getProvinceTax, getServiceTaxRate } from "./canadian-tax";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = "claude-opus-4-7";
@@ -23,7 +23,12 @@ const MODEL = "claude-opus-4-7";
 export interface InvoiceMatch {
   invoice_id: string;
   customer_name: string | null;
+  /** Gross invoice amount (incl. any tax on the invoice) */
   amount: number;
+  /** Pre-tax service revenue portion (calculated from province service-tax rate) */
+  pre_tax_amount: number;
+  /** Sales tax portion (HST/GST/QST/PST as applicable to services in this province) */
+  tax_amount: number;
 }
 
 export interface DepositMatch {
@@ -34,7 +39,13 @@ export interface DepositMatch {
   matched_invoices: InvoiceMatch[];
   matched_customer_names: string[];
   total_invoice_amount: number;
+  /** Pre-tax revenue across all matched invoices */
+  pre_tax_revenue: number;
+  /** Sales tax collected from customers across all matched invoices */
+  total_sales_tax_collected: number;
+  /** Stripe processing fee (pre-tax for Canada, all-in for US) */
   computed_fee: number;
+  /** ITC on Stripe fee (Canada only) */
   computed_tax: number;
   tax_code: string | null;
   ai_confidence: number;
@@ -94,14 +105,12 @@ export async function matchStripeDeposits(params: {
   const allMatches: DepositMatch[] = [];
   const warnings: string[] = [];
 
-  // Province tax rate (Canada only)
+  // Province tax setup (Canada only)
   const provinceTax = params.jurisdiction === "CA" ? getProvinceTax(params.stateProvince) : null;
-  const combinedTaxRate = provinceTax?.combined ?? 0;
-  const taxCode = provinceTax
-    ? Object.entries(provinceTax.rates)
-        .map(([k]) => k.toUpperCase())
-        .join(" + ")
-    : null;
+  // Service-tax rate is the rate that actually applies to painting services
+  // (BC/MB exempt PST/RST on labor; SK includes PST; etc.)
+  const serviceTaxRate = params.jurisdiction === "CA" ? getServiceTaxRate(params.stateProvince) : 0;
+  const taxCode = provinceTax?.serviceTax.components.join(" + ") || null;
 
   const invoiceById = new Map(params.invoices.map((i) => [i.id, i]));
 
@@ -204,23 +213,45 @@ Match each deposit to its underlying invoice(s). Return JSON only.`;
       for (const invId of m.matched_invoice_ids || []) {
         const inv = invoiceById.get(invId);
         if (!inv) continue;
+
+        // Decompose invoice total into pre-tax revenue + sales tax collected.
+        // Prefer QBO's actual tax detail if present; otherwise derive from the
+        // province's service-tax rate (PST-exempt provinces will get tax=0 on labor).
+        let preTax: number;
+        let taxAmount: number;
+        if (inv.qbo_total_tax > 0) {
+          // Use QBO's recorded tax — most accurate
+          taxAmount = inv.qbo_total_tax;
+          preTax = inv.total_amount - taxAmount;
+        } else if (serviceTaxRate > 0) {
+          // Back out the service-tax rate from the gross
+          preTax = inv.total_amount / (1 + serviceTaxRate);
+          taxAmount = inv.total_amount - preTax;
+        } else {
+          // US or no-tax province
+          preTax = inv.total_amount;
+          taxAmount = 0;
+        }
+
         matchedInvoices.push({
           invoice_id: inv.id,
           customer_name: inv.customer_name,
-          amount: inv.total_amount,
+          amount: Number(inv.total_amount.toFixed(2)),
+          pre_tax_amount: Number(preTax.toFixed(2)),
+          tax_amount: Number(taxAmount.toFixed(2)),
         });
       }
 
       const totalInvoiceAmount = matchedInvoices.reduce((s, x) => s + x.amount, 0);
-      const grossDiscrepancy = Math.max(0, totalInvoiceAmount - deposit.amount);
+      const preTaxRevenue = matchedInvoices.reduce((s, x) => s + x.pre_tax_amount, 0);
+      const totalSalesTaxCollected = matchedInvoices.reduce((s, x) => s + x.tax_amount, 0);
 
-      // Split fee: in Canada, the discrepancy already includes tax on the fee.
-      //   pre-tax fee = grossDiscrepancy / (1 + combinedTaxRate)
-      //   tax        = grossDiscrepancy - pre-tax fee
-      // In the US, combinedTaxRate = 0 → fee = grossDiscrepancy, tax = 0.
+      // Stripe fee = invoice total - deposit amount (the "discrepancy")
+      // The fee itself is taxed in Canada (tax on processing services). Split it.
+      const grossDiscrepancy = Math.max(0, totalInvoiceAmount - deposit.amount);
       const preTaxFee =
-        combinedTaxRate > 0
-          ? grossDiscrepancy / (1 + combinedTaxRate)
+        serviceTaxRate > 0
+          ? grossDiscrepancy / (1 + serviceTaxRate)
           : grossDiscrepancy;
       const computedTax = grossDiscrepancy - preTaxFee;
 
@@ -251,6 +282,8 @@ Match each deposit to its underlying invoice(s). Return JSON only.`;
         matched_invoices: matchedInvoices,
         matched_customer_names: customerNames,
         total_invoice_amount: Number(totalInvoiceAmount.toFixed(2)),
+        pre_tax_revenue: Number(preTaxRevenue.toFixed(2)),
+        total_sales_tax_collected: Number(totalSalesTaxCollected.toFixed(2)),
         computed_fee: Number(preTaxFee.toFixed(2)),
         computed_tax: Number(computedTax.toFixed(2)),
         tax_code: taxCode,
@@ -272,6 +305,8 @@ Match each deposit to its underlying invoice(s). Return JSON only.`;
       matched_invoices: [],
       matched_customer_names: [],
       total_invoice_amount: 0,
+      pre_tax_revenue: 0,
+      total_sales_tax_collected: 0,
       computed_fee: 0,
       computed_tax: 0,
       tax_code: taxCode,

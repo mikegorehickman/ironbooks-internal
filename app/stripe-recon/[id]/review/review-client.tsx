@@ -16,6 +16,8 @@ interface InvoiceLine {
   invoice_id: string;
   customer_name: string | null;
   amount: number;
+  pre_tax_amount?: number;
+  tax_amount?: number;
 }
 
 export function StripeReconReview({
@@ -93,20 +95,49 @@ export function StripeReconReview({
 
   const totalDeposits = matches.reduce((s, m) => s + Number(m.deposit_amount || 0), 0);
   const totalInvoices = matches.reduce((s, m) => s + Number(m.total_invoice_amount || 0), 0);
+  const totalPreTax = matches.reduce((s, m) => s + Number(m.pre_tax_revenue || 0), 0);
+  const totalTaxCollected = matches.reduce((s, m) => s + Number(m.total_sales_tax_collected || 0), 0);
   const totalFees = matches.reduce((s, m) => s + Number(m.computed_fee || 0), 0);
-  const totalTax = matches.reduce((s, m) => s + Number(m.computed_tax || 0), 0);
+  const totalTaxOnFees = matches.reduce((s, m) => s + Number(m.computed_tax || 0), 0);
 
   const isCanada = clientLink.jurisdiction === "CA";
 
   return (
     <div>
       {/* Summary cards */}
-      <div className={`grid gap-3 mb-5 ${isCanada ? "grid-cols-4" : "grid-cols-3"}`}>
-        <SummaryCard label="Stripe Deposits" value={`$${totalDeposits.toLocaleString("en-US", { maximumFractionDigits: 2 })}`} sub={`${matches.length} matched`} />
-        <SummaryCard label="Customer Invoices" value={`$${totalInvoices.toLocaleString("en-US", { maximumFractionDigits: 2 })}`} sub="Gross before fees" />
-        <SummaryCard label="Stripe Fees" value={`$${totalFees.toLocaleString("en-US", { maximumFractionDigits: 2 })}`} sub={isCanada ? "Pre-tax" : "Total"} color="#7C3AED" />
+      <div className={`grid gap-3 mb-5 ${isCanada ? "grid-cols-5" : "grid-cols-3"}`}>
+        <SummaryCard
+          label="Stripe Deposits"
+          value={`$${totalDeposits.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+          sub={`${matches.length} matched`}
+        />
+        <SummaryCard
+          label="Pre-Tax Revenue"
+          value={`$${totalPreTax.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+          sub="To Painting Revenue"
+          color="#10B981"
+        />
         {isCanada && (
-          <SummaryCard label="Tax on Fees" value={`$${totalTax.toLocaleString("en-US", { maximumFractionDigits: 2 })}`} sub={clientLink.state_province ?? "CA"} color="#2563EB" />
+          <SummaryCard
+            label="Sales Tax Collected"
+            value={`$${totalTaxCollected.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+            sub={`To Tax Payable · ${clientLink.state_province ?? "CA"}`}
+            color="#2563EB"
+          />
+        )}
+        <SummaryCard
+          label="Stripe Fees"
+          value={`$${totalFees.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+          sub={isCanada ? "Pre-tax expense" : "Expense"}
+          color="#7C3AED"
+        />
+        {isCanada && (
+          <SummaryCard
+            label="ITC on Fees"
+            value={`$${totalTaxOnFees.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+            sub="Recoverable"
+            color="#0891B2"
+          />
         )}
       </div>
 
@@ -283,11 +314,11 @@ function MatchRow({
         </div>
       </div>
 
-      {/* Expanded invoice breakdown */}
+      {/* Expanded breakdown — per-customer income, tax, fee, ITC */}
       {expanded && (
         <div className="px-5 pb-4 pt-2 bg-gray-50 border-t border-gray-100">
           <div className="text-xs font-bold uppercase tracking-wider text-ink-slate mb-2">
-            Invoices in this deposit
+            Deposit decomposition
           </div>
           {invoiceList.length === 0 ? (
             <div className="text-sm text-ink-slate italic py-2">
@@ -295,28 +326,65 @@ function MatchRow({
             </div>
           ) : (
             <div className="space-y-1">
+              {/* Per-customer income lines */}
+              <div className="text-[10px] font-bold uppercase tracking-wider text-green-700 mt-1">
+                Income (Painting Revenue)
+              </div>
               {invoiceList.map((inv) => (
                 <div key={inv.invoice_id} className="flex items-center justify-between text-sm bg-white rounded px-3 py-1.5 border border-gray-200">
-                  <span className="text-navy">{inv.customer_name || "Unknown"} · #{inv.invoice_id}</span>
-                  <span className="font-semibold text-navy">${Number(inv.amount).toFixed(2)}</span>
+                  <span className="text-navy">
+                    {inv.customer_name || "Unknown"} · Invoice {inv.invoice_id}
+                  </span>
+                  <span className="font-semibold text-green-700">
+                    +${Number(inv.pre_tax_amount ?? inv.amount).toFixed(2)}
+                  </span>
                 </div>
               ))}
-              <div className="flex items-center justify-between text-sm font-semibold pt-1.5 border-t border-gray-200">
-                <span>Total invoices</span>
-                <span>${Number(match.total_invoice_amount).toFixed(2)}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm text-purple-700">
-                <span>Stripe fee {isCanada ? "(pre-tax)" : ""}</span>
-                <span>−${Number(match.computed_fee).toFixed(2)}</span>
-              </div>
-              {isCanada && Number(match.computed_tax) > 0 && (
-                <div className="flex items-center justify-between text-sm text-blue-700">
-                  <span>Tax on fee {match.tax_code ? `(${match.tax_code})` : ""}</span>
-                  <span>−${Number(match.computed_tax).toFixed(2)}</span>
+
+              {/* Sales tax collected (Canada only) */}
+              {isCanada && Number(match.total_sales_tax_collected) > 0 && (
+                <div className="flex items-center justify-between text-sm bg-white rounded px-3 py-1.5 border border-blue-100 mt-1.5">
+                  <span className="text-blue-800">
+                    Sales tax collected {match.tax_code ? `(${match.tax_code})` : ""} — to Tax Payable
+                  </span>
+                  <span className="font-semibold text-blue-700">
+                    +${Number(match.total_sales_tax_collected).toFixed(2)}
+                  </span>
                 </div>
               )}
+
+              {/* Subtotal of positive lines */}
+              <div className="flex items-center justify-between text-sm font-semibold pt-1.5 border-t border-gray-200">
+                <span>Gross customer payments</span>
+                <span>${Number(match.total_invoice_amount).toFixed(2)}</span>
+              </div>
+
+              {/* Negative — Stripe fee */}
+              <div className="text-[10px] font-bold uppercase tracking-wider text-purple-700 mt-2">
+                Stripe deductions
+              </div>
+              <div className="flex items-center justify-between text-sm bg-white rounded px-3 py-1.5 border border-purple-100">
+                <span className="text-purple-800">
+                  Stripe processing fee {isCanada ? "(pre-tax)" : ""} — to Bank Charges & Fees
+                </span>
+                <span className="font-semibold text-purple-700">
+                  −${Number(match.computed_fee).toFixed(2)}
+                </span>
+              </div>
+              {isCanada && Number(match.computed_tax) > 0 && (
+                <div className="flex items-center justify-between text-sm bg-white rounded px-3 py-1.5 border border-cyan-100">
+                  <span className="text-cyan-800">
+                    {match.tax_code || "Tax"} on Stripe fee (ITC) — to Tax Receivable
+                  </span>
+                  <span className="font-semibold text-cyan-700">
+                    −${Number(match.computed_tax).toFixed(2)}
+                  </span>
+                </div>
+              )}
+
+              {/* Net = bank deposit */}
               <div className="flex items-center justify-between text-sm font-bold pt-1.5 border-t border-gray-300">
-                <span>Net to Stripe deposit</span>
+                <span>Net to bank (Stripe deposit)</span>
                 <span>${Number(match.deposit_amount).toFixed(2)}</span>
               </div>
             </div>

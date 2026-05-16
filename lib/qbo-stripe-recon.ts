@@ -37,9 +37,11 @@ export interface QBOInvoice {
   customer_id: string | null;
   customer_name: string | null;
   txn_date: string;
-  total_amount: number;
+  total_amount: number;     // gross including any tax QBO has on the invoice
   balance: number;          // outstanding after partial payments
   status: "open" | "paid" | "partial";
+  /** Tax actually attached to the invoice in QBO (may be 0 if not configured). */
+  qbo_total_tax: number;
 }
 
 export interface QBOCustomerPayment {
@@ -187,6 +189,8 @@ export async function fetchInvoicesForRange(
       if (balance === 0) status = "paid";
       else if (balance < total) status = "partial";
 
+      const qboTotalTax = Number(inv.TxnTaxDetail?.TotalTax ?? 0);
+
       results.push({
         id: inv.Id,
         doc_number: inv.DocNumber || null,
@@ -196,6 +200,7 @@ export async function fetchInvoicesForRange(
         total_amount: total,
         balance,
         status,
+        qbo_total_tax: qboTotalTax,
       });
     }
     if (invoices.length < pageSize) break;

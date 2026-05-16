@@ -138,6 +138,8 @@ async function runDiscovery(jobId: string, autoApproveConfidence: number) {
     matched_invoices: m.matched_invoices as any,
     matched_customer_names: m.matched_customer_names,
     total_invoice_amount: m.total_invoice_amount,
+    pre_tax_revenue: m.pre_tax_revenue,
+    total_sales_tax_collected: m.total_sales_tax_collected,
     computed_fee: m.computed_fee,
     computed_tax: m.computed_tax,
     tax_code: m.tax_code,

@@ -121,7 +121,10 @@ async function runExecution(
         accessToken,
         {
           qbo_deposit_id: m.qbo_deposit_id,
+          matched_invoices: (m.matched_invoices as any) || [],
           matched_customer_names: m.matched_customer_names || [],
+          pre_tax_revenue: Number(m.pre_tax_revenue || 0),
+          total_sales_tax_collected: Number(m.total_sales_tax_collected || 0),
           computed_fee: Number(m.computed_fee || 0),
           computed_tax: Number(m.computed_tax || 0),
           tax_code: m.tax_code,

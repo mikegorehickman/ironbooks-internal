@@ -880,10 +880,12 @@ export type Database = {
           job_id: string
           matched_customer_names: string[] | null
           matched_invoices: Json | null
+          pre_tax_revenue: number | null
           qbo_deposit_id: string
           qbo_deposit_txn_type: string | null
           tax_code: string | null
           total_invoice_amount: number | null
+          total_sales_tax_collected: number | null
         }
         Insert: {
           ai_confidence?: number | null
@@ -903,10 +905,12 @@ export type Database = {
           job_id: string
           matched_customer_names?: string[] | null
           matched_invoices?: Json | null
+          pre_tax_revenue?: number | null
           qbo_deposit_id: string
           qbo_deposit_txn_type?: string | null
           tax_code?: string | null
           total_invoice_amount?: number | null
+          total_sales_tax_collected?: number | null
         }
         Update: {
           ai_confidence?: number | null
@@ -926,10 +930,12 @@ export type Database = {
           job_id?: string
           matched_customer_names?: string[] | null
           matched_invoices?: Json | null
+          pre_tax_revenue?: number | null
           qbo_deposit_id?: string
           qbo_deposit_txn_type?: string | null
           tax_code?: string | null
           total_invoice_amount?: number | null
+          total_sales_tax_collected?: number | null
         }
         Relationships: []
       }

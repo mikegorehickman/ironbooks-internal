@@ -84,3 +84,8 @@ DO $$ BEGIN
   CREATE POLICY "stripe_recon_matches_update" ON stripe_recon_matches
     FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ───── Phase 2 corrections: pre-tax revenue + sales tax collected per match ─────
+ALTER TABLE stripe_recon_matches
+  ADD COLUMN IF NOT EXISTS pre_tax_revenue numeric DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS total_sales_tax_collected numeric DEFAULT 0;
