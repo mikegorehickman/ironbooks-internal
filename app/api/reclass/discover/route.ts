@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { after } from "next/server";
 import {
   fetchTransactionsForAccount,
+  fetchAllTransactionLines,
   getCompanyClosingDate,
   isInClosedPeriod,
   groupLinesByVendor,
@@ -12,8 +13,10 @@ import {
 import { fetchAllAccounts } from "@/lib/qbo";
 import {
   classifyVendorGroups,
+  categorizeAllTransactions,
   type ReclassClassification,
   type AvailableAccount,
+  type FullCategorizationLine,
 } from "@/lib/claude-reclass";
 import { getClientEndCloses, type DoubleEndCloseSummary } from "@/lib/double";
 
@@ -178,24 +181,9 @@ async function runDiscovery(jobId: string) {
   // Get fresh QBO token
   const accessToken = await getValidToken(clientLink.id, service as any);
 
-  // full_categorization runs through a separate path (handled below; not implemented yet
-  // in this deploy — UI/form is shipping first to unblock the wizard flow).
+  // ─────────── FULL CATEGORIZATION pipeline ───────────
   if (job.workflow === "full_categorization") {
-    await service
-      .from("reclass_jobs")
-      .update({
-        status: "in_review",
-        transactions_pulled: 0,
-        transactions_in_scope: 0,
-        transactions_auto_approve: 0,
-        transactions_needs_review: 0,
-        transactions_flagged: 0,
-        ai_completed_at: new Date().toISOString(),
-        warnings: [
-          "Full AI Categorization pipeline pending. The job was created with your date range and threshold; transaction processing will run in the next deploy."
-        ] as any,
-      } as any)
-      .eq("id", jobId);
+    await runFullCategorization(jobId, service, clientLink, accessToken);
     return;
   }
 
@@ -491,6 +479,182 @@ function isDoubleCloseLocked(status: string): boolean {
   // Lock on any "completed" or "delivered" status. Conservative: also treat null/unknown
   // as NOT locked (don't false-positive).
   return ["complete", "completed", "closed", "delivered"].includes(status.toLowerCase());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FULL CATEGORIZATION DISCOVERY
+// Pulls every line in date range, runs Claude line-level classification,
+// applies the auto-approve threshold, and writes reclassifications rows.
+// ════════════════════════════════════════════════════════════════════════════
+
+async function runFullCategorization(
+  jobId: string,
+  service: ReturnType<typeof createServiceSupabase>,
+  clientLink: any,
+  accessToken: string
+) {
+  // Refetch the job to ensure we have the threshold + dates
+  const { data: job } = await service
+    .from("reclass_jobs")
+    .select("*")
+    .eq("id", jobId)
+    .single();
+  if (!job) throw new Error("Job not found");
+
+  const threshold = (job as any).auto_approve_threshold || 500;
+
+  // 1. Pull every line in the date range
+  const { lines, transactionsPulled, transactionsSkippedUnsupported } =
+    await fetchAllTransactionLines(
+      clientLink.qbo_realm_id,
+      accessToken,
+      job.date_range_start,
+      job.date_range_end
+    );
+
+  // 2. Closed-period guards (QBO + Double)
+  const bookCloseDate = await getCompanyClosingDate(clientLink.qbo_realm_id, accessToken);
+  let doubleCloses: DoubleEndCloseSummary[] = [];
+  if (clientLink.double_client_id && !clientLink.double_client_id.startsWith("pending_")) {
+    try {
+      const dcId = parseInt(clientLink.double_client_id, 10);
+      if (!isNaN(dcId)) {
+        doubleCloses = await getClientEndCloses(dcId);
+      }
+    } catch (err: any) {
+      console.warn("Failed to fetch Double end-closes:", err.message);
+    }
+  }
+
+  // 3. Fetch all live accounts for target options
+  const allAccounts = await fetchAllAccounts(clientLink.qbo_realm_id, accessToken);
+  const availableAccounts: AvailableAccount[] = allAccounts
+    .filter((a) => a.Active !== false)
+    .map((a) => ({
+      qbo_account_id: a.Id,
+      account_name: a.Name,
+      account_type: a.AccountType || "",
+      account_subtype: a.AccountSubType || "",
+    }));
+
+  const stats = {
+    inScope: 0,
+    autoApprove: 0,
+    needsReview: 0,
+    flagged: 0,
+    skipReconciled: 0,
+    skipClosedQbo: 0,
+    skipClosedDouble: 0,
+    skipUnsupported: transactionsSkippedUnsupported,
+  };
+  const reclassRows: any[] = [];
+  const inScopeLines: ReclassLine[] = [];
+
+  // 4. Filter to in-scope vs skipped
+  for (const line of lines) {
+    if (isInClosedPeriod(line.transaction_date, bookCloseDate)) {
+      stats.skipClosedQbo++;
+      reclassRows.push(buildSkipRow(jobId, line, "closed_period_qbo"));
+      continue;
+    }
+    const doubleClose = findDoubleClose(line.transaction_date, doubleCloses);
+    if (doubleClose && isDoubleCloseLocked(doubleClose.status)) {
+      stats.skipClosedDouble++;
+      reclassRows.push(buildSkipRow(jobId, line, "closed_period_double"));
+      continue;
+    }
+    if (line.is_reconciled) {
+      stats.skipReconciled++;
+      reclassRows.push(buildSkipRow(jobId, line, "reconciled"));
+      continue;
+    }
+    inScopeLines.push(line);
+  }
+  stats.inScope = inScopeLines.length;
+
+  // 5. Pass to Claude
+  const aiLines: FullCategorizationLine[] = inScopeLines.map((l) => ({
+    ref_id: `${l.transaction_id}::${l.line_id}`,
+    vendor_name: l.vendor_name,
+    amount: l.transaction_amount,
+    date: l.transaction_date,
+    description: l.description,
+    private_note: l.private_note,
+    current_account_name: l.current_account_name,
+  }));
+
+  const aiResult = await categorizeAllTransactions({
+    clientName: clientLink.client_name,
+    jurisdiction: clientLink.jurisdiction,
+    stateProvince: clientLink.state_province || "",
+    lines: aiLines,
+    availableAccounts,
+    autoApproveThreshold: threshold,
+  });
+
+  // 6. Build reclass rows
+  const decisionByRef = new Map(aiResult.decisions.map((d) => [d.ref_id, d]));
+
+  for (const line of inScopeLines) {
+    const refId = `${line.transaction_id}::${line.line_id}`;
+    const decision = decisionByRef.get(refId);
+
+    if (!decision) {
+      reclassRows.push(
+        buildReclassRow(jobId, line, {
+          target_account_id: null,
+          target_account_name: null,
+          decision: "flagged",
+          confidence: 0,
+          reasoning: "AI did not return a decision for this line.",
+        })
+      );
+      stats.flagged++;
+      continue;
+    }
+
+    reclassRows.push(
+      buildReclassRow(jobId, line, {
+        target_account_id: decision.target_account_id,
+        target_account_name: decision.target_account_name,
+        decision: decision.decision,
+        confidence: decision.confidence,
+        reasoning: decision.flagged_reason || decision.reasoning,
+      })
+    );
+
+    if (decision.decision === "auto_approve") stats.autoApprove++;
+    else if (decision.decision === "needs_review") stats.needsReview++;
+    else stats.flagged++;
+  }
+
+  // 7. Bulk insert
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < reclassRows.length; i += BATCH_SIZE) {
+    const batch = reclassRows.slice(i, i + BATCH_SIZE);
+    const { error: insertErr } = await service.from("reclassifications").insert(batch);
+    if (insertErr) throw new Error(`Insert batch failed: ${insertErr.message}`);
+  }
+
+  const uniqueVendors = new Set(lines.map((l) => l.vendor_name).filter(Boolean)).size;
+
+  await service
+    .from("reclass_jobs")
+    .update({
+      status: "in_review",
+      transactions_pulled: transactionsPulled,
+      transactions_in_scope: stats.inScope,
+      transactions_auto_approve: stats.autoApprove,
+      transactions_needs_review: stats.needsReview,
+      transactions_flagged: stats.flagged,
+      transactions_skipped_reconciled: stats.skipReconciled,
+      transactions_skipped_closed: stats.skipClosedQbo + stats.skipClosedDouble,
+      transactions_skipped_unsupported: stats.skipUnsupported,
+      unique_vendors_count: uniqueVendors,
+      ai_completed_at: new Date().toISOString(),
+      warnings: aiResult.warnings.length > 0 ? (aiResult.warnings as any) : null,
+    } as any)
+    .eq("id", jobId);
 }
 
 export const maxDuration = 300;

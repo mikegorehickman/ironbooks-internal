@@ -21,6 +21,18 @@ export default async function ReclassExecutePage({
     .eq("id", id)
     .single();
 
+  // Pull client_link_id from reclass_jobs (the view may not expose it directly,
+  // but we need it for the bank rules handoff CTA).
+  const { data: baseJob } = await service
+    .from("reclass_jobs")
+    .select("client_link_id, workflow")
+    .eq("id", id)
+    .single();
+  if (job && baseJob) {
+    (job as any).client_link_id = baseJob.client_link_id;
+    if (!(job as any).workflow) (job as any).workflow = baseJob.workflow;
+  }
+
   if (!job) {
     return (
       <AppShell>

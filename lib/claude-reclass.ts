@@ -216,3 +216,238 @@ Classify each vendor group. Return the structured JSON.`;
     summary: parsed.summary || "",
   };
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// FULL CATEGORIZATION — line-level AI classification against the new COA
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Patterns that should always route to "Uncategorized" (decision = flagged)
+ * regardless of AI confidence. E-transfers and peer payment apps without
+ * a clear vendor or memo cannot be categorized blind — human review required.
+ */
+const ETRANSFER_PATTERNS = [
+  /e-?transfer/i,
+  /interac/i,
+  /\be-?tfr\b/i,
+  /\bemt\b/i,
+  /venmo/i,
+  /zelle/i,
+  /cash\s*app/i,
+  /wire\s*transfer/i,
+  /etfr/i,
+];
+
+export interface FullCategorizationLine {
+  /** Stable identifier the caller uses to correlate back to its source row */
+  ref_id: string;
+  vendor_name: string;
+  amount: number;             // signed
+  date: string;               // YYYY-MM-DD
+  description: string;        // line description
+  private_note: string;       // transaction memo
+  current_account_name: string;
+}
+
+export interface FullCategorizationDecision {
+  ref_id: string;
+  target_account_id: string | null;
+  target_account_name: string | null;
+  confidence: number;
+  reasoning: string;
+  decision: "auto_approve" | "needs_review" | "flagged";
+  flagged_reason?: string;
+}
+
+const FULL_CAT_SYSTEM_PROMPT = `You are the IronBooks AI Bookkeeper running full-COA transaction categorization for a residential painting contractor.
+
+You'll receive a batch of transaction lines (vendor, amount, date, description, current account) and the full list of valid target accounts in the client's NEW Chart of Accounts. For each line, pick the BEST target account and a confidence score.
+
+CRITICAL RULES:
+1. The target_account_id MUST be one of the provided available_accounts. Never invent.
+2. Confidence 0.95+ for obvious vendor → account mappings (Sherwin-Williams → Paint & Materials).
+3. Confidence 0.80-0.94 for likely-correct mappings.
+4. Confidence 0.50-0.79 for plausible but ambiguous.
+5. Confidence <0.50 means you can't reasonably decide — leave target_account_id empty.
+6. Be conservative with payroll, tax, owner draws, distributions, loans → low confidence.
+7. Use the vendor + description together for context; don't rely on vendor alone.
+8. Reasoning is short (one sentence), specific to the vendor.
+
+Painter-specific quick map:
+- Sherwin-Williams, Benjamin Moore, Dunn-Edwards, PPG, Para → Paint & Materials
+- Home Depot, Lowes, Rona → Job Supplies (usually) or Small Tools (if itemized)
+- Shell, Chevron, Esso, Petro-Canada, Costco Gas → Fuel – Admin & Sales Vehicles (admin) or Direct Fuel Allocation (crew)
+- Gusto, ADP, Wagepoint, Payworks → Payroll-related (LOW confidence)
+- State Farm, Intact, Aviva, Wawanesa → Insurance (high)
+- Verizon, Rogers, Bell, Telus, Comcast → Software Subscriptions or Utilities
+- Stripe, Square, Helcim, PayPal → Painting Revenue (net) or Bank Charges
+- IRS, CRA, federal/provincial revenue authorities → LOW confidence, flag
+
+Return STRICTLY valid JSON:
+{
+  "decisions": [
+    {
+      "ref_id": "string (echoes input)",
+      "target_account_id": "string (from available_accounts, or empty string)",
+      "target_account_name": "string (matches account_name)",
+      "confidence": 0.00-1.00,
+      "reasoning": "string"
+    }
+  ]
+}
+
+No markdown fences, no preamble. Just the JSON.`;
+
+const FULL_CAT_BATCH_SIZE = 30;
+
+/**
+ * Classify every transaction line against the new COA.
+ * Auto-approve rule: confidence >= 0.80 AND |amount| < threshold AND not e-transfer.
+ * E-transfer/Venmo/Zelle without clear vendor → forced to "flagged".
+ */
+export async function categorizeAllTransactions(params: {
+  clientName: string;
+  jurisdiction: "US" | "CA";
+  stateProvince: string;
+  lines: FullCategorizationLine[];
+  availableAccounts: AvailableAccount[];
+  autoApproveThreshold: number;
+}): Promise<{
+  decisions: FullCategorizationDecision[];
+  warnings: string[];
+  summary: string;
+}> {
+  const allDecisions: FullCategorizationDecision[] = [];
+  const warnings: string[] = [];
+
+  // E-transfer pre-routing: anything matching is forced to flagged with target=null
+  const linesToClassify: FullCategorizationLine[] = [];
+  for (const line of params.lines) {
+    const haystack = `${line.vendor_name} ${line.description} ${line.private_note}`;
+    const isETransfer = ETRANSFER_PATTERNS.some((re) => re.test(haystack));
+    const hasNoClearVendor = !line.vendor_name || line.vendor_name.toLowerCase() === "unknown vendor";
+    if (isETransfer && hasNoClearVendor) {
+      allDecisions.push({
+        ref_id: line.ref_id,
+        target_account_id: null,
+        target_account_name: null,
+        confidence: 0,
+        reasoning: "E-transfer / peer payment without a clear vendor — needs manual placement.",
+        decision: "flagged",
+        flagged_reason: "Uncategorized — peer payment (e-transfer/Venmo/Zelle) with no vendor info",
+      });
+      continue;
+    }
+    linesToClassify.push(line);
+  }
+
+  // Compact account list shared across batches
+  const compactAccounts = params.availableAccounts.map((a) => ({
+    id: a.qbo_account_id,
+    name: a.account_name,
+    type: a.account_type,
+    subtype: a.account_subtype,
+  }));
+
+  // Build account lookup for validation
+  const accountById = new Map(params.availableAccounts.map((a) => [a.qbo_account_id, a]));
+
+  // Batch through Claude
+  for (let i = 0; i < linesToClassify.length; i += FULL_CAT_BATCH_SIZE) {
+    const batch = linesToClassify.slice(i, i + FULL_CAT_BATCH_SIZE);
+    const compactBatch = batch.map((l) => ({
+      ref_id: l.ref_id,
+      vendor: l.vendor_name,
+      amount: l.amount,
+      date: l.date,
+      desc: l.description || "",
+      memo: l.private_note || "",
+      current_account: l.current_account_name,
+    }));
+
+    const userMessage = `CLIENT: ${params.clientName}
+JURISDICTION: ${params.jurisdiction} (${params.stateProvince})
+INDUSTRY: Residential Painting Contractor
+
+===== AVAILABLE TARGET ACCOUNTS (new COA) =====
+${JSON.stringify(compactAccounts, null, 2)}
+
+===== TRANSACTION LINES (this batch: ${batch.length}) =====
+${JSON.stringify(compactBatch, null, 2)}
+
+Classify each line. Return JSON only.`;
+
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      system: FULL_CAT_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userMessage }],
+    });
+
+    const textBlock = response.content.find((c) => c.type === "text");
+    if (!textBlock || textBlock.type !== "text") {
+      warnings.push(`Batch ${i / FULL_CAT_BATCH_SIZE + 1}: no text response from Claude`);
+      continue;
+    }
+    const raw = textBlock.text
+      .trim()
+      .replace(/^```json\s*/, "")
+      .replace(/^```\s*/, "")
+      .replace(/\s*```$/, "")
+      .trim();
+
+    let parsed: { decisions: Array<{ ref_id: string; target_account_id: string; target_account_name: string; confidence: number; reasoning: string }> };
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err: any) {
+      warnings.push(`Batch ${i / FULL_CAT_BATCH_SIZE + 1}: JSON parse failed (${err.message})`);
+      continue;
+    }
+
+    for (const d of parsed.decisions || []) {
+      const sourceLine = batch.find((l) => l.ref_id === d.ref_id);
+      if (!sourceLine) continue;
+
+      // Validate target exists
+      const targetAccount = d.target_account_id ? accountById.get(d.target_account_id) : null;
+      const confidence = Math.max(0, Math.min(1, d.confidence));
+      const absAmount = Math.abs(sourceLine.amount);
+
+      let decision: "auto_approve" | "needs_review" | "flagged";
+      let target_id: string | null = targetAccount?.qbo_account_id || null;
+      let target_name: string | null = targetAccount?.account_name || null;
+
+      if (!targetAccount) {
+        decision = "flagged";
+        target_id = null;
+        target_name = null;
+      } else if (confidence >= 0.80 && absAmount < params.autoApproveThreshold) {
+        decision = "auto_approve";
+      } else {
+        decision = "needs_review";
+      }
+
+      allDecisions.push({
+        ref_id: d.ref_id,
+        target_account_id: target_id,
+        target_account_name: target_name,
+        confidence,
+        reasoning: d.reasoning || "",
+        decision,
+        flagged_reason: !targetAccount ? "AI could not confidently pick a target account" : undefined,
+      });
+    }
+  }
+
+  const counts = {
+    auto: allDecisions.filter((d) => d.decision === "auto_approve").length,
+    review: allDecisions.filter((d) => d.decision === "needs_review").length,
+    flagged: allDecisions.filter((d) => d.decision === "flagged").length,
+  };
+
+  return {
+    decisions: allDecisions,
+    warnings,
+    summary: `Classified ${allDecisions.length} lines: ${counts.auto} auto-approved (<${params.autoApproveThreshold}), ${counts.review} needs review, ${counts.flagged} flagged for manual placement.`,
+  };
+}
