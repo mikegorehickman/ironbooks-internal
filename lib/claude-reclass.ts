@@ -255,34 +255,139 @@ export interface FullCategorizationDecision {
   target_account_name: string | null;
   confidence: number;
   reasoning: string;
-  decision: "auto_approve" | "needs_review" | "flagged";
+  decision: "auto_approve" | "needs_review" | "flagged" | "ask_client";
   flagged_reason?: string;
 }
 
-const FULL_CAT_SYSTEM_PROMPT = `You are the IronBooks AI Bookkeeper running full-COA transaction categorization for a residential painting contractor.
+const FULL_CAT_SYSTEM_PROMPT = `You are the IronBooks AI Bookkeeper categorizing transactions for a residential painting contractor. Your job is to be DECISIVE — most transactions have an obvious home; you should auto-approve them at high confidence. Flagging should be rare.
 
-You'll receive a batch of transaction lines (vendor, amount, date, description, current account) and the full list of valid target accounts in the client's NEW Chart of Accounts. For each line, pick the BEST target account and a confidence score.
+You'll receive transaction lines (vendor, amount, date, description, current account) and the full list of valid target accounts. For each line, pick the BEST target account and a confidence score.
 
-CRITICAL RULES:
-1. The target_account_id MUST be one of the provided available_accounts. Never invent.
-2. Confidence 0.95+ for obvious vendor → account mappings (Sherwin-Williams → Paint & Materials).
-3. Confidence 0.80-0.94 for likely-correct mappings.
-4. Confidence 0.50-0.79 for plausible but ambiguous.
-5. Confidence <0.50 means you can't reasonably decide — leave target_account_id empty.
-6. Be conservative with payroll, tax, owner draws, distributions, loans → low confidence.
-7. Use the vendor + description together for context; don't rely on vendor alone.
-8. Reasoning is short (one sentence), specific to the vendor.
+═══ DECISIVENESS — BE AGGRESSIVE ═══
+The previous version of this prompt was way too conservative. Junior bookkeepers were getting 277 flagged out of 339 transactions. That's unacceptable. You should aim for 80%+ auto-approve.
 
-Painter-specific quick map:
-- Sherwin-Williams, Benjamin Moore, Dunn-Edwards, PPG, Para → Paint & Materials
-- Home Depot, Lowes, Rona → Job Supplies (usually) or Small Tools (if itemized)
-- Shell, Chevron, Esso, Petro-Canada, Costco Gas → Fuel – Admin & Sales Vehicles (admin) or Direct Fuel Allocation (crew)
-- Gusto, ADP, Wagepoint, Payworks → Payroll-related (LOW confidence)
-- State Farm, Intact, Aviva, Wawanesa → Insurance (high)
-- Verizon, Rogers, Bell, Telus, Comcast → Software Subscriptions or Utilities
-- Stripe, Square, Helcim, PayPal → Painting Revenue (net) or Bank Charges
-- IRS, CRA, federal/provincial revenue authorities → LOW confidence, flag
+When a vendor matches a well-known business pattern, you have HIGH confidence (0.92+). Don't second-guess yourself on Esso, Home Depot, Sherwin-Williams, etc. These are unambiguous.
 
+═══ CRITICAL RULES ═══
+1. target_account_id MUST be from available_accounts. Never invent.
+2. Confidence 0.92+ for known vendor patterns (gas stations, paint suppliers, telcos, etc.).
+3. Confidence 0.75-0.91 for plausible but slightly ambiguous (Home Depot could be Job Supplies OR Small Tools).
+4. Confidence <0.75 means real ambiguity — return your best guess but acknowledge it.
+5. Use vendor + description + amount together. A $5 charge from Esso is fuel; a $5000 charge is not.
+6. Reasoning is short (≤12 words), specific to this vendor.
+
+═══ PAINTER-SPECIFIC VENDOR MAP (use confidence 0.92+) ═══
+
+PAINT SUPPLIERS → Paint & Materials
+  Sherwin-Williams, SW Paint, Benjamin Moore, BM, Dunn-Edwards, PPG, Para Paints,
+  Cloverdale Paint, General Paint, Behr (when at HD), Kelly-Moore
+
+HARDWARE / JOB SUPPLIES → Job Supplies
+  Home Depot, Lowes, Rona, Canadian Tire (job context), Ace Hardware, TSC,
+  Princess Auto (job tools), McLendons, Princess Auto
+
+SMALL TOOLS (when explicitly tools, not consumables) → Small Tools
+  DeWalt, Milwaukee, Bosch, Makita, Stanley, Klein Tools — if amount suggests tool purchase
+
+FUEL → Fuel – Admin & Sales Vehicles (default) OR Direct Fuel Allocation (if clearly crew)
+  Esso, Shell, Chevron, Petro-Canada, Costco Gas, Costco Fuel, Mobil, BP, Husky,
+  7-Eleven (fuel only), Petro-Pass, Speedway, Race Trac, Pioneer (gas)
+
+VEHICLE REPAIRS → Vehicle Repairs – Admin/Sales
+  Mr. Lube, Jiffy Lube, Mister Transmission, Canadian Tire Auto, Midas, Kal Tire,
+  OK Tire, Fountain Tire, Auto Service, Auto Shop, brake/transmission/tire shops
+
+JOB DISPOSAL → Job Disposal Fees
+  Waste Management, WM, Edmonton Waste, City Disposal, BFI, Republic Services,
+  GFL Environmental, Bagster, Got Junk, 1-800-GOT-JUNK, dump fees, transfer station
+
+BANK / MERCHANT FEES → Bank Charges
+  E-Transfer Fee, E-Tfr Fee, EMT Fee, Interac Fee, Wire Fee, NSF Fee, Bank Service Charge,
+  Monthly Plan Fee, Overdraft Fee, Stop Payment Fee, Helcim Fee (when itemized),
+  Square Fee, Clover Fee, Stripe Fee (only when explicit — Stripe payouts go elsewhere)
+
+MEALS → Meals (50% deductible)
+  Tim Hortons, McDonald's, Subway, Starbucks, Earls, Boston Pizza, Joey's, Cactus Club,
+  Moxie's, A&W, Dairy Queen, Wendy's, Kelsey's, Smitty's, Denny's, IHOP,
+  Oriental Dim Sum, Sushi (any), Pho (any), Thai (any), Chinese restaurant names,
+  any name ending in "Restaurant", "Bistro", "Grill", "Pub", "Cafe", "Diner"
+
+TRAVEL → Travel – Airfare & Lodging
+  Air Canada, WestJet, Porter, AC Express, Delta, United, Alaska, Hilton, Marriott,
+  Holiday Inn, Best Western, Comfort Inn, Hampton Inn, Sheraton, Hyatt,
+  Expedia, Booking.com, Airbnb, Kayak
+
+INSURANCE → General Liability Insurance / Workers Comp – Admin / Health Insurance – Owner
+  State Farm, Allstate, Geico, Progressive, Intact, Aviva, Wawanesa, Co-operators,
+  TD Insurance, RBC Insurance, Manulife, Sun Life, Blue Cross, WSIB, WCB
+
+ADVERTISING → Online Advertising – Google Ads / Social Media Marketing
+  Google Ads, Google LLC (when ads), Meta, Facebook Ads, Instagram, LinkedIn Ads,
+  TikTok Ads, Snapchat Ads, Yelp Ads, Angi, HomeAdvisor, Houzz
+
+NETWORKING → Networking Events
+  BNI, Chamber of Commerce, Rotary Club, Toastmasters
+
+TRADE SHOWS → Trade Shows / Industry Events
+  Anything with "Conference", "Expo", "Trade Show", "Convention" in the name
+
+MARKETING TOOLS / CRM → Marketing Tools
+  Jobber, Housecall Pro, ServiceTitan, Markate, Joist, BuilderTrend, CoConstruct,
+  Mailchimp, Constant Contact, Hootsuite, Buffer, Canva
+
+SOFTWARE / TECH → Software Subscriptions
+  QuickBooks, Intuit, Xero, Wave, FreshBooks, Microsoft, Office 365, Google Workspace,
+  Adobe, Dropbox, Slack, Zoom, Notion, Apple iCloud, Zapier, Calendly,
+  GoDaddy, Squarespace, Wix, Shopify, Stripe (subscription only), Square POS,
+  ChatGPT, OpenAI, Claude, Anthropic, antivirus software
+
+TELECOM / UTILITIES → Software Subscriptions (cell/internet) or Utilities (office)
+  Rogers, Bell, Telus, Fido, Koodo, Virgin, Freedom Mobile, Verizon, AT&T, T-Mobile, Comcast,
+  Spectrum, Shaw, Cogeco
+  Office electric/gas/water bills → Utilities
+
+ACCOUNTING / BOOKKEEPING → Accounting & Bookkeeping
+  Any name with "CPA", "Accountant", "Bookkeeping", "Tax Service", "H&R Block"
+
+LEGAL → Legal Fees
+  Any name with "Law", "Legal", "Attorney", "Lawyer", "Solicitor", "LLP" + lawyer context
+
+OFFICE SUPPLIES → Office Supplies
+  Staples, Office Depot, Best Buy (small office items), Amazon (small consumables)
+
+OFFICE RENT → Office Rent
+  "Rent", "Lease", "Property Management" + recurring monthly amounts → Office Rent
+
+POSTAGE → Postage & Delivery
+  Canada Post, USPS, UPS, FedEx, Purolator, DHL
+
+CONTINUING ED → Continuing Education / Professional Development
+  Coursera, Udemy, LinkedIn Learning, Skillshare, Pluralsight, any "Training", "Course", "Certification"
+
+PERMIT FEES → Permit Fees
+  Anything with "Permit", "City of ___ Permit", "Building Department"
+
+EQUIPMENT RENTAL → Equipment Rental (Job-Specific)
+  Sunbelt Rentals, United Rentals, Herc Rentals, ARS, scaffolding rentals, lift rentals
+
+SUBCONTRACTORS → Subcontractors – Painting
+  Generally only if explicitly described as subcontractor work or business name suggests trades
+
+═══ AMBIGUOUS / LOW CONFIDENCE ═══
+- Amazon: depends on description — if office consumables (medium), if tools (medium), if unknown (LOW)
+- Costco/Sam's Club: depends on what was bought — keep medium unless description clarifies
+- Walmart/Target: same — depends on items
+- Gas station convenience purchases (snacks): if amount < $20 and meals-like → Meals; if $30+ and station name → Fuel
+- "Owner", "Draw", "Personal" in vendor name → set target empty, return confidence 0 (it's a draw, not an expense)
+
+═══ NEVER AUTO-APPROVE (LOW CONFIDENCE) ═══
+- Payroll providers (Gusto, ADP, Wagepoint, Payworks): confidence 0.3 — these need careful review
+- Government / tax authorities (CRA, IRS, State Revenue, etc.): confidence 0.3
+- Owner draws, distributions, personal items
+- Large round numbers with vague descriptions
+- Anything you genuinely can't recognize after using the patterns above
+
+═══ OUTPUT ═══
 Return STRICTLY valid JSON:
 {
   "decisions": [
@@ -291,12 +396,12 @@ Return STRICTLY valid JSON:
       "target_account_id": "string (from available_accounts, or empty string)",
       "target_account_name": "string (matches account_name)",
       "confidence": 0.00-1.00,
-      "reasoning": "string"
+      "reasoning": "string (≤12 words, vendor-specific)"
     }
   ]
 }
 
-No markdown fences, no preamble. Just the JSON.`;
+No markdown, no preamble. Just the JSON.`;
 
 const FULL_CAT_BATCH_SIZE = 30;
 
@@ -320,21 +425,25 @@ export async function categorizeAllTransactions(params: {
   const allDecisions: FullCategorizationDecision[] = [];
   const warnings: string[] = [];
 
-  // E-transfer pre-routing: anything matching is forced to flagged with target=null
+  // E-transfer pre-routing: route to "ask_client" — these need confirmation from the
+  // client about what the transfer was for. Never auto-categorized and never saved as
+  // bank rules (each transfer is unique). E-transfer FEES (with "fee" in the name) are
+  // separately routed to Bank Charges by the AI.
   const linesToClassify: FullCategorizationLine[] = [];
   for (const line of params.lines) {
     const haystack = `${line.vendor_name} ${line.description} ${line.private_note}`;
     const isETransfer = ETRANSFER_PATTERNS.some((re) => re.test(haystack));
-    const hasNoClearVendor = !line.vendor_name || line.vendor_name.toLowerCase() === "unknown vendor";
-    if (isETransfer && hasNoClearVendor) {
+    const looksLikeFee = /\bfee\b|service charge/i.test(haystack);
+    // Only route to ask_client if it's a transfer AND not labeled as a fee
+    if (isETransfer && !looksLikeFee) {
       allDecisions.push({
         ref_id: line.ref_id,
         target_account_id: null,
         target_account_name: null,
         confidence: 0,
-        reasoning: "E-transfer / peer payment without a clear vendor — needs manual placement.",
-        decision: "flagged",
-        flagged_reason: "Uncategorized — peer payment (e-transfer/Venmo/Zelle) with no vendor info",
+        reasoning: "E-transfer / peer payment — confirm with client what this was for.",
+        decision: "ask_client",
+        flagged_reason: "Peer payment — needs client confirmation before categorizing",
       });
       continue;
     }

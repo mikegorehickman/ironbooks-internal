@@ -11,6 +11,10 @@ import {
   Play,
   ArrowRight,
   Info,
+  HelpCircle,
+  Search,
+  ChevronDown,
+  Flag,
 } from "lucide-react";
 
 interface ReclassJob {
@@ -59,16 +63,28 @@ interface Reclassification {
   bookkeeper_override_target_name: string | null;
 }
 
-type Tab = "auto" | "review" | "flagged" | "skipped";
+type Tab = "auto" | "review" | "flagged" | "ask_client" | "skipped";
+
+interface MasterAccount {
+  account_name: string;
+  parent_account_name: string | null;
+  is_parent: boolean;
+  section: string | null;
+  sort_order: number | null;
+}
 
 export function ReclassReview({
   job,
   rows: initialRows,
   userRole,
+  masterAccounts = [],
+  clientLinkId,
 }: {
   job: ReclassJob;
   rows: Reclassification[];
   userRole: string;
+  masterAccounts?: MasterAccount[];
+  clientLinkId?: string;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState(initialRows);
@@ -88,14 +104,16 @@ export function ReclassReview({
     const auto: Reclassification[] = [];
     const review: Reclassification[] = [];
     const flagged: Reclassification[] = [];
+    const ask: Reclassification[] = [];
     const skipped: Reclassification[] = [];
     for (const r of rows) {
       if (r.decision === "auto_approve" || r.decision === "approved") auto.push(r);
       else if (r.decision === "needs_review") review.push(r);
       else if (r.decision === "flagged") flagged.push(r);
+      else if (r.decision === "ask_client") ask.push(r);
       else if (r.decision === "skip" || r.decision === "rejected") skipped.push(r);
     }
-    return { auto, review, flagged, skipped };
+    return { auto, review, flagged, ask, skipped };
   }, [rows]);
 
   const totalApproved = partitioned.auto.length;
@@ -111,6 +129,55 @@ export function ReclassReview({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision: newDecision }),
     });
+  }
+
+  /**
+   * Set the target account for a row + promote to "approved".
+   * Also fires off a bank-rule upsert so the same vendor auto-categorizes next time.
+   * Skipped for ask_client decisions (peer payments are never re-rule'd).
+   */
+  async function setTarget(rowId: string, targetAccountName: string) {
+    const row = rows.find((r) => r.id === rowId);
+    if (!row) return;
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === rowId
+          ? {
+              ...r,
+              bookkeeper_override: true,
+              bookkeeper_override_target_name: targetAccountName,
+              to_account_name: targetAccountName,
+              decision: "approved",
+            }
+          : r
+      )
+    );
+    // Persist row update
+    await fetch(`/api/reclass/decisions/${rowId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        decision: "approved",
+        bookkeeper_override_target_name: targetAccountName,
+      }),
+    });
+    // Save as bank rule (fire-and-forget, skip for ask_client / no vendor)
+    if (
+      clientLinkId &&
+      row.decision !== "ask_client" &&
+      row.vendor_name &&
+      row.vendor_name.toLowerCase() !== "unknown vendor"
+    ) {
+      fetch(`/api/bank-rules/upsert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_link_id: clientLinkId,
+          vendor_pattern: row.vendor_name,
+          target_account_name: targetAccountName,
+        }),
+      }).catch((e) => console.warn("Bank rule upsert failed:", e));
+    }
   }
 
   async function bulkApprove(rowIds: string[]) {
@@ -264,6 +331,13 @@ export function ReclassReview({
           count={partitioned.flagged.length}
         />
         <TabButton
+          active={activeTab === "ask_client"}
+          onClick={() => setActiveTab("ask_client")}
+          icon={<HelpCircle size={16} className="text-purple-600" />}
+          label="Ask Client"
+          count={partitioned.ask.length}
+        />
+        <TabButton
           active={activeTab === "skipped"}
           onClick={() => setActiveTab("skipped")}
           icon={<Lock size={16} className="text-ink-slate" />}
@@ -277,8 +351,10 @@ export function ReclassReview({
         {activeTab === "auto" && (
           <RowTable
             rows={partitioned.auto}
-            showConfidence={job.workflow === "scrub"}
+            showConfidence={true}
             showActions={false}
+            masterAccounts={masterAccounts}
+            onTargetChange={setTarget}
           />
         )}
 
@@ -287,7 +363,7 @@ export function ReclassReview({
             {partitioned.review.length > 0 && (
               <div className="p-3 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
                 <span className="text-sm text-amber-800">
-                  AI confidence 70-94%. Confirm or override target.
+                  AI confidence 70-91%. Confirm the AI's pick or override via the dropdown.
                 </span>
                 <button
                   onClick={() => bulkApprove(partitioned.review.map((r) => r.id))}
@@ -301,6 +377,8 @@ export function ReclassReview({
               rows={partitioned.review}
               showConfidence={true}
               showActions={true}
+              masterAccounts={masterAccounts}
+              onTargetChange={setTarget}
               onApprove={(id) => updateDecision(id, "approved")}
               onReject={(id) => updateDecision(id, "rejected")}
             />
@@ -311,13 +389,37 @@ export function ReclassReview({
           <>
             {partitioned.flagged.length > 0 && (
               <div className="p-3 bg-red-50 border-b border-red-100 text-sm text-red-800">
-                AI confidence below 70%. Review carefully — these need human judgment.
+                AI couldn't confidently match these. Use the dropdown to pick the right account, or
+                flag for senior review.
               </div>
             )}
             <RowTable
               rows={partitioned.flagged}
               showConfidence={true}
               showActions={true}
+              masterAccounts={masterAccounts}
+              onTargetChange={setTarget}
+              onApprove={(id) => updateDecision(id, "approved")}
+              onReject={(id) => updateDecision(id, "rejected")}
+            />
+          </>
+        )}
+
+        {activeTab === "ask_client" && (
+          <>
+            {partitioned.ask.length > 0 && (
+              <div className="p-3 bg-purple-50 border-b border-purple-100 text-sm text-purple-800">
+                <HelpCircle size={14} className="inline mr-1" />
+                E-transfers / Venmo / Zelle — confirm with the client what each was for, then pick
+                the right account. These are never saved as bank rules.
+              </div>
+            )}
+            <RowTable
+              rows={partitioned.ask}
+              showConfidence={false}
+              showActions={true}
+              masterAccounts={masterAccounts}
+              onTargetChange={setTarget}
               onApprove={(id) => updateDecision(id, "approved")}
               onReject={(id) => updateDecision(id, "rejected")}
             />
@@ -435,6 +537,8 @@ function RowTable({
   showConfidence,
   showActions,
   showSkipReason,
+  masterAccounts = [],
+  onTargetChange,
   onApprove,
   onReject,
 }: {
@@ -442,12 +546,16 @@ function RowTable({
   showConfidence: boolean;
   showActions: boolean;
   showSkipReason?: boolean;
+  masterAccounts?: MasterAccount[];
+  onTargetChange?: (rowId: string, accountName: string) => void;
   onApprove?: (id: string) => void;
   onReject?: (id: string) => void;
 }) {
   if (rows.length === 0) {
     return <div className="p-8 text-center text-ink-slate text-sm">No transactions in this category.</div>;
   }
+
+  const showDropdown = showActions && masterAccounts.length > 0;
 
   return (
     <div className="overflow-x-auto">
@@ -457,7 +565,10 @@ function RowTable({
             <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Date</th>
             <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Vendor</th>
             <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Amount</th>
-            <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">→ Target</th>
+            <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">→ AI Target</th>
+            {showDropdown && (
+              <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Map to Master</th>
+            )}
             {showConfidence && (
               <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Confidence</th>
             )}
@@ -472,8 +583,8 @@ function RowTable({
         <tbody>
           {rows.slice(0, 200).map((r) => (
             <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-              <td className="px-4 py-2.5 text-ink-slate">{r.transaction_date}</td>
-              <td className="px-4 py-2.5">
+              <td className="px-4 py-2.5 text-ink-slate align-top">{r.transaction_date}</td>
+              <td className="px-4 py-2.5 align-top">
                 <div className="font-medium text-navy">{r.vendor_name}</div>
                 {r.description && (
                   <div className="text-xs text-ink-slate truncate max-w-xs">{r.description}</div>
@@ -496,10 +607,10 @@ function RowTable({
                   )}
                 </div>
               </td>
-              <td className="px-4 py-2.5 text-right font-mono text-navy">
+              <td className="px-4 py-2.5 text-right font-mono text-navy align-top">
                 ${(r.transaction_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </td>
-              <td className="px-4 py-2.5">
+              <td className="px-4 py-2.5 align-top">
                 <div className="text-navy">
                   {r.bookkeeper_override
                     ? r.bookkeeper_override_target_name
@@ -509,6 +620,15 @@ function RowTable({
                   <div className="text-xs text-ink-slate italic">{r.ai_reasoning}</div>
                 )}
               </td>
+              {showDropdown && (
+                <td className="px-4 py-2.5 align-top">
+                  <MasterAccountSelect
+                    value={r.bookkeeper_override_target_name || r.to_account_name || ""}
+                    masterAccounts={masterAccounts}
+                    onChange={(name) => onTargetChange?.(r.id, name)}
+                  />
+                </td>
+              )}
               {showConfidence && (
                 <td className="px-4 py-2.5">
                   {r.ai_confidence !== null ? (
@@ -563,5 +683,90 @@ function ConfidenceBadge({ value }: { value: number }) {
   else if (value < 0.95) cls = "bg-amber-100 text-amber-700";
   return (
     <span className={`text-xs font-semibold px-2 py-0.5 rounded ${cls}`}>{pct}%</span>
+  );
+}
+
+// Searchable master-account dropdown for reclass review.
+function MasterAccountSelect({
+  value,
+  masterAccounts,
+  onChange,
+}: {
+  value: string;
+  masterAccounts: MasterAccount[];
+  onChange: (val: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filtered = masterAccounts.filter(
+    (m) =>
+      m.account_name.toLowerCase().includes(search.toLowerCase()) ||
+      (m.parent_account_name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (m.section || "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full max-w-[230px] flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border bg-white hover:bg-gray-50 text-left"
+        style={{ borderColor: value ? "#2D7A75" : "#D1D5DB", color: value ? "#0F1F2E" : "#9CA3AF" }}
+      >
+        <span className="flex-1 truncate">{value || "Select account…"}</span>
+        <ChevronDown size={12} className="flex-shrink-0 text-ink-light" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSearch(""); }} />
+          <div className="absolute left-0 top-full mt-1 z-20 w-72 rounded-lg shadow-xl bg-white border border-gray-200 overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
+              <Search size={13} className="text-ink-light flex-shrink-0" />
+              <input
+                autoFocus
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search accounts..."
+                className="flex-1 text-xs outline-none bg-transparent text-navy placeholder:text-ink-light"
+              />
+            </div>
+            <div className="max-h-72 overflow-y-auto">
+              {/* Pinned Uncategorized option */}
+              {!search && (
+                <button
+                  onClick={() => { onChange("Uncategorized"); setOpen(false); setSearch(""); }}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-amber-50 transition-colors text-amber-700 border-b border-gray-100"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Flag size={11} /> Uncategorized — flag for senior review
+                  </span>
+                </button>
+              )}
+              {filtered.length === 0 ? (
+                <div className="px-3 py-4 text-xs text-center text-ink-slate">No matches</div>
+              ) : (
+                filtered.map((m) => (
+                  <button
+                    key={m.account_name}
+                    onClick={() => { onChange(m.account_name); setOpen(false); setSearch(""); }}
+                    className={`w-full text-left px-3 py-2 text-xs hover:bg-teal-lighter transition-colors ${
+                      value === m.account_name ? "font-semibold text-teal bg-teal-lighter" : "text-navy"
+                    }`}
+                  >
+                    <span>{m.account_name}</span>
+                    {m.parent_account_name && (
+                      <span className="ml-1.5 text-ink-light">· {m.parent_account_name}</span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

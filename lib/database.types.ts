@@ -1276,6 +1276,7 @@ export type Database = {
         | "approved"
         | "rejected"
         | "skip"
+        | "ask_client"
       reclass_skip_reason:
         | "reconciled"
         | "closed_period_qbo"
@@ -1450,6 +1451,7 @@ export const Constants = {
         "approved",
         "rejected",
         "skip",
+        "ask_client",
       ],
       reclass_skip_reason: [
         "reconciled",

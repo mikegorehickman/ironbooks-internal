@@ -73,6 +73,20 @@ export default async function ReclassReviewPage({
     .single();
   const userRole = userProfile?.role || "bookkeeper";
 
+  // Load master COA accounts for the Map-to-Master dropdown.
+  // Filter to leaf accounts in the client's jurisdiction.
+  const jurisdiction = (job as any).jurisdiction || "US";
+  const { data: masterAccounts } = await service
+    .from("master_coa")
+    .select("account_name, parent_account_name, is_parent, section, sort_order")
+    .eq("jurisdiction", jurisdiction)
+    .eq("is_parent", false)
+    .order("sort_order");
+
+  // Also load live QBO accounts so we can resolve target_account_id when the
+  // bookkeeper picks a master account by name. The qbo-accounts endpoint already
+  // exists but is async-only; we'll let the client-side fetch it on demand.
+
   return (
     <AppShell>
       <TopBar
@@ -91,6 +105,8 @@ export default async function ReclassReviewPage({
           job={job}
           rows={reclassifications || []}
           userRole={userRole}
+          masterAccounts={masterAccounts || []}
+          clientLinkId={(job as any).client_link_id}
         />
       </div>
     </AppShell>

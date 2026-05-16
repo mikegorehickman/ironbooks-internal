@@ -30,6 +30,7 @@ export async function PATCH(
     "auto_approve",
     "needs_review",
     "flagged",
+    "ask_client",
   ];
   if (body.decision !== undefined) {
     if (!validDecisions.includes(body.decision)) {
@@ -42,9 +43,15 @@ export async function PATCH(
     updates.bookkeeper_override = true;
     updates.bookkeeper_override_target_id = body.bookkeeper_override_target_id;
     updates.bookkeeper_override_target_name = body.bookkeeper_override_target_name || null;
-    // When overriding target, treat as bookkeeper-approved
     updates.to_account_id = body.bookkeeper_override_target_id;
     updates.to_account_name = body.bookkeeper_override_target_name || null;
+    if (!updates.decision) updates.decision = "approved";
+  } else if (body.bookkeeper_override_target_name !== undefined) {
+    // Name-only override from the new Map-to-Master dropdown — we don't have a
+    // QBO target_id at the UI layer (it's resolved at execute time by name lookup).
+    updates.bookkeeper_override = true;
+    updates.bookkeeper_override_target_name = body.bookkeeper_override_target_name;
+    updates.to_account_name = body.bookkeeper_override_target_name;
     if (!updates.decision) updates.decision = "approved";
   }
 
