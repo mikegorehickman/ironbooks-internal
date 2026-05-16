@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2, AlertTriangle, Flag, CreditCard, ChevronDown, ChevronRight,
-  Loader2, Receipt, Info, ArrowRight,
+  Loader2, Receipt, ArrowRight,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/lib/database.types";
@@ -31,6 +31,7 @@ export function StripeReconReview({
   const [matches, setMatches] = useState<Match[]>(initialMatches);
   const [filter, setFilter] = useState<"all" | "auto_approve" | "needs_review" | "flagged">("needs_review");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [executing, setExecuting] = useState(false);
 
   const supabase = createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -55,6 +56,31 @@ export function StripeReconReview({
       .from("stripe_recon_matches")
       .update({ decision: newDecision, bookkeeper_override: true })
       .eq("id", matchId);
+  }
+
+  async function executeRecon() {
+    const approvedCount = matches.filter((m) => m.decision === "auto_approve").length;
+    if (approvedCount === 0) {
+      alert("No matches are set to 'Auto-approve'. Set at least one before executing.");
+      return;
+    }
+    if (!confirm(`Apply ${approvedCount} approved match${approvedCount === 1 ? "" : "es"} to QBO?\n\nThis will:\n• Update each Stripe deposit's memo with customer names\n• Add a negative line item for the Stripe processing fee${clientLink.jurisdiction === "CA" ? "\n• Add a separate line item for GST/HST recoverable on the fee" : ""}`)) {
+      return;
+    }
+    setExecuting(true);
+    try {
+      const res = await fetch(`/api/stripe-recon/${job.id}/execute`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(`Could not start execution: ${data.error || `HTTP ${res.status}`}`);
+        setExecuting(false);
+        return;
+      }
+      router.push(`/stripe-recon/${job.id}/execute`);
+    } catch (err: any) {
+      alert(`Network error: ${err?.message || err}`);
+      setExecuting(false);
+    }
   }
 
   function toggleExpanded(id: string) {
@@ -130,15 +156,15 @@ export function StripeReconReview({
         </button>
         <div className="flex items-center gap-3">
           <div className="text-xs text-ink-slate">
-            <Info size={12} className="inline mr-1" />
-            Execution (writing back to QBO) ships in Phase 2.
+            {counts.auto} approved · {counts.review} pending review
           </div>
           <button
-            disabled
-            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
-            title="Phase 2 — coming soon"
+            onClick={executeRecon}
+            disabled={executing || counts.auto === 0}
+            className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
           >
-            Execute Reconciliation <ArrowRight size={16} />
+            {executing ? <Loader2 className="animate-spin" size={16} /> : <ArrowRight size={16} />}
+            {executing ? "Starting..." : `Execute ${counts.auto} Reconciliation${counts.auto === 1 ? "" : "s"}`}
           </button>
         </div>
       </div>
