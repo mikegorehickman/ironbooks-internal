@@ -14,10 +14,13 @@ import { fetchAllAccounts } from "@/lib/qbo";
 import {
   classifyVendorGroups,
   categorizeAllTransactions,
+  webSearchVendor,
   type ReclassClassification,
   type AvailableAccount,
   type FullCategorizationLine,
+  type FullCategorizationDecision,
 } from "@/lib/claude-reclass";
+import { lookupVendor, normalizeVendorForLookup } from "@/lib/vendor-knowledge";
 import { getClientEndCloses, type DoubleEndCloseSummary } from "@/lib/double";
 
 /**
@@ -581,8 +584,92 @@ async function runFullCategorization(
   }
   stats.inScope = inScopeLines.length;
 
-  // 5. Pass to Claude
-  const aiLines: FullCategorizationLine[] = inScopeLines.map((l) => ({
+  // 4.5. PRE-PASS: knowledge base + bank rules cache.
+  //   Items that match here skip Claude entirely → faster, cheaper, more accurate.
+  //   Items that don't match fall through to Claude in step 5.
+  const industry = ((clientLink as any).industry as string) || "painters";
+  const accountByName = new Map(
+    availableAccounts.map((a) => [a.account_name.toLowerCase(), a])
+  );
+
+  // Fetch per-client bank rules (vendor → account mappings learned from past runs)
+  const { data: bankRules } = await service
+    .from("bank_rules")
+    .select("vendor_pattern, target_account_name")
+    .eq("client_link_id", clientLink.id);
+  const bankRulesByVendor = new Map<string, string>(
+    (bankRules || [])
+      .filter((r: any) => r.vendor_pattern && r.target_account_name)
+      .map((r: any) => [String(r.vendor_pattern).toUpperCase(), String(r.target_account_name)])
+  );
+
+  function normalizeForBankRule(name: string): string {
+    return normalizeVendorForLookup(name)
+      .toUpperCase()
+      .replace(/[^A-Z0-9 ]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  const preMatched = new Map<string, FullCategorizationDecision>();
+  const linesForClaude: ReclassLine[] = [];
+  let kbHits = 0;
+  let cacheHits = 0;
+
+  for (const line of inScopeLines) {
+    const refId = `${line.transaction_id}::${line.line_id}`;
+    const absAmount = Math.abs(line.transaction_amount);
+
+    // 1) Knowledge base lookup (static, ~200 patterns, instant)
+    const kbMatch = lookupVendor(line.vendor_name, line.description, line.transaction_amount, industry);
+    if (kbMatch) {
+      const account = accountByName.get(kbMatch.account.toLowerCase());
+      if (account) {
+        preMatched.set(refId, {
+          ref_id: refId,
+          target_account_id: account.qbo_account_id,
+          target_account_name: account.account_name,
+          confidence: kbMatch.confidence,
+          reasoning: kbMatch.reasoning,
+          decision:
+            kbMatch.confidence >= 0.80 && absAmount < threshold
+              ? "auto_approve"
+              : "needs_review",
+        });
+        kbHits++;
+        continue;
+      }
+    }
+
+    // 2) Per-client bank rules cache (instant DB lookup, already done)
+    const normalized = normalizeForBankRule(line.vendor_name);
+    const cachedAccountName = normalized ? bankRulesByVendor.get(normalized) : undefined;
+    if (cachedAccountName) {
+      const account = accountByName.get(cachedAccountName.toLowerCase());
+      if (account) {
+        preMatched.set(refId, {
+          ref_id: refId,
+          target_account_id: account.qbo_account_id,
+          target_account_name: account.account_name,
+          confidence: 1.0,
+          reasoning: "Matched existing bank rule from prior categorization",
+          decision: absAmount < threshold ? "auto_approve" : "needs_review",
+        });
+        cacheHits++;
+        continue;
+      }
+    }
+
+    // No pre-match → needs AI
+    linesForClaude.push(line);
+  }
+
+  console.log(
+    `[reclass] Pre-pass: ${kbHits} knowledge-base hits, ${cacheHits} bank-rule cache hits, ${linesForClaude.length} sent to Claude.`
+  );
+
+  // 5. Pass remaining lines to Claude
+  const aiLines: FullCategorizationLine[] = linesForClaude.map((l) => ({
     ref_id: `${l.transaction_id}::${l.line_id}`,
     vendor_name: l.vendor_name,
     amount: l.transaction_amount,
@@ -601,8 +688,94 @@ async function runFullCategorization(
     autoApproveThreshold: threshold,
   });
 
-  // 6. Build reclass rows
-  const decisionByRef = new Map(aiResult.decisions.map((d) => [d.ref_id, d]));
+  // 6. Build reclass rows — merge AI decisions with pre-matched ones
+  const decisionByRef = new Map<string, FullCategorizationDecision>();
+  for (const [ref, d] of preMatched) decisionByRef.set(ref, d);
+  for (const d of aiResult.decisions) decisionByRef.set(d.ref_id, d);
+
+  // 6.5. WEB SEARCH PASS for low-confidence Claude results.
+  //   Only fires on UNIQUE vendor names (we dedupe so we don't waste API calls on
+  //   the same vendor repeated 20 times). Results are written back to bank_rules
+  //   so re-runs and other transactions for the same vendor skip web search.
+  const clientCity = (clientLink as any).state_province || null;
+  const lowConfDecisions = aiResult.decisions.filter(
+    (d) => d.decision === "flagged" || (d.decision === "needs_review" && d.confidence < 0.7)
+  );
+
+  // Dedupe by normalized vendor name — search each unique vendor only once
+  const lineByRef = new Map<string, ReclassLine>();
+  for (const l of inScopeLines) {
+    lineByRef.set(`${l.transaction_id}::${l.line_id}`, l);
+  }
+  const uniqueVendorsToSearch = new Map<string, { vendorName: string; refIds: string[] }>();
+  for (const d of lowConfDecisions) {
+    const line = lineByRef.get(d.ref_id);
+    if (!line || !line.vendor_name) continue;
+    const norm = normalizeForBankRule(line.vendor_name);
+    if (!norm) continue;
+    if (!uniqueVendorsToSearch.has(norm)) {
+      uniqueVendorsToSearch.set(norm, { vendorName: line.vendor_name, refIds: [] });
+    }
+    uniqueVendorsToSearch.get(norm)!.refIds.push(d.ref_id);
+  }
+
+  if (uniqueVendorsToSearch.size > 0) {
+    console.log(`[reclass] Web-searching ${uniqueVendorsToSearch.size} unique unknown vendors...`);
+
+    const newBankRules: any[] = [];
+    for (const [normalized, info] of uniqueVendorsToSearch) {
+      try {
+        const result = await webSearchVendor({
+          vendorName: info.vendorName,
+          clientCity: clientCity || undefined,
+          availableAccounts,
+        });
+        if (result && result.target_account_id && result.confidence >= 0.65) {
+          // Update every transaction with the same vendor
+          for (const refId of info.refIds) {
+            const existing = decisionByRef.get(refId);
+            decisionByRef.set(refId, {
+              ref_id: refId,
+              target_account_id: result.target_account_id,
+              target_account_name: result.target_account_name,
+              confidence: result.confidence,
+              reasoning: result.reasoning,
+              decision:
+                result.confidence >= 0.80 ? "auto_approve" : "needs_review",
+              flagged_reason: existing?.flagged_reason,
+            });
+          }
+          // Cache this match as a bank rule so future runs skip the search
+          newBankRules.push({
+            client_link_id: clientLink.id,
+            vendor_pattern: normalized,
+            target_account_name: result.target_account_name,
+            ai_confidence: result.confidence,
+            ai_reasoning: result.reasoning,
+            match_type: "CONTAINS",
+            status: "approved",
+            requires_approval: false,
+            created_by: job.bookkeeper_id,
+            pushed_to_qbo: false,
+          });
+        }
+      } catch (err: any) {
+        console.warn(`[reclass] Web search failed for "${info.vendorName}":`, err.message);
+      }
+    }
+
+    // Bulk-insert new bank rules in one shot (skip dupes via vendor_pattern uniqueness)
+    if (newBankRules.length > 0) {
+      try {
+        await service
+          .from("bank_rules")
+          .upsert(newBankRules, { onConflict: "client_link_id,vendor_pattern", ignoreDuplicates: false } as any);
+        console.log(`[reclass] Cached ${newBankRules.length} new bank rules from web search`);
+      } catch (err: any) {
+        console.warn(`[reclass] Failed to cache bank rules:`, err.message);
+      }
+    }
+  }
 
   for (const line of inScopeLines) {
     const refId = `${line.transaction_id}::${line.line_id}`;

@@ -11,6 +11,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { VendorGroup } from "./qbo-reclass";
+import { lookupVendor, normalizeVendorForLookup } from "./vendor-knowledge";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = "claude-opus-4-7";
@@ -471,17 +472,43 @@ export async function categorizeAllTransactions(params: {
   const allDecisions: FullCategorizationDecision[] = [];
   const warnings: string[] = [];
 
-  // E-transfer pre-routing: route to "ask_client" — these need confirmation from the
-  // client about what the transfer was for. Never auto-categorized and never saved as
-  // bank rules (each transfer is unique). E-transfer FEES (with "fee" in the name) are
-  // separately routed to Bank Charges by the AI.
+  // E-transfer pre-routing.
+  //
+  //  - Real peer-payment transfers ($5+) → ask_client (each transfer is unique)
+  //  - "Fee"-labeled transfers OR very small amounts (<$5) → Bank Charges
+  //    (these are bank service charges, not actual peer payments — $1.50 EMT fee,
+  //     $1.00 e-transfer fee, etc. are common Canadian charges)
+  //  - Plain "Interac Purchase" (NOT "Interac e-Transfer") → falls through to AI
+  const bankChargesAccount = params.availableAccounts.find(
+    (a) =>
+      a.account_name.toLowerCase() === "bank charges" ||
+      a.account_name.toLowerCase() === "bank charges & fees" ||
+      a.account_name.toLowerCase() === "bank charges and fees"
+  );
+
   const linesToClassify: FullCategorizationLine[] = [];
   for (const line of params.lines) {
     const haystack = `${line.vendor_name} ${line.description} ${line.private_note}`;
     const isETransfer = ETRANSFER_PATTERNS.some((re) => re.test(haystack));
     const looksLikeFee = /\bfee\b|service charge/i.test(haystack);
-    // Only route to ask_client if it's a transfer AND not labeled as a fee
-    if (isETransfer && !looksLikeFee) {
+    const absAmount = Math.abs(line.amount);
+    const isLikelyFee = isETransfer && (looksLikeFee || absAmount < 5);
+
+    if (isLikelyFee && bankChargesAccount) {
+      // Tiny-amount e-transfers / fees → Bank Charges
+      allDecisions.push({
+        ref_id: line.ref_id,
+        target_account_id: bankChargesAccount.qbo_account_id,
+        target_account_name: bankChargesAccount.account_name,
+        confidence: 0.95,
+        reasoning: `${absAmount < 5 ? "Small-amount" : "Fee-labeled"} e-transfer → Bank Charges`,
+        decision: "auto_approve",
+      });
+      continue;
+    }
+
+    if (isETransfer) {
+      // Real peer payment — ask the client
       allDecisions.push({
         ref_id: line.ref_id,
         target_account_id: null,
@@ -605,4 +632,111 @@ Classify each line. Return JSON only.`;
     warnings,
     summary: `Classified ${allDecisions.length} lines: ${counts.auto} auto-approved (<${params.autoApproveThreshold}), ${counts.review} needs review, ${counts.flagged} flagged for manual placement.`,
   };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// WEB SEARCH FALLBACK — for unknown vendors
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Given a vendor name + optional client city, use Claude's web search tool to
+ * identify what type of business it is, then map to a master COA account.
+ *
+ * Used as a 4th-tier fallback in the pipeline:
+ *   1. Knowledge base (instant)        →  ~200 known patterns
+ *   2. Per-client bank rules (instant) →  learned from prior runs
+ *   3. Batched Claude (single call)    →  general categorization
+ *   4. Web search (this function)      →  for vendors Claude returned low-confidence on
+ *
+ * Each call is one Claude API request (with web_search tool enabled), so this
+ * is the slowest path. Only used when needed.
+ */
+export async function webSearchVendor(params: {
+  vendorName: string;
+  clientCity?: string;
+  availableAccounts: AvailableAccount[];
+}): Promise<{
+  target_account_id: string | null;
+  target_account_name: string | null;
+  confidence: number;
+  reasoning: string;
+} | null> {
+  if (!params.vendorName || params.vendorName.toLowerCase() === "unknown vendor") {
+    return null;
+  }
+
+  const accountsList = params.availableAccounts
+    .map((a) => `- ${a.account_name}`)
+    .join("\n");
+
+  const query = params.clientCity
+    ? `"${params.vendorName}" ${params.clientCity} what type of business`
+    : `"${params.vendorName}" what type of business`;
+
+  const userMessage = `I need to categorize a vendor for a small bookkeeping system.
+
+Vendor: "${params.vendorName}"
+${params.clientCity ? `Client is located in: ${params.clientCity}` : ""}
+
+Please search the web to figure out what type of business this vendor is, then map it to one of these accounts:
+
+${accountsList}
+
+Return STRICTLY valid JSON, no other text:
+{
+  "target_account_name": "string (must match one of the listed accounts exactly, or empty string if no match)",
+  "confidence": 0.00-1.00,
+  "reasoning": "short sentence — what is this vendor and why this account"
+}`;
+
+  try {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1500,
+      tools: [
+        {
+          type: "web_search_20250305" as any,
+          name: "web_search",
+          max_uses: 2,
+        } as any,
+      ],
+      messages: [{ role: "user", content: userMessage }],
+    });
+
+    // The final text block is the JSON result (after any tool use)
+    const textBlocks = response.content.filter((c: any) => c.type === "text");
+    const lastText = textBlocks[textBlocks.length - 1];
+    if (!lastText || lastText.type !== "text") return null;
+
+    const raw = lastText.text
+      .trim()
+      .replace(/^```json\s*/, "")
+      .replace(/^```\s*/, "")
+      .replace(/\s*```$/, "")
+      .trim();
+
+    const parsed = JSON.parse(raw) as {
+      target_account_name: string;
+      confidence: number;
+      reasoning: string;
+    };
+
+    if (!parsed.target_account_name) return null;
+
+    // Find the account in available accounts
+    const account = params.availableAccounts.find(
+      (a) => a.account_name.toLowerCase() === parsed.target_account_name.toLowerCase()
+    );
+    if (!account) return null;
+
+    return {
+      target_account_id: account.qbo_account_id,
+      target_account_name: account.account_name,
+      confidence: Math.max(0, Math.min(1, parsed.confidence)),
+      reasoning: `(web search) ${parsed.reasoning}`,
+    };
+  } catch (err: any) {
+    console.warn(`[webSearchVendor] Failed for "${params.vendorName}":`, err.message);
+    return null;
+  }
 }
