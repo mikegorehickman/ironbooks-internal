@@ -151,6 +151,11 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
       : 0;
   const dateRangeOverLimit = workflow !== "full_categorization" && daysDiff > 366;
 
+  // Reason is auto-generated server-side for full_categorization (no bookkeeper input needed).
+  // Required for consolidation / scrub since those are bespoke decisions.
+  const reasonOk =
+    workflow === "full_categorization" ? true : reason.trim().length >= 5;
+
   const canSubmit =
     workflow &&
     clientLinkId &&
@@ -160,7 +165,7 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
     dateRangeStart &&
     dateRangeEnd &&
     !dateRangeOverLimit &&
-    reason.trim().length >= 5 &&
+    reasonOk &&
     (workflow !== "full_categorization" || threshold > 0) &&
     !submitting;
 
@@ -177,7 +182,8 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
         date_range_end: dateRangeEnd,
         jurisdiction: selectedClient.jurisdiction,
         state_province: selectedClient.state_province || "",
-        reason: reason.trim(),
+        // Reason: auto-generated server-side for full_categorization
+        reason: workflow === "full_categorization" ? "" : reason.trim(),
       };
 
       if (workflow === "full_categorization") {
@@ -447,7 +453,7 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
           </>
         )}
 
-        {clientLinkId && (
+        {clientLinkId && workflow !== "full_categorization" && (
           <div>
             <label className="block text-sm font-semibold text-navy mb-2">Reason (appears in QBO memo + audit log)</label>
             <input

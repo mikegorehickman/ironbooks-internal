@@ -110,11 +110,19 @@ export async function POST(request: Request) {
     }
   }
 
-  if (!body.reason || body.reason.trim().length < 5) {
-    return NextResponse.json(
-      { error: "Reason must be at least 5 characters" },
-      { status: 400 }
-    );
+  // Reason: required for consolidation/scrub (bespoke decisions). Auto-generated for
+  // full_categorization since it's the standard cleanup step — no judgment-call to record.
+  let finalReason: string;
+  if (body.workflow === "full_categorization") {
+    finalReason = await buildAutoReason(supabase, user.id);
+  } else {
+    if (!body.reason || body.reason.trim().length < 5) {
+      return NextResponse.json(
+        { error: "Reason must be at least 5 characters" },
+        { status: 400 }
+      );
+    }
+    finalReason = body.reason.trim();
   }
 
   const service = createServiceSupabase();
@@ -134,7 +142,7 @@ export async function POST(request: Request) {
       date_range_end: body.date_range_end,
       jurisdiction: body.jurisdiction,
       state_province: body.state_province || null,
-      reason: body.reason.trim(),
+      reason: finalReason,
       auto_approve_threshold: body.auto_approve_threshold || null,
     } as any)
     .select()
@@ -655,6 +663,36 @@ async function runFullCategorization(
       warnings: aiResult.warnings.length > 0 ? (aiResult.warnings as any) : null,
     } as any)
     .eq("id", jobId);
+}
+
+/**
+ * Build the auto-generated reason for full_categorization jobs.
+ * Format: "IronBooks Categorization, May 2026, MGH"
+ *   - month spelled out + year
+ *   - bookkeeper initials from users.full_name
+ */
+async function buildAutoReason(
+  supabase: any,
+  userId: string
+): Promise<string> {
+  const { data: profile } = await supabase
+    .from("users")
+    .select("full_name")
+    .eq("id", userId)
+    .single();
+
+  const fullName: string = profile?.full_name || "";
+  const initials = fullName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part: string) => part.charAt(0).toUpperCase())
+    .join("");
+
+  const now = new Date();
+  const month = now.toLocaleString("en-US", { month: "long" });
+  const year = now.getFullYear();
+
+  return `IronBooks Categorization, ${month} ${year}${initials ? `, ${initials}` : ""}`;
 }
 
 export const maxDuration = 300;
