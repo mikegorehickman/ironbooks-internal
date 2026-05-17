@@ -11,6 +11,8 @@ import {
   AlertTriangle,
   Timer,
   Wifi,
+  CreditCard,
+  Clock,
 } from "lucide-react";
 import { DashboardCharts, type WeeklyPoint, type BookkeeperPoint } from "./dashboard-charts";
 
@@ -60,6 +62,8 @@ export default async function DashboardPage() {
     bookkeepersRes,
     stripeCountRes,
     assignedClientsRes,
+    pendingStripeTokensRes,
+    recentStripeConnectionsRes,
   ] = await Promise.all([
     service.from("users").select("role, full_name").eq("id", user!.id).single(),
 
@@ -121,6 +125,25 @@ export default async function DashboardPage() {
       .eq("assigned_bookkeeper_id", user!.id)
       .eq("is_active", true)
       .order("due_date", { ascending: true }),
+
+    // Outstanding Stripe Connect requests: unused tokens for clients whose
+    // connection status is still pending. We order by created_at so the
+    // oldest (most overdue) requests surface first.
+    service
+      .from("stripe_connect_tokens")
+      .select("id, client_link_id, created_at, expires_at, used_at, client_links!inner(client_name, stripe_connection_status, is_active)")
+      .is("used_at", null)
+      .order("created_at", { ascending: true }),
+
+    // Recently connected clients (last 14 days) — the "good news" section.
+    service
+      .from("client_links")
+      .select("id, client_name, stripe_connected_at")
+      .eq("stripe_connection_status", "connected")
+      .eq("is_active", true)
+      .not("stripe_connected_at", "is", null)
+      .gte("stripe_connected_at", new Date(now.getTime() - 14 * 86400000).toISOString())
+      .order("stripe_connected_at", { ascending: false }),
   ]);
 
   const profile = profileRes.data;
@@ -224,6 +247,57 @@ export default async function DashboardPage() {
   });
   const completedThisMonth = completedThisMonthJobs.length;
   const stripeConnected = stripeCountRes.count || 0;
+
+  // ─── Stripe Connect status (senior-only card) ───
+  // Outstanding requests: unused tokens where the client_link is still pending.
+  // Recent connections: the friendly "X just connected" list.
+  interface PendingStripeRequest {
+    client_link_id: string;
+    client_name: string;
+    created_at: string;
+    expires_at: string;
+    daysOutstanding: number;
+    daysUntilExpiry: number;
+    isExpired: boolean;
+  }
+  const pendingRaw = (pendingStripeTokensRes.data || []) as any[];
+  // One row per client — keep oldest unused token per client (most overdue).
+  const pendingByClient = new Map<string, PendingStripeRequest>();
+  for (const row of pendingRaw) {
+    const cl = row.client_links;
+    if (!cl) continue;
+    if (cl.is_active === false) continue;
+    // Skip clients already connected — their stale token is harmless
+    if (cl.stripe_connection_status === "connected") continue;
+    if (pendingByClient.has(row.client_link_id)) continue; // we sorted asc, oldest first
+    const created = row.created_at as string | null;
+    const expires = row.expires_at as string;
+    if (!created) continue;
+    pendingByClient.set(row.client_link_id, {
+      client_link_id: row.client_link_id,
+      client_name: cl.client_name,
+      created_at: created,
+      expires_at: expires,
+      daysOutstanding: daysBetween(created),
+      daysUntilExpiry: daysUntil(expires),
+      isExpired: new Date(expires).getTime() < now.getTime(),
+    });
+  }
+  const pendingStripeRequests = Array.from(pendingByClient.values()).sort(
+    (a, b) => b.daysOutstanding - a.daysOutstanding
+  );
+
+  const recentStripeConnections = ((recentStripeConnectionsRes.data || []) as Array<{
+    id: string;
+    client_name: string;
+    stripe_connected_at: string;
+  }>).map((c) => ({
+    ...c,
+    daysAgo: daysBetween(c.stripe_connected_at),
+  }));
+
+  // "New" badge if any client connected in the past 48h
+  const hasFreshStripeConnection = recentStripeConnections.some((c) => c.daysAgo <= 2);
 
   // Avg minutes per cleanup = (execution_completed_at - created_at) in minutes
   function elapsedMinutes(job: { created_at: string | null; execution_completed_at: string | null }): number | null {
@@ -666,6 +740,105 @@ export default async function DashboardPage() {
                   <span className="text-xs font-semibold bg-white border border-amber-200 rounded-md px-2.5 py-1 text-amber-800">
                     {flaggedCounts.stripe} Stripe
                   </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Stripe Connections ─── (senior only) */}
+        {isSenior && (pendingStripeRequests.length > 0 || recentStripeConnections.length > 0) && (
+          <div className="rounded-xl bg-white border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-purple-100">
+                  <CreditCard size={16} className="text-purple-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-navy flex items-center gap-2">
+                    Stripe Connections
+                    {hasFreshStripeConnection && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 uppercase tracking-wide">
+                        New
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-xs text-ink-slate mt-0.5">
+                    {pendingStripeRequests.length > 0
+                      ? `${pendingStripeRequests.length} outstanding · ${recentStripeConnections.length} recent`
+                      : `${recentStripeConnections.length} recent connection${recentStripeConnections.length === 1 ? "" : "s"}`}
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-semibold text-purple-700">
+                {stripeConnected} total connected
+              </span>
+            </div>
+
+            {/* Outstanding requests */}
+            {pendingStripeRequests.length > 0 && (
+              <div className="border-b border-gray-100">
+                <div className="px-5 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
+                  <Clock size={12} className="text-amber-600" />
+                  <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wide">
+                    Outstanding requests · {pendingStripeRequests.length}
+                  </span>
+                </div>
+                {pendingStripeRequests.slice(0, 10).map((r) => {
+                  const status = r.isExpired
+                    ? { color: "text-red-700", label: "Expired — generate new link" }
+                    : r.daysUntilExpiry <= 2
+                    ? { color: "text-red-600", label: `${r.daysUntilExpiry}d left` }
+                    : { color: "text-amber-700", label: `${r.daysUntilExpiry}d left` };
+                  return (
+                    <div
+                      key={r.client_link_id}
+                      className="flex items-center justify-between px-5 py-3 border-b border-gray-50 last:border-0"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-navy truncate">{r.client_name}</div>
+                        <div className="text-[11px] text-ink-slate">
+                          Sent {r.daysOutstanding === 0 ? "today" : `${r.daysOutstanding}d ago`}
+                        </div>
+                      </div>
+                      <span className={`text-xs font-semibold ${status.color} flex-shrink-0`}>
+                        {status.label}
+                      </span>
+                    </div>
+                  );
+                })}
+                {pendingStripeRequests.length > 10 && (
+                  <div className="px-5 py-2 text-[11px] text-ink-slate">
+                    + {pendingStripeRequests.length - 10} more
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Recent connections */}
+            {recentStripeConnections.length > 0 && (
+              <div>
+                <div className="px-5 py-2.5 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2">
+                  <CheckCircle2 size={12} className="text-emerald-600" />
+                  <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wide">
+                    Recently connected · last 14 days
+                  </span>
+                </div>
+                {recentStripeConnections.slice(0, 10).map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between px-5 py-3 border-b border-gray-50 last:border-0"
+                  >
+                    <div className="text-sm font-medium text-navy truncate">{c.client_name}</div>
+                    <span className="text-xs font-semibold text-emerald-700 flex-shrink-0">
+                      {c.daysAgo === 0 ? "Today" : c.daysAgo === 1 ? "Yesterday" : `${c.daysAgo}d ago`}
+                    </span>
+                  </div>
+                ))}
+                {recentStripeConnections.length > 10 && (
+                  <div className="px-5 py-2 text-[11px] text-ink-slate">
+                    + {recentStripeConnections.length - 10} more
+                  </div>
                 )}
               </div>
             )}
