@@ -513,9 +513,10 @@ function findDoubleClose(
   return closes.find((c) => c.yearMonth === yearMonth) || null;
 }
 
-function isDoubleCloseLocked(status: string): boolean {
-  // Lock on any "completed" or "delivered" status. Conservative: also treat null/unknown
-  // as NOT locked (don't false-positive).
+function isDoubleCloseLocked(status: string | null | undefined): boolean {
+  // Lock on any "completed" or "delivered" status. Conservative: treat null/unknown
+  // as NOT locked (don't false-positive on missing data).
+  if (!status) return false;
   return ["complete", "completed", "closed", "delivered"].includes(status.toLowerCase());
 }
 
@@ -535,7 +536,7 @@ async function getOrCreateUncategorizedAccount(
   availableAccounts: AvailableAccount[]
 ): Promise<AvailableAccount | null> {
   const existing = availableAccounts.find(
-    (a) => a.account_name.toLowerCase() === UNCATEGORIZED_ACCOUNT_NAME.toLowerCase()
+    (a) => (a.account_name || "").toLowerCase() === UNCATEGORIZED_ACCOUNT_NAME.toLowerCase()
   );
   if (existing) return existing;
 
@@ -697,7 +698,9 @@ async function runFullCategorization(
   //   Items that don't match fall through to Claude in step 5.
   const industry = ((clientLink as any).industry as string) || "painters";
   const accountByName = new Map(
-    availableAccounts.map((a) => [a.account_name.toLowerCase(), a])
+    availableAccounts
+      .filter((a) => !!a.account_name)
+      .map((a) => [a.account_name.toLowerCase(), a])
   );
 
   // Fetch per-client bank rules (vendor → account mappings learned from past runs)
@@ -731,7 +734,7 @@ async function runFullCategorization(
     // 1) Knowledge base lookup (static, ~200 patterns, instant)
     const kbMatch = lookupVendor(line.vendor_name, line.description, line.transaction_amount, industry);
     if (kbMatch) {
-      const account = accountByName.get(kbMatch.account.toLowerCase());
+      const account = kbMatch.account ? accountByName.get(kbMatch.account.toLowerCase()) : undefined;
       // Apply the KB decision EVEN IF the suggested account isn't in the client's
       // current QBO COA — the COA cleanup step may have removed it or this client
       // may need it added. The bookkeeper can override via the dropdown.
