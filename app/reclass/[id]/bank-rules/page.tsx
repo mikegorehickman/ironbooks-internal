@@ -2,8 +2,22 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { WorkflowStepper } from "@/components/WorkflowStepper";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { fetchAllAccounts, getValidToken } from "@/lib/qbo";
 import { redirect } from "next/navigation";
 import { BankRulesFromReclassClient } from "./bank-rules-client";
+
+const PNL_TYPES_NORMALIZED = new Set([
+  "income",
+  "otherincome",
+  "expense",
+  "otherexpense",
+  "costofgoodssold",
+]);
+
+function isPnLAccountType(t: string | null | undefined): boolean {
+  if (!t) return false;
+  return PNL_TYPES_NORMALIZED.has(t.toLowerCase().replace(/\s+/g, ""));
+}
 
 export default async function BankRulesFromReclassPage({
   params,
@@ -36,11 +50,29 @@ export default async function BankRulesFromReclassPage({
 
   const { data: clientLink } = await service
     .from("client_links")
-    .select("client_name")
+    .select("client_name, qbo_realm_id")
     .eq("id", job.client_link_id)
     .single();
 
   const clientName = (clientLink as any)?.client_name || "Client";
+  const qboRealmId = (clientLink as any)?.qbo_realm_id;
+
+  // Fetch live P&L accounts so the bookkeeper can override any AI-picked target.
+  // Fail-soft: if QBO is unreachable, dropdowns get an empty list and the row
+  // shows the proposed account as a read-only label (current behavior).
+  let availablePnLAccounts: Array<{ id: string; name: string; type: string }> = [];
+  if (qboRealmId) {
+    try {
+      const accessToken = await getValidToken(job.client_link_id, service as any);
+      const allAccounts = await fetchAllAccounts(qboRealmId, accessToken);
+      availablePnLAccounts = allAccounts
+        .filter((a) => a.Active !== false && isPnLAccountType(a.AccountType))
+        .map((a) => ({ id: a.Id, name: a.Name, type: a.AccountType }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch (err: any) {
+      console.warn("[bank-rules] Could not fetch P&L accounts:", err.message);
+    }
+  }
 
   const { data: rows } = await service
     .from("reclassifications")
@@ -149,6 +181,7 @@ export default async function BankRulesFromReclassPage({
           clientLinkId={job.client_link_id}
           clientName={clientName}
           proposedRules={proposedRules}
+          availableAccounts={availablePnLAccounts}
         />
       </div>
     </AppShell>

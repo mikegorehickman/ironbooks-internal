@@ -7,10 +7,11 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json();
-  const { reclass_job_id, client_link_id, selected_vendors } = body as {
+  const { reclass_job_id, client_link_id, selected_vendors, overrides } = body as {
     reclass_job_id: string;
     client_link_id: string;
     selected_vendors: string[];
+    overrides?: Record<string, { id: string; name: string }>;
   };
 
   if (!reclass_job_id || !client_link_id || !selected_vendors?.length) {
@@ -108,12 +109,19 @@ export async function POST(request: Request) {
   for (const [vendorPattern, group] of groupMap.entries()) {
     if (!selectedSet.has(vendorPattern)) continue;
 
+    // Prefer the bookkeeper's override (set in the dropdown); fall back to
+    // the most-frequent AI-picked target.
     let bestTarget = { id: "", name: "" };
-    let bestCount = 0;
-    for (const t of group.targetCounts.values()) {
-      if (t.count > bestCount) {
-        bestCount = t.count;
-        bestTarget = { id: t.id, name: t.name };
+    const override = overrides?.[vendorPattern];
+    if (override?.name) {
+      bestTarget = { id: override.id || "", name: override.name };
+    } else {
+      let bestCount = 0;
+      for (const t of group.targetCounts.values()) {
+        if (t.count > bestCount) {
+          bestCount = t.count;
+          bestTarget = { id: t.id, name: t.name };
+        }
       }
     }
     if (!bestTarget.name) continue;

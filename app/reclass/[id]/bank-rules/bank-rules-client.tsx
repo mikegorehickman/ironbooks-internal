@@ -13,11 +13,18 @@ interface ProposedRule {
   totalAmount: number;
 }
 
+interface AvailableAccount {
+  id: string;
+  name: string;
+  type: string;
+}
+
 interface Props {
   reclassJobId: string;
   clientLinkId: string;
   clientName: string;
   proposedRules: ProposedRule[];
+  availableAccounts: AvailableAccount[];
 }
 
 export function BankRulesFromReclassClient({
@@ -25,13 +32,35 @@ export function BankRulesFromReclassClient({
   clientLinkId,
   clientName,
   proposedRules,
+  availableAccounts,
 }: Props) {
   const [selected, setSelected] = useState<Set<string>>(
     new Set(proposedRules.map((r) => r.vendorPattern))
   );
+  // Per-vendor account override map. Defaults to the AI-picked target;
+  // the bookkeeper can re-route a rule to any P&L account from the dropdown.
+  const [overrides, setOverrides] = useState<Map<string, { id: string; name: string }>>(
+    () => {
+      const initial = new Map<string, { id: string; name: string }>();
+      for (const r of proposedRules) {
+        initial.set(r.vendorPattern, { id: r.targetAccountId, name: r.targetAccountName });
+      }
+      return initial;
+    }
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<number | null>(null);
+
+  function setOverride(vendorPattern: string, accountId: string) {
+    const account = availableAccounts.find((a) => a.id === accountId);
+    if (!account) return;
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(vendorPattern, { id: account.id, name: account.name });
+      return next;
+    });
+  }
 
   function toggleAll(checked: boolean) {
     if (checked) {
@@ -57,6 +86,15 @@ export function BankRulesFromReclassClient({
     setSubmitting(true);
     setError("");
     try {
+      // Send only the overrides for SELECTED vendors. The API will use
+      // these to set target_account_name, falling back to the AI pick if
+      // a vendor isn't in the map (shouldn't happen, but safe).
+      const overridesPayload: Record<string, { id: string; name: string }> = {};
+      for (const vendorPattern of selected) {
+        const o = overrides.get(vendorPattern);
+        if (o) overridesPayload[vendorPattern] = o;
+      }
+
       const res = await fetch("/api/rules/from-reclass", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -64,6 +102,7 @@ export function BankRulesFromReclassClient({
           reclass_job_id: reclassJobId,
           client_link_id: clientLinkId,
           selected_vendors: Array.from(selected),
+          overrides: overridesPayload,
         }),
       });
       const data = await res.json();
@@ -189,9 +228,36 @@ export function BankRulesFromReclassClient({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-teal-lighter text-teal text-xs font-semibold">
-                      {rule.targetAccountName}
-                    </span>
+                    {availableAccounts.length > 0 ? (
+                      <select
+                        value={overrides.get(rule.vendorPattern)?.id || rule.targetAccountId}
+                        onChange={(e) => setOverride(rule.vendorPattern, e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        disabled={!isSelected}
+                        className={`text-xs font-semibold rounded-md border px-2 py-1 outline-none focus:ring-2 focus:ring-teal/40 ${
+                          isSelected
+                            ? "bg-teal-lighter text-teal border-teal/30 cursor-pointer"
+                            : "bg-gray-100 text-ink-slate border-gray-200 cursor-not-allowed"
+                        }`}
+                      >
+                        {/* If the AI-picked target isn't in the live P&L list,
+                            still render it so the row doesn't blank out. */}
+                        {!availableAccounts.find((a) => a.id === rule.targetAccountId) && (
+                          <option value={rule.targetAccountId}>
+                            {rule.targetAccountName}
+                          </option>
+                        )}
+                        {availableAccounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-teal-lighter text-teal text-xs font-semibold">
+                        {rule.targetAccountName}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right text-ink-slate">{rule.txCount}</td>
                   <td className="px-4 py-3 text-right text-ink-slate font-mono">
