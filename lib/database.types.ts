@@ -161,6 +161,11 @@ export type Database = {
           qbo_token_expires_at: string | null
           state_province: string | null
           status: Database["public"]["Enums"]["client_status"]
+          stripe_account_id: string | null
+          stripe_access_token: string | null
+          stripe_refresh_token: string | null
+          stripe_connected_at: string | null
+          stripe_connection_status: string | null
           updated_at: string | null
         }
         Insert: {
@@ -186,6 +191,11 @@ export type Database = {
           qbo_token_expires_at?: string | null
           state_province?: string | null
           status?: Database["public"]["Enums"]["client_status"]
+          stripe_account_id?: string | null
+          stripe_access_token?: string | null
+          stripe_refresh_token?: string | null
+          stripe_connected_at?: string | null
+          stripe_connection_status?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -211,7 +221,42 @@ export type Database = {
           qbo_token_expires_at?: string | null
           state_province?: string | null
           status?: Database["public"]["Enums"]["client_status"]
+          stripe_account_id?: string | null
+          stripe_access_token?: string | null
+          stripe_refresh_token?: string | null
+          stripe_connected_at?: string | null
+          stripe_connection_status?: string | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      stripe_connect_tokens: {
+        Row: {
+          client_link_id: string
+          created_at: string | null
+          created_by: string
+          expires_at: string
+          id: string
+          token: string
+          used_at: string | null
+        }
+        Insert: {
+          client_link_id: string
+          created_at?: string | null
+          created_by: string
+          expires_at: string
+          id?: string
+          token: string
+          used_at?: string | null
+        }
+        Update: {
+          client_link_id?: string
+          created_at?: string | null
+          created_by?: string
+          expires_at?: string
+          id?: string
+          token?: string
+          used_at?: string | null
         }
         Relationships: []
       }

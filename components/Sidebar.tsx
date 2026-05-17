@@ -9,6 +9,7 @@ import {
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
 import type { Database } from "@/lib/database.types";
+import { StripeConnectModal } from "./StripeConnectModal";
 
 const standardItems = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
@@ -42,6 +43,7 @@ export function Sidebar() {
   const [userName, setUserName] = useState<string>("");
   const [userRole, setUserRole] = useState<string>("");
   const [flaggedCount, setFlaggedCount] = useState<number>(0);
+  const [stripeModalOpen, setStripeModalOpen] = useState(false);
 
   // Advanced section is collapsed by default; auto-open if user lands on one of its routes
   const isOnAdvancedRoute = advancedItems.some((i) => pathname.startsWith(i.href));
@@ -179,7 +181,21 @@ export function Sidebar() {
         </div>
       </nav>
 
-      <div className="px-3 py-4 border-t border-white/10">
+      {/* Stripe Connect Link — purple stylized button above the account block */}
+      <div className="px-3 pt-3">
+        <button
+          onClick={() => setStripeModalOpen(true)}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider text-white shadow-md transition-all hover:scale-[1.02]"
+          style={{
+            background: "linear-gradient(135deg, #635BFF 0%, #7C3AED 100%)",
+          }}
+        >
+          <CreditCard size={14} />
+          Stripe Connect Link
+        </button>
+      </div>
+
+      <div className="px-3 py-4 border-t border-white/10 mt-2">
         <div className="flex items-center gap-3 px-2 py-2 rounded-lg bg-white/5">
           <div className="rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 w-8 h-8 bg-teal">
             {userName.charAt(0) || "?"}
@@ -197,6 +213,7 @@ export function Sidebar() {
           </button>
         </div>
       </div>
+      {stripeModalOpen && <StripeConnectModal onClose={() => setStripeModalOpen(false)} />}
     </aside>
   );
 }
