@@ -405,16 +405,34 @@ export async function reclassifyTransactionLines(
     ? existingMemo
     : (existingMemo ? existingMemo + memoAppendDelim : "") + params.auditMemo;
 
-  // Step 4: Strip any line that has AccountBasedExpenseLineDetail but no valid AccountRef.
-  // QBO sometimes returns these for bank-feed or legacy transactions; sending them back
-  // triggers error 2020 ("AccountRef is missing"). Lines we updated always have a valid
-  // AccountRef set above, so this only drops externally-malformed pass-through lines.
-  const safeLines = updatedLines.filter((line: any) => {
-    if (line.DetailType === "AccountBasedExpenseLineDetail") {
-      return !!(line.AccountBasedExpenseLineDetail?.AccountRef?.value);
-    }
-    return true;
-  });
+  // Step 4: Sanitize lines.
+  // QBO sometimes returns lines with AccountBasedExpenseLineDetail present but no valid
+  // AccountRef (bank-feed lines, legacy data, or lines with a different DetailType that
+  // still carry the field). Sending these back triggers error 2020 regardless of DetailType.
+  // - If DetailType IS AccountBasedExpenseLineDetail and AccountRef is invalid: drop the line.
+  // - If DetailType is something else but AccountBasedExpenseLineDetail is invalid: strip the field.
+  // Lines we updated above always have a valid AccountRef, so they are never affected here.
+  const safeLines = updatedLines
+    .map((line: any) => {
+      const detail = line.AccountBasedExpenseLineDetail;
+      const hasInvalidDetail = detail !== undefined && !detail?.AccountRef?.value;
+      if (!hasInvalidDetail) return line;
+
+      if (line.DetailType === "AccountBasedExpenseLineDetail") {
+        // Log so we can diagnose which lines are being dropped
+        console.warn(
+          `[qbo-reclass] dropping malformed line ${line.Id ?? "(no id)"} on ${params.txType}/${params.txId}: AccountBasedExpenseLineDetail present but AccountRef missing`
+        );
+        return null; // drop entirely
+      }
+      // For other DetailTypes, strip only the bad property and keep the line
+      console.warn(
+        `[qbo-reclass] stripping AccountBasedExpenseLineDetail from ${line.DetailType} line ${line.Id ?? "(no id)"} on ${params.txType}/${params.txId}`
+      );
+      const { AccountBasedExpenseLineDetail, ...rest } = line;
+      return rest;
+    })
+    .filter(Boolean);
 
   // Step 5: Full update via POST
   const updatePayload = {
@@ -424,15 +442,30 @@ export async function reclassifyTransactionLines(
     sparse: false,
   };
 
-  const data: any = await qboRequest(
-    realmId,
-    accessToken,
-    `/${params.txType.toLowerCase()}?operation=update`,
-    {
-      method: "POST",
-      body: JSON.stringify(updatePayload),
-    }
-  );
+  let data: any;
+  try {
+    data = await qboRequest(
+      realmId,
+      accessToken,
+      `/${params.txType.toLowerCase()}?operation=update`,
+      {
+        method: "POST",
+        body: JSON.stringify(updatePayload),
+      }
+    );
+  } catch (err: any) {
+    // Log the sanitized line structure so we can diagnose persistent failures
+    console.error(
+      `[qbo-reclass] update failed for ${params.txType}/${params.txId}. safeLines:`,
+      JSON.stringify(safeLines.map((l: any) => ({
+        Id: l.Id,
+        DetailType: l.DetailType,
+        hasAccountDetail: !!l.AccountBasedExpenseLineDetail,
+        accountRef: l.AccountBasedExpenseLineDetail?.AccountRef,
+      })))
+    );
+    throw err;
+  }
 
   return data[params.txType];
 }
