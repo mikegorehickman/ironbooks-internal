@@ -916,41 +916,84 @@ function ClientEmailModal({
   const [copyError, setCopyError] = useState<string>("");
 
   // Build the HTML the bookkeeper pastes into Double's rich-text editor.
-  // Most rich-text editors handle <table> well, including Double's portal.
+  // Branded with the Ironbooks palette (teal + navy + slate). Most rich-text
+  // editors handle <table> + inline styles well, including Double's portal.
   const html = useMemo(() => {
+    const BRAND = {
+      teal: "#2D7A75",
+      tealDark: "#1F5D58",
+      tealLight: "#E8F2F0",
+      tealLighter: "#F4F9F8",
+      navy: "#0F1F2E",
+      slate: "#475569",
+      lightSlate: "#94A3B8",
+      border: "#CBD5E1",
+      white: "#FFFFFF",
+    };
     const introHtml = intro
       .split("\n\n")
-      .map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`)
+      .map((p) => `<p style="margin:0 0 12px 0;color:${BRAND.navy};line-height:1.55;">${escapeHtml(p).replace(/\n/g, "<br>")}</p>`)
       .join("");
     const outroHtml = outro
       .split("\n\n")
-      .map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`)
+      .map((p) => `<p style="margin:0 0 12px 0;color:${BRAND.navy};line-height:1.55;">${escapeHtml(p).replace(/\n/g, "<br>")}</p>`)
       .join("");
     const tableRows = txns
       .map(
-        (t) => `
-        <tr>
-          <td style="border:1px solid #cbd5e1;padding:6px 10px;">${escapeHtml(t.date)}</td>
-          <td style="border:1px solid #cbd5e1;padding:6px 10px;">${escapeHtml(t.vendor)}</td>
-          <td style="border:1px solid #cbd5e1;padding:6px 10px;text-align:right;">$${fmtMoney(t.amount)}</td>
-          <td style="border:1px solid #cbd5e1;padding:6px 10px;">&nbsp;</td>
-        </tr>`
+        (t, i) => {
+          const bg = i % 2 === 0 ? BRAND.white : BRAND.tealLighter;
+          return `
+        <tr style="background:${bg};">
+          <td style="border:1px solid ${BRAND.border};padding:8px 12px;color:${BRAND.slate};font-variant-numeric:tabular-nums;">${escapeHtml(t.date)}</td>
+          <td style="border:1px solid ${BRAND.border};padding:8px 12px;color:${BRAND.navy};font-weight:500;">${escapeHtml(t.vendor)}</td>
+          <td style="border:1px solid ${BRAND.border};padding:8px 12px;text-align:right;color:${BRAND.navy};font-weight:600;font-variant-numeric:tabular-nums;">$${fmtMoney(t.amount)}</td>
+          <td style="border:1px solid ${BRAND.border};padding:8px 12px;background:${BRAND.white};">&nbsp;</td>
+        </tr>`;
+        }
       )
       .join("");
-    return `${introHtml}
-<table style="border-collapse:collapse;width:100%;border:1px solid #cbd5e1;font-family:sans-serif;font-size:13px;">
-  <thead>
-    <tr style="background:#f1f5f9;">
-      <th style="border:1px solid #cbd5e1;padding:6px 10px;text-align:left;">Date</th>
-      <th style="border:1px solid #cbd5e1;padding:6px 10px;text-align:left;">Sender / Vendor</th>
-      <th style="border:1px solid #cbd5e1;padding:6px 10px;text-align:right;">Amount</th>
-      <th style="border:1px solid #cbd5e1;padding:6px 10px;text-align:left;">What was this for?</th>
-    </tr>
-  </thead>
-  <tbody>${tableRows}
-  </tbody>
-</table>
-${outroHtml}`;
+
+    return `<div style="font-family:'Figtree','Helvetica Neue',Helvetica,Arial,sans-serif;color:${BRAND.navy};max-width:720px;margin:0 auto;background:${BRAND.white};">
+  <!-- Brand header bar -->
+  <div style="background:${BRAND.navy};color:${BRAND.white};padding:18px 22px;border-radius:10px 10px 0 0;display:flex;align-items:center;">
+    <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+      <tr>
+        <td style="background:${BRAND.teal};color:${BRAND.white};font-weight:700;font-size:16px;width:38px;height:38px;text-align:center;border-radius:8px;font-family:'Figtree','Helvetica Neue',sans-serif;">IB</td>
+        <td style="padding-left:12px;color:${BRAND.white};">
+          <div style="font-size:18px;font-weight:700;letter-spacing:-0.01em;line-height:1.1;">Ironbooks</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:2px;letter-spacing:0.06em;text-transform:uppercase;">Bookkeeping &middot; Cleanup</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Body -->
+  <div style="border:1px solid ${BRAND.border};border-top:none;padding:24px 22px;border-radius:0 0 10px 10px;background:${BRAND.white};">
+    ${introHtml}
+
+    <!-- Branded transaction table -->
+    <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;border:1px solid ${BRAND.border};font-family:'Figtree','Helvetica Neue',sans-serif;font-size:13px;margin:8px 0 18px 0;">
+      <thead>
+        <tr style="background:${BRAND.teal};">
+          <th style="border:1px solid ${BRAND.tealDark};padding:10px 12px;text-align:left;color:${BRAND.white};font-weight:600;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;">Date</th>
+          <th style="border:1px solid ${BRAND.tealDark};padding:10px 12px;text-align:left;color:${BRAND.white};font-weight:600;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;">Sender / Vendor</th>
+          <th style="border:1px solid ${BRAND.tealDark};padding:10px 12px;text-align:right;color:${BRAND.white};font-weight:600;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;">Amount</th>
+          <th style="border:1px solid ${BRAND.tealDark};padding:10px 12px;text-align:left;color:${BRAND.white};font-weight:600;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;">What was this for?</th>
+        </tr>
+      </thead>
+      <tbody>${tableRows}
+      </tbody>
+    </table>
+
+    ${outroHtml}
+
+    <!-- Branded signature divider -->
+    <div style="border-top:2px solid ${BRAND.teal};margin:24px 0 12px 0;width:60px;"></div>
+    <div style="color:${BRAND.lightSlate};font-size:11px;line-height:1.5;">
+      This message was prepared with <span style="color:${BRAND.teal};font-weight:600;">Ironbooks</span> as part of your bookkeeping cleanup. Reply directly to this email with your answers in the table above.
+    </div>
+  </div>
+</div>`;
   }, [intro, outro, txns]);
 
   // Plain-text fallback for paste destinations that don't take HTML
@@ -1071,29 +1114,29 @@ ${outroHtml}`;
             />
           </div>
 
-          {/* Table preview */}
+          {/* Branded table preview — matches what the client will see */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-ink-slate mb-1">
-              Transaction Table ({txns.length} rows)
+              Transaction Table Preview ({txns.length} rows)
             </label>
             <div className="rounded-lg border border-gray-200 overflow-hidden">
               <div className="overflow-x-auto max-h-72">
-                <table className="w-full text-xs">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-semibold text-ink-slate border-b border-gray-200">Date</th>
-                      <th className="text-left px-3 py-2 font-semibold text-ink-slate border-b border-gray-200">Sender / Vendor</th>
-                      <th className="text-right px-3 py-2 font-semibold text-ink-slate border-b border-gray-200">Amount</th>
-                      <th className="text-left px-3 py-2 font-semibold text-ink-slate border-b border-gray-200">What was this for?</th>
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr style={{ background: "#2D7A75" }}>
+                      <th className="text-left px-3 py-2 text-white font-semibold uppercase tracking-wider text-[10px]">Date</th>
+                      <th className="text-left px-3 py-2 text-white font-semibold uppercase tracking-wider text-[10px]">Sender / Vendor</th>
+                      <th className="text-right px-3 py-2 text-white font-semibold uppercase tracking-wider text-[10px]">Amount</th>
+                      <th className="text-left px-3 py-2 text-white font-semibold uppercase tracking-wider text-[10px]">What was this for?</th>
                     </tr>
                   </thead>
                   <tbody>
                     {txns.map((t, i) => (
-                      <tr key={i} className="border-b border-gray-100 last:border-0">
-                        <td className="px-3 py-1.5 text-ink-slate">{t.date}</td>
-                        <td className="px-3 py-1.5 text-navy">{t.vendor}</td>
-                        <td className="px-3 py-1.5 text-right font-mono text-navy">${fmtMoney(t.amount)}</td>
-                        <td className="px-3 py-1.5 text-ink-light italic">(client fills in)</td>
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#FFFFFF" : "#F4F9F8" }}>
+                        <td className="px-3 py-1.5 text-ink-slate border border-gray-200">{t.date}</td>
+                        <td className="px-3 py-1.5 text-navy border border-gray-200 font-medium">{t.vendor}</td>
+                        <td className="px-3 py-1.5 text-right font-semibold text-navy border border-gray-200">${fmtMoney(t.amount)}</td>
+                        <td className="px-3 py-1.5 text-ink-light italic border border-gray-200">(client fills in)</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1101,7 +1144,7 @@ ${outroHtml}`;
               </div>
             </div>
             <p className="text-[11px] text-ink-light mt-1.5">
-              This table is auto-built from the {rows.length} ask-client transactions and renders as HTML when pasted.
+              When copied, the email gets a branded Ironbooks header bar, this teal-styled table, and a brand-line footer.
             </p>
           </div>
 
