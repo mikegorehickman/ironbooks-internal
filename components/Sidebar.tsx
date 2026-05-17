@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Home, Sparkles, Flag, Users, Settings, LogOut, BookOpen, Clock,
+  Home, Sparkles, Users, Settings, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
@@ -16,11 +16,6 @@ const standardItems = [
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/templates", label: "Master COA", icon: BookOpen },
   { href: "/history", label: "Job History", icon: Clock },
-];
-
-// Visible only to admin + lead — junior bookkeepers see their pending items on the dashboard instead
-const seniorItems = [
-  { href: "/flagged", label: "Flagged Queue", icon: Flag, showBadge: true },
 ];
 
 const advancedItems = [
@@ -42,7 +37,6 @@ export function Sidebar() {
   const pathname = usePathname();
   const [userName, setUserName] = useState<string>("");
   const [userRole, setUserRole] = useState<string>("");
-  const [flaggedCount, setFlaggedCount] = useState<number>(0);
   const [stripeModalOpen, setStripeModalOpen] = useState(false);
 
   // Advanced section is collapsed by default; auto-open if user lands on one of its routes
@@ -60,10 +54,11 @@ export function Sidebar() {
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (data.user) {
-        const [{ data: profile }, { data: stats }] = await Promise.all([
-          supabase.from("users").select("full_name, role").eq("id", data.user.id).single(),
-          supabase.from("dashboard_stats").select("flagged_for_lisa").single(),
-        ]);
+        const { data: profile } = await supabase
+          .from("users")
+          .select("full_name, role")
+          .eq("id", data.user.id)
+          .single();
 
         if (profile) {
           setUserName(profile.full_name);
@@ -75,9 +70,6 @@ export function Sidebar() {
             .eq("id", data.user.id)
             .then(() => {});
         }
-        if (stats?.flagged_for_lisa) {
-          setFlaggedCount(stats.flagged_for_lisa);
-        }
       }
     });
   }, []);
@@ -88,7 +80,6 @@ export function Sidebar() {
   }
 
   const isAdmin = userRole === "admin";
-  const isSenior = userRole === "admin" || userRole === "lead";
 
   // Active state for the primary CTA — match any /jobs/* route or in-flight workflow pages
   const cleanupActive =
@@ -128,24 +119,8 @@ export function Sidebar() {
         </Link>
 
         {standardItems.map((item) => (
-          <NavItem
-            key={item.href}
-            item={item}
-            pathname={pathname}
-            badgeCount={item.showBadge ? flaggedCount : undefined}
-          />
+          <NavItem key={item.href} item={item} pathname={pathname} />
         ))}
-
-        {/* Senior-only items — Flagged Queue */}
-        {isSenior &&
-          seniorItems.map((item) => (
-            <NavItem
-              key={item.href}
-              item={item}
-              pathname={pathname}
-              badgeCount={item.showBadge ? flaggedCount : undefined}
-            />
-          ))}
 
         {/* ADVANCED — collapsed by default */}
         <button
@@ -221,17 +196,14 @@ export function Sidebar() {
 function NavItem({
   item,
   pathname,
-  badgeCount,
   dim,
 }: {
-  item: { href: string; label: string; icon: any; highlight?: boolean; showBadge?: boolean };
+  item: { href: string; label: string; icon: any };
   pathname: string;
-  badgeCount?: number;
   dim?: boolean;
 }) {
   const active = pathname === item.href || pathname.startsWith(item.href + "/");
   const Icon = item.icon;
-  const showCount = badgeCount !== undefined && badgeCount > 0;
 
   return (
     <Link
@@ -246,11 +218,6 @@ function NavItem({
     >
       <Icon size={dim ? 14 : 17} />
       <span className={dim ? "text-[13px]" : ""}>{item.label}</span>
-      {showCount && (
-        <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-yellow-500 text-white">
-          {badgeCount}
-        </span>
-      )}
     </Link>
   );
 }
