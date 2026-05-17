@@ -113,14 +113,20 @@ export function ReclassReview({
   const isAdmin = userRole === "admin";
   const isLeadOrAdmin = userRole === "admin" || userRole === "lead";
 
-  // Partition rows by tab.
+  // Partition rows by tab. The rules:
   //
-  // Auto-approved tab uses CURRENT decision (it's the destination — items move HERE).
-  //
-  // All other tabs use the ORIGINAL decision snapshot — so a row that started
-  // in Needs Review STAYS visible there even after the bookkeeper approves it.
-  // The approved row will appear in BOTH its original tab (with a "Moved" badge)
-  // AND in Auto-Approved. This prevents the disorienting "rows vanishing" effect.
+  // - Auto-Approved: any row whose CURRENT decision is auto_approve/approved.
+  // - Skipped:       any row whose CURRENT decision is skip/rejected.
+  // - Needs Review:  rows currently in needs_review, PLUS rows whose ORIGINAL
+  //                  decision was needs_review and are now approved (shown
+  //                  with a "Moved to Auto-Approved" badge so the bookkeeper
+  //                  doesn't get disoriented by rows vanishing on approve).
+  // - Flagged:       same rule, for flagged origin.
+  // - Ask Client:    ONLY rows whose CURRENT decision is ask_client. Moving
+  //                  to/from ask_client is a deliberate workflow gesture —
+  //                  rows should leave the tab the moment the bookkeeper
+  //                  picks a category (which flips them to approved) or
+  //                  reclassifies them. This keeps the email template clean.
   const partitioned = useMemo(() => {
     const auto: Reclassification[] = [];
     const review: Reclassification[] = [];
@@ -129,18 +135,31 @@ export function ReclassReview({
     const skipped: Reclassification[] = [];
 
     for (const r of rows) {
-      // Always place in Auto-Approved if currently approved
-      if (r.decision === "auto_approve" || r.decision === "approved") {
-        auto.push(r);
-      } else if (r.decision === "skip" || r.decision === "rejected") {
-        skipped.push(r);
+      const isApprovedNow = r.decision === "auto_approve" || r.decision === "approved";
+      if (isApprovedNow) auto.push(r);
+      if (r.decision === "skip" || r.decision === "rejected") skipped.push(r);
+
+      const orig = originalDecisions.get(r.id) || r.decision;
+
+      // Needs Review: current OR (originally + now approved for the badge)
+      if (r.decision === "needs_review") {
+        review.push(r);
+      } else if (orig === "needs_review" && isApprovedNow) {
+        review.push(r);
       }
 
-      // Then place in the original-tab bucket (regardless of current decision)
-      const orig = originalDecisions.get(r.id) || r.decision;
-      if (orig === "needs_review") review.push(r);
-      else if (orig === "flagged") flagged.push(r);
-      else if (orig === "ask_client") ask.push(r);
+      // Flagged: current OR (originally + now approved)
+      if (r.decision === "flagged") {
+        flagged.push(r);
+      } else if (orig === "flagged" && isApprovedNow) {
+        flagged.push(r);
+      }
+
+      // Ask Client: ONLY current decision. No badge persistence — rows leave
+      // immediately when the bookkeeper picks a category or moves them.
+      if (r.decision === "ask_client") {
+        ask.push(r);
+      }
     }
 
     return { auto, review, flagged, ask, skipped };
