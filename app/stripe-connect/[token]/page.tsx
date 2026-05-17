@@ -1,6 +1,7 @@
 import { createServiceSupabase } from "@/lib/supabase";
 import { buildStripeAuthorizeUrl } from "@/lib/stripe-oauth";
 import { LandingClient } from "./landing-client";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,21 @@ export default async function StripeConnectLandingPage({ params, searchParams }:
     };
   }
 
-  // Pre-compute the Stripe authorize URL (token = state param)
+  // If the token is valid and there's no callback status yet, redirect straight
+  // to Stripe's OAuth screen — skip the intermediate landing page entirely.
+  if (validity.state === "valid" && !status) {
+    try {
+      const authorizeUrl = buildStripeAuthorizeUrl({
+        state: token,
+        suggestedCompany: validity.clientName,
+      });
+      redirect(authorizeUrl);
+    } catch {
+      // STRIPE_CONNECT_CLIENT_ID not configured — fall through to error UI
+    }
+  }
+
+  // For callback states (success/error/expired/denied) or config errors, show the UI
   let authorizeUrl: string | null = null;
   if (validity.state === "valid") {
     try {
@@ -67,7 +82,6 @@ export default async function StripeConnectLandingPage({ params, searchParams }:
         suggestedCompany: validity.clientName,
       });
     } catch {
-      // STRIPE_CONNECT_CLIENT_ID not configured — landing page will show error
       authorizeUrl = null;
     }
   }
