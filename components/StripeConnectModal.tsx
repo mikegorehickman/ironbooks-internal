@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { createBrowserClient } from "@supabase/ssr";
 import {
   X, Loader2, CreditCard, Copy, CheckCircle2, Search, Send, Mail, Unplug,
@@ -33,6 +34,30 @@ export function StripeConnectModal({
   const [disconnecting, setDisconnecting] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [disconnectMessage, setDisconnectMessage] = useState<string>("");
+  const [mounted, setMounted] = useState(false);
+
+  // Portal target only exists on the client — wait for hydration before rendering
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Lock body scroll while the modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // Close on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const supabase = createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -137,9 +162,18 @@ export function StripeConnectModal({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+  if (!mounted) return null;
+
+  const modalContent = (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(15, 31, 46, 0.6)", backdropFilter: "blur(4px)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col relative"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-start justify-between">
           <div>
@@ -360,6 +394,8 @@ export function StripeConnectModal({
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }
 
 // ─── Branded email content for clipboard ───
