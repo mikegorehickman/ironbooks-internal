@@ -2,67 +2,218 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Plus, ArrowRight, MoreVertical, Zap, CheckCircle2, Flag, TrendingUp, FilePlus2, Shuffle, CreditCard, Receipt, AlertCircle } from "lucide-react";
+import {
+  Plus,
+  ArrowRight,
+  Flag,
+  CheckCircle2,
+  Zap,
+  AlertTriangle,
+  Timer,
+  Wifi,
+} from "lucide-react";
+
+export const dynamic = "force-dynamic";
+
+const ACTIVE_STATUSES = ["draft", "in_review", "pending_lisa", "approved", "executing"];
+
+const STATUS_LABEL: Record<string, string> = {
+  draft: "Draft",
+  in_review: "In Review",
+  pending_lisa: "Flagged for Senior",
+  approved: "Ready to Execute",
+  executing: "Executing",
+};
+
+function daysBetween(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+}
+
+function daysUntil(iso: string): number {
+  return Math.floor((new Date(iso).getTime() - Date.now()) / 86400000);
+}
 
 export default async function DashboardPage() {
   const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  const { data: stats } = await supabase.from("dashboard_stats").select("*").single();
-  const { data: jobs } = await supabase.from("active_jobs_view").select("*").limit(10);
+  const service = createServiceSupabase();
 
-  // Count this user's items still flagged across all 3 sources (only their own jobs).
-  // Senior bookkeepers see this too, but it's most relevant to juniors who don't have
-  // access to /flagged. Service client used so we can aggregate without RLS friction.
-  let myPendingReview = { coa: 0, reclass: 0, stripe: 0, total: 0, jobs: [] as any[] };
-  if (user) {
-    const service = createServiceSupabase();
-    const [coaR, reclassR, stripeR] = await Promise.all([
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
+  const ninetyDaysAgo = new Date(now.getTime() - 90 * 86400000).toISOString();
+  const fourteenDaysFromNow = new Date(now.getTime() + 14 * 86400000).toISOString();
+
+  const [
+    profileRes,
+    clientsRes,
+    qboExpiryRes,
+    allCoaRes,
+    allReclassRes,
+    completedMonthRes,
+    avgDurationRes,
+    bookkeepersRes,
+    stripeCountRes,
+  ] = await Promise.all([
+    service.from("users").select("role, full_name").eq("id", user!.id).single(),
+
+    service
+      .from("client_list_view")
+      .select("id, client_name, status, is_active, last_cleanup_at")
+      .eq("is_active", true),
+
+    service
+      .from("client_links")
+      .select("id, client_name, qbo_token_expires_at")
+      .eq("is_active", true)
+      .not("qbo_token_expires_at", "is", null)
+      .lte("qbo_token_expires_at", fourteenDaysFromNow),
+
+    service
+      .from("coa_jobs")
+      .select("id, status, created_at, updated_at, bookkeeper_id, client_links!client_link_id(client_name)")
+      .in("status", ACTIVE_STATUSES),
+
+    service
+      .from("reclass_jobs")
+      .select("id, status, created_at, updated_at, bookkeeper_id, client_links!client_link_id(client_name)")
+      .in("status", ACTIVE_STATUSES),
+
+    service
+      .from("coa_jobs")
+      .select("id, bookkeeper_id, execution_duration_seconds")
+      .eq("status", "complete")
+      .gte("updated_at", startOfMonth),
+
+    service
+      .from("coa_jobs")
+      .select("execution_duration_seconds")
+      .eq("status", "complete")
+      .not("execution_duration_seconds", "is", null)
+      .gte("updated_at", ninetyDaysAgo),
+
+    service
+      .from("users")
+      .select("id, full_name")
+      .eq("is_active", true)
+      .in("role", ["admin", "lead", "bookkeeper"])
+      .order("full_name"),
+
+    service
+      .from("client_links")
+      .select("id", { count: "exact", head: true })
+      .eq("stripe_connection_status", "connected")
+      .eq("is_active", true),
+  ]);
+
+  const profile = profileRes.data;
+  const isSenior = profile && ["admin", "lead"].includes(profile.role);
+  const isAdmin = profile?.role === "admin";
+
+  // Flagged counts — senior only, second round-trip is fine since it's conditional
+  let flaggedCounts = { coa: 0, reclass: 0, stripe: 0 };
+  if (isSenior) {
+    const [coaFlagRes, reclassFlagRes, stripeFlagRes] = await Promise.all([
       service
         .from("coa_actions")
-        .select("id, job_id, coa_jobs!inner(id, bookkeeper_id, client_links(client_name))")
+        .select("id", { count: "exact", head: true })
         .eq("action", "flag")
-        .eq("executed", false)
-        .eq("coa_jobs.bookkeeper_id", user.id),
+        .eq("executed", false),
       service
         .from("reclassifications")
-        .select("id, reclass_job_id, reclass_jobs!reclass_job_id!inner(id, bookkeeper_id, client_links(client_name))")
-        .eq("decision", "flagged")
-        .eq("reclass_jobs.bookkeeper_id", user.id)
-        .limit(500),
+        .select("id", { count: "exact", head: true })
+        .eq("decision", "flagged"),
       service
         .from("stripe_recon_matches")
-        .select("id, job_id, stripe_recon_jobs!inner(id, bookkeeper_id, client_links(client_name))")
+        .select("id", { count: "exact", head: true })
         .eq("decision", "flagged")
-        .eq("executed", false)
-        .eq("stripe_recon_jobs.bookkeeper_id", user.id),
+        .eq("executed", false),
     ]);
-    const byJob = new Map<string, { client_name: string; source: string; count: number }>();
-    function bump(jobId: string, clientName: string, source: string) {
-      const k = `${source}::${jobId}`;
-      if (!byJob.has(k)) byJob.set(k, { client_name: clientName, source, count: 0 });
-      byJob.get(k)!.count++;
-    }
-    for (const r of coaR.data || []) {
-      const j = (r as any).coa_jobs;
-      if (j) bump(j.id, j.client_links?.client_name || "?", "COA Cleanup");
-    }
-    for (const r of reclassR.data || []) {
-      const j = (r as any).reclass_jobs;
-      if (j) bump(j.id, j.client_links?.client_name || "?", "Reclass");
-    }
-    for (const r of stripeR.data || []) {
-      const j = (r as any).stripe_recon_jobs;
-      if (j) bump(j.id, j.client_links?.client_name || "?", "Stripe Recon");
-    }
-    myPendingReview = {
-      coa: coaR.data?.length || 0,
-      reclass: reclassR.data?.length || 0,
-      stripe: stripeR.data?.length || 0,
-      total: (coaR.data?.length || 0) + (reclassR.data?.length || 0) + (stripeR.data?.length || 0),
-      jobs: Array.from(byJob.values()),
+    flaggedCounts = {
+      coa: coaFlagRes.count || 0,
+      reclass: reclassFlagRes.count || 0,
+      stripe: stripeFlagRes.count || 0,
     };
   }
+
+  // ─── Derive everything in JS ───
+
+  const bookkeepers = bookkeepersRes.data || [];
+  const bkById = new Map(bookkeepers.map((b) => [b.id, b.full_name]));
+
+  const allCoaJobs = (allCoaRes.data || []).map((j) => ({
+    ...j,
+    jobType: "coa" as const,
+    href: `/jobs/${j.id}/review`,
+    clientName: (j as any).client_links?.client_name || "Unknown",
+  }));
+  const allReclassJobs = (allReclassRes.data || []).map((j) => ({
+    ...j,
+    jobType: "reclass" as const,
+    href: `/reclass/${j.id}/review`,
+    clientName: (j as any).client_links?.client_name || "Unknown",
+  }));
+  const allActiveJobs = [...allCoaJobs, ...allReclassJobs];
+
+  const myJobs = allActiveJobs.filter((j) => j.bookkeeper_id === user!.id);
+
+  const stalledJobs = allActiveJobs.filter((j) => {
+    const ref = j.updated_at || j.created_at;
+    return ref && ref < sevenDaysAgo;
+  });
+
+  const clients = clientsRes.data || [];
+  const clientsNeedingCleanup = clients
+    .filter((c) => {
+      if (c.status === "churned" || c.status === "onboarding") return false;
+      if (!c.last_cleanup_at) return true;
+      return c.last_cleanup_at < ninetyDaysAgo;
+    })
+    .slice(0, 12);
+
+  const qboExpiring = (qboExpiryRes.data || []).sort(
+    (a, b) => new Date(a.qbo_token_expires_at!).getTime() - new Date(b.qbo_token_expires_at!).getTime()
+  );
+
+  // Stats
+  const activeJobsCount = allActiveJobs.length;
+  const completedThisMonth = (completedMonthRes.data || []).length;
+  const durations = (avgDurationRes.data || [])
+    .map((r) => r.execution_duration_seconds)
+    .filter(Boolean) as number[];
+  const avgDays =
+    durations.length > 0
+      ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length / 86400)
+      : null;
+  const stripeConnected = stripeCountRes.count || 0;
+
+  // Team workload — only bookkeepers with any activity
+  const completedByBk = new Map<string, number>();
+  for (const j of completedMonthRes.data || []) {
+    completedByBk.set(j.bookkeeper_id, (completedByBk.get(j.bookkeeper_id) || 0) + 1);
+  }
+  const teamWorkload = bookkeepers
+    .map((bk) => {
+      const bkJobs = allActiveJobs.filter((j) => j.bookkeeper_id === bk.id);
+      const stalled = bkJobs.filter((j) => {
+        const ref = j.updated_at || j.created_at;
+        return ref && ref < sevenDaysAgo;
+      }).length;
+      return {
+        ...bk,
+        inFlight: bkJobs.length,
+        stalled,
+        completedMonth: completedByBk.get(bk.id) || 0,
+      };
+    })
+    .filter((bk) => bk.inFlight > 0 || bk.completedMonth > 0);
+
+  const totalFlagged = flaggedCounts.coa + flaggedCounts.reclass + flaggedCounts.stripe;
+  const hasAttentionItems =
+    qboExpiring.length > 0 || stalledJobs.length > 0 || clientsNeedingCleanup.length > 0;
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -70,46 +221,42 @@ export default async function DashboardPage() {
     day: "numeric",
   });
 
-  const statCards = [
-    { label: "Active Jobs", value: stats?.active_jobs ?? 0, color: "#2D7A75", icon: Zap },
-    { label: "Completed This Week", value: stats?.completed_this_week ?? 0, color: "#10B981", icon: CheckCircle2 },
-    { label: "Flagged for Lisa", value: stats?.flagged_for_lisa ?? 0, color: "#F59E0B", icon: Flag },
-    {
-      label: "Avg Duration",
-      value: stats?.avg_duration_seconds ? `${Math.round(stats.avg_duration_seconds / 60)}m` : "—",
-      color: "#0F1F2E",
-      icon: TrendingUp,
-    },
-  ];
-
   return (
     <AppShell>
       <TopBar
         title="Dashboard"
-        subtitle={`${today} — Welcome back`}
+        subtitle={today}
         actions={
           <Link
             href="/jobs/new"
-            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-4 py-2 rounded-lg"
           >
             <Plus size={16} />
-            New Cleanup Job
+            New Cleanup
           </Link>
         }
       />
 
-      <div className="px-8 py-6">
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-8">
-          {statCards.map((s) => {
+      <div className="px-8 py-6 space-y-6">
+
+        {/* ─── Stats strip ─── */}
+        <div className="grid grid-cols-4 gap-4">
+          {[
+            { label: "Active Jobs", value: activeJobsCount, icon: Zap, color: "#2D7A75" },
+            { label: "Completed This Month", value: completedThisMonth, icon: CheckCircle2, color: "#10B981" },
+            {
+              label: "Avg Days Per Cleanup",
+              value: avgDays !== null ? `${avgDays}d` : "—",
+              icon: Timer,
+              color: "#0891B2",
+            },
+            { label: "Stripe Connected", value: stripeConnected, icon: Wifi, color: "#7C3AED" },
+          ].map((s) => {
             const Icon = s.icon;
             return (
               <div key={s.label} className="p-5 rounded-xl bg-white border border-gray-200">
                 <div className="flex items-start justify-between mb-3">
-                  <div
-                    className="p-2 rounded-lg"
-                    style={{ backgroundColor: `${s.color}15` }}
-                  >
+                  <div className="p-2 rounded-lg" style={{ backgroundColor: `${s.color}15` }}>
                     <Icon size={18} style={{ color: s.color }} />
                   </div>
                 </div>
@@ -120,170 +267,276 @@ export default async function DashboardPage() {
           })}
         </div>
 
-        {/* Awaiting senior review — only renders when there's something to show */}
-        {myPendingReview.total > 0 && (
-          <div className="rounded-xl bg-amber-50 border border-amber-200 mb-6 overflow-hidden">
-            <div className="px-5 py-4 border-b border-amber-200 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg flex items-center justify-center w-9 h-9 bg-amber-100">
-                  <AlertCircle size={18} className="text-amber-600" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-navy">Your items awaiting senior review</h2>
-                  <p className="text-xs text-ink-slate mt-0.5">
-                    {myPendingReview.total} item{myPendingReview.total === 1 ? "" : "s"} flagged on your jobs — a senior bookkeeper will resolve these.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {myPendingReview.coa > 0 && (
-                  <span className="text-xs font-semibold bg-white border border-amber-200 rounded-md px-2 py-1 text-amber-800">
-                    {myPendingReview.coa} COA
-                  </span>
-                )}
-                {myPendingReview.reclass > 0 && (
-                  <span className="text-xs font-semibold bg-white border border-amber-200 rounded-md px-2 py-1 text-amber-800">
-                    {myPendingReview.reclass} Reclass
-                  </span>
-                )}
-                {myPendingReview.stripe > 0 && (
-                  <span className="text-xs font-semibold bg-white border border-amber-200 rounded-md px-2 py-1 text-amber-800">
-                    {myPendingReview.stripe} Stripe
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="bg-white">
-              {myPendingReview.jobs.map((j, i) => (
-                <div
-                  key={i}
-                  className="px-5 py-2.5 flex items-center justify-between text-sm"
-                  style={{ borderBottom: i < myPendingReview.jobs.length - 1 ? "1px solid #F3F4F6" : "none" }}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="font-semibold text-navy">{j.client_name}</span>
-                    <span className="text-xs text-ink-slate">{j.source}</span>
-                  </div>
-                  <span className="text-xs font-semibold text-amber-700">
-                    {j.count} pending
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Workflow guide */}
-        <div className="rounded-xl bg-white border border-gray-200 mb-6 overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-200 bg-gradient-to-r from-teal-lighter to-blue-50">
-            <h2 className="text-base font-bold text-navy">The Ironbooks Cleanup Workflow</h2>
+        {/* ─── My Work Queue ─── */}
+        <div className="rounded-xl bg-white border border-gray-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-200">
+            <h2 className="text-base font-bold text-navy">My Work Queue</h2>
             <p className="text-xs text-ink-slate mt-0.5">
-              Four sequential steps to take a painter's QBO from messy to clean. Each step hands off to the next.
+              {myJobs.length === 0
+                ? "Nothing in progress — queue is clear"
+                : `${myJobs.length} job${myJobs.length !== 1 ? "s" : ""} in progress`}
             </p>
           </div>
-          <div className="grid grid-cols-4 divide-x divide-gray-100">
-            {[
-              {
-                num: 1, label: "COA Cleanup", icon: FilePlus2, href: "/jobs/new",
-                desc: "Align chart of accounts to the Ironbooks master template",
-                tag: "Required", tagColor: "#2D7A75",
-              },
-              {
-                num: 2, label: "Reclassify", icon: Shuffle, href: "/reclass/new",
-                desc: "AI categorizes every transaction against the new COA",
-                tag: "Required", tagColor: "#2D7A75",
-              },
-              {
-                num: 3, label: "Stripe Recon", icon: CreditCard, href: "/stripe-recon/new",
-                desc: "Match Stripe deposits to invoices + split out fees & tax",
-                tag: "If applicable", tagColor: "#7C3AED",
-              },
-              {
-                num: 4, label: "Bank Rules", icon: Receipt, href: "/rules/new",
-                desc: "Auto-generate rules so future transactions categorize themselves",
-                tag: "Recommended", tagColor: "#0891B2",
-              },
-            ].map((s) => {
-              const Icon = s.icon;
-              return (
-                <Link
-                  key={s.num}
-                  href={s.href}
-                  className="p-4 hover:bg-teal-lighter transition-colors group"
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="rounded-full flex items-center justify-center font-bold text-xs w-6 h-6 bg-gray-100 text-ink-slate group-hover:bg-teal group-hover:text-white transition-colors">
-                      {s.num}
-                    </div>
-                    <Icon size={16} className="text-ink-slate group-hover:text-teal transition-colors" />
-                    <span
-                      className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ml-auto"
-                      style={{ backgroundColor: `${s.tagColor}15`, color: s.tagColor }}
-                    >
-                      {s.tag}
-                    </span>
-                  </div>
-                  <div className="font-bold text-sm text-navy mb-1">{s.label}</div>
-                  <div className="text-xs text-ink-slate leading-snug">{s.desc}</div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Active jobs */}
-        <div className="rounded-xl bg-white border border-gray-200">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-            <h2 className="text-base font-bold text-navy">Active Jobs</h2>
-            <Link href="/history" className="text-sm font-semibold flex items-center gap-1 text-teal">
-              View all <ArrowRight size={14} />
-            </Link>
-          </div>
-
-          {!jobs || jobs.length === 0 ? (
-            <div className="px-5 py-12 text-center">
-              <p className="text-sm text-ink-slate mb-4">No active jobs yet.</p>
-              <Link
-                href="/jobs/new"
-                className="inline-flex items-center gap-2 text-sm font-semibold text-teal hover:text-teal-dark"
-              >
-                Start your first cleanup <ArrowRight size={14} />
-              </Link>
+          {myJobs.length === 0 ? (
+            <div className="px-5 py-8 text-center">
+              <CheckCircle2 size={22} className="text-teal mx-auto mb-2" />
+              <p className="text-sm text-ink-slate">Start a new cleanup or pick up a stalled job below.</p>
             </div>
           ) : (
             <div>
-              {jobs.map((job, i) => (
-                <Link
-                  key={job.id}
-                  href={`/jobs/${job.id}/review`}
-                  className="flex items-center px-5 py-4 hover:bg-teal-lighter transition-colors"
-                  style={{
-                    borderBottom: i < jobs.length - 1 ? "1px solid #F1F5F9" : "none",
-                  }}
-                >
-                  <div className="rounded-lg flex items-center justify-center font-bold text-sm flex-shrink-0 mr-4 w-9 h-9 bg-teal-light text-teal">
-                    {job.client_name?.charAt(0) || "?"}
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-semibold text-sm text-navy">{job.client_name}</div>
-                    <div className="text-xs mt-0.5 text-ink-slate">
-                      {job.bookkeeper_name} • {job.jurisdiction} {job.state_province}
+              {myJobs.map((job) => {
+                const ref = job.updated_at || job.created_at;
+                const daysOld = ref ? daysBetween(ref) : null;
+                const isStalled = daysOld !== null && daysOld >= 7;
+                return (
+                  <Link
+                    key={job.id}
+                    href={job.href}
+                    className="flex items-center px-5 py-3.5 hover:bg-teal-lighter transition-colors border-b border-gray-100 last:border-0"
+                  >
+                    <div className="rounded-lg flex items-center justify-center font-bold text-sm flex-shrink-0 mr-4 w-9 h-9 bg-teal-light text-teal">
+                      {job.clientName.charAt(0)}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-teal-light text-teal capitalize">
-                      {job.status?.replace("_", " ")}
-                    </span>
-                    {job.flagged_for_lisa && (
-                      <Flag size={14} className="text-yellow-500" />
-                    )}
-                    <MoreVertical size={16} className="text-ink-light" />
-                  </div>
-                </Link>
-              ))}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-navy">{job.clientName}</div>
+                      <div className="text-xs text-ink-slate mt-0.5">
+                        {job.jobType === "coa" ? "COA Cleanup" : "Reclassify"} ·{" "}
+                        {STATUS_LABEL[job.status] || job.status}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {isStalled ? (
+                        <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                          Stalled {daysOld}d
+                        </span>
+                      ) : daysOld !== null ? (
+                        <span className="text-xs text-ink-slate">
+                          {daysOld === 0 ? "Today" : `${daysOld}d ago`}
+                        </span>
+                      ) : null}
+                      <ArrowRight size={14} className="text-ink-light" />
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </div>
+
+        {/* ─── Needs Attention ─── */}
+        {hasAttentionItems && (
+          <div className="rounded-xl bg-white border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h2 className="text-base font-bold text-navy">Needs Attention</h2>
+              <p className="text-xs text-ink-slate mt-0.5">Items that may require action</p>
+            </div>
+
+            {/* QBO token expiry */}
+            {qboExpiring.length > 0 && (
+              <div className="border-b border-gray-100">
+                <div className="px-5 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
+                  <AlertTriangle size={12} className="text-amber-600" />
+                  <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wide">
+                    QBO Token Expiring Soon
+                  </span>
+                </div>
+                {qboExpiring.map((c) => {
+                  const days = daysUntil(c.qbo_token_expires_at!);
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between px-5 py-3 border-b border-gray-50 last:border-0"
+                    >
+                      <span className="text-sm font-medium text-navy">{c.client_name}</span>
+                      <span
+                        className={`text-xs font-semibold ${
+                          days <= 0
+                            ? "text-red-700"
+                            : days <= 3
+                            ? "text-red-600"
+                            : "text-amber-700"
+                        }`}
+                      >
+                        {days <= 0 ? "Expired" : `Expires in ${days}d`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Stalled jobs */}
+            {stalledJobs.length > 0 && (
+              <div className="border-b border-gray-100">
+                <div className="px-5 py-2.5 bg-gray-50 border-b border-gray-100">
+                  <span className="text-[11px] font-bold text-ink-slate uppercase tracking-wide">
+                    Stalled Jobs · {stalledJobs.length}
+                  </span>
+                </div>
+                {stalledJobs.slice(0, 8).map((job) => {
+                  const ref = job.updated_at || job.created_at;
+                  const daysOld = ref ? daysBetween(ref) : 0;
+                  const bkName = bkById.get(job.bookkeeper_id) || "Unknown";
+                  return (
+                    <Link
+                      key={job.id}
+                      href={job.href}
+                      className="flex items-center px-5 py-3 hover:bg-teal-lighter transition-colors border-b border-gray-50 last:border-0"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm text-navy">{job.clientName}</div>
+                        <div className="text-xs text-ink-slate mt-0.5">
+                          {job.jobType === "coa" ? "COA Cleanup" : "Reclassify"} ·{" "}
+                          {STATUS_LABEL[job.status] || job.status} · {bkName}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-amber-700">
+                          Stalled {daysOld}d
+                        </span>
+                        <ArrowRight size={13} className="text-ink-light" />
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Clients with no recent cleanup */}
+            {clientsNeedingCleanup.length > 0 && (
+              <div>
+                <div className="px-5 py-2.5 bg-gray-50 border-b border-gray-100">
+                  <span className="text-[11px] font-bold text-ink-slate uppercase tracking-wide">
+                    No Cleanup in 90+ Days · {clientsNeedingCleanup.length}
+                  </span>
+                </div>
+                {clientsNeedingCleanup.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center px-5 py-3 border-b border-gray-50 last:border-0"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-navy">{c.client_name}</div>
+                      <div className="text-xs text-ink-slate mt-0.5">
+                        {c.last_cleanup_at
+                          ? `Last cleanup ${daysBetween(c.last_cleanup_at)}d ago`
+                          : "Never cleaned up"}
+                      </div>
+                    </div>
+                    <Link
+                      href={`/jobs/new?client=${c.id}`}
+                      className="text-xs font-semibold text-teal hover:text-teal-dark flex items-center gap-1"
+                    >
+                      Start <ArrowRight size={12} />
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Flagged for Senior Review ─── (senior / admin only) */}
+        {isSenior && (
+          <div
+            className={`rounded-xl border overflow-hidden ${
+              totalFlagged > 0 ? "bg-amber-50 border-amber-200" : "bg-white border-gray-200"
+            }`}
+          >
+            <div className="px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`p-2 rounded-lg ${totalFlagged > 0 ? "bg-amber-100" : "bg-gray-100"}`}
+                >
+                  <Flag
+                    size={16}
+                    className={totalFlagged > 0 ? "text-amber-600" : "text-ink-slate"}
+                  />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-navy">Flagged for Senior Review</h2>
+                  <p className="text-xs text-ink-slate mt-0.5">
+                    {totalFlagged === 0
+                      ? "Nothing in the queue — all clear"
+                      : `${totalFlagged} item${totalFlagged !== 1 ? "s" : ""} waiting`}
+                  </p>
+                </div>
+              </div>
+              {totalFlagged > 0 && (
+                <Link
+                  href="/flagged"
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-800 hover:text-amber-900"
+                >
+                  Review All <ArrowRight size={14} />
+                </Link>
+              )}
+            </div>
+            {totalFlagged > 0 && (
+              <div className="border-t border-amber-200 px-5 py-3 flex items-center gap-3">
+                {flaggedCounts.coa > 0 && (
+                  <span className="text-xs font-semibold bg-white border border-amber-200 rounded-md px-2.5 py-1 text-amber-800">
+                    {flaggedCounts.coa} COA
+                  </span>
+                )}
+                {flaggedCounts.reclass > 0 && (
+                  <span className="text-xs font-semibold bg-white border border-amber-200 rounded-md px-2.5 py-1 text-amber-800">
+                    {flaggedCounts.reclass} Reclass
+                  </span>
+                )}
+                {flaggedCounts.stripe > 0 && (
+                  <span className="text-xs font-semibold bg-white border border-amber-200 rounded-md px-2.5 py-1 text-amber-800">
+                    {flaggedCounts.stripe} Stripe
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Team Workload ─── (admin only) */}
+        {isAdmin && teamWorkload.length > 0 && (
+          <div className="rounded-xl bg-white border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h2 className="text-base font-bold text-navy">Team Workload</h2>
+              <p className="text-xs text-ink-slate mt-0.5">Bookkeepers with active or recent jobs</p>
+            </div>
+            <div
+              className="grid px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-ink-slate bg-gray-50 border-b border-gray-100"
+              style={{ gridTemplateColumns: "1fr 80px 80px 110px" }}
+            >
+              <div>Bookkeeper</div>
+              <div className="text-right">In Flight</div>
+              <div className="text-right">Stalled</div>
+              <div className="text-right">Done This Month</div>
+            </div>
+            {teamWorkload.map((bk) => (
+              <div
+                key={bk.id}
+                className="grid px-5 py-3 items-center border-b border-gray-50 last:border-0"
+                style={{ gridTemplateColumns: "1fr 80px 80px 110px" }}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="rounded-full flex items-center justify-center font-bold text-[10px] flex-shrink-0 w-7 h-7 bg-teal-light text-teal">
+                    {bk.full_name.charAt(0)}
+                  </div>
+                  <span className="text-sm font-medium text-navy">{bk.full_name}</span>
+                </div>
+                <div className="text-right text-sm font-semibold text-navy">{bk.inFlight || "—"}</div>
+                <div className="text-right">
+                  {bk.stalled > 0 ? (
+                    <span className="text-sm font-semibold text-amber-700">{bk.stalled}</span>
+                  ) : (
+                    <span className="text-sm text-ink-slate">—</span>
+                  )}
+                </div>
+                <div className="text-right text-sm font-semibold text-teal">
+                  {bk.completedMonth || "—"}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
       </div>
     </AppShell>
   );
