@@ -773,8 +773,11 @@ function RowTable({
               )}
               {showSkipReason && (
                 <td className="px-4 py-2.5">
-                  <span className="text-xs bg-gray-100 text-ink-slate px-1.5 py-0.5 rounded">
-                    {r.skip_reason || r.decision}
+                  <span
+                    title={r.skip_reason || r.decision || ""}
+                    className="text-xs bg-gray-100 text-ink-slate px-1.5 py-0.5 rounded"
+                  >
+                    {friendlySkipReason(r.skip_reason, r.decision)}
                   </span>
                 </td>
               )}
@@ -808,6 +811,30 @@ function RowTable({
       )}
     </div>
   );
+}
+
+// Convert raw skip-reason enum values into something the bookkeeper can read at a glance.
+function friendlySkipReason(reason: string | null, decision: string | null): string {
+  switch (reason) {
+    case "already_correct":
+      return "Already in target account";
+    case "reconciled":
+      return "Reconciled — locked";
+    case "closed_period_qbo":
+      return "QBO closed period";
+    case "closed_period_double":
+      return "Double end-close locked";
+    case "balance_sheet_account":
+      return "Balance sheet line — skipped";
+    case "unsupported_type":
+      return "Unsupported transaction type";
+    case "user_excluded":
+      return "Excluded by bookkeeper";
+    case "manual_entry":
+      return "Manual entry — skipped";
+    default:
+      return reason || decision || "Skipped";
+  }
 }
 
 function ConfidenceBadge({ value }: { value: number }) {
