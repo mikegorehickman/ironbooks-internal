@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Packages with native deps that should be loaded as Node modules at
+  // runtime instead of bundled by webpack. @react-pdf/renderer pulls in
+  // yoga-layout / font binaries that Next's bundler can't pack.
+  serverExternalPackages: ["@react-pdf/renderer"],
   experimental: {
     serverActions: {
       allowedOrigins: ["localhost:3000", "ironbooks.paintergrowth.com", "internal.ironbooks.com"],
