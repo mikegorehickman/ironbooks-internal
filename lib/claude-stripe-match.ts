@@ -87,7 +87,10 @@ Return STRICTLY valid JSON:
 No markdown, no preamble.`;
 
 const BATCH_SIZE = 10;          // deposits per Claude call
-const CANDIDATE_WINDOW_DAYS = 7;
+// Stripe payouts lag invoices by ~2-3 days for cards, longer for ACH and
+// for clients whose payout schedule is weekly. ±30 days catches almost
+// every realistic invoice→deposit pairing without flooding Claude.
+const CANDIDATE_WINDOW_DAYS = 30;
 
 export async function matchStripeDeposits(params: {
   clientName: string;
@@ -131,9 +134,24 @@ export async function matchStripeDeposits(params: {
     return { invs, pays };
   }
 
-  // Batch by deposit count
-  for (let i = 0; i < params.deposits.length; i += BATCH_SIZE) {
-    const batch = params.deposits.slice(i, i + BATCH_SIZE);
+  // Pre-pass: surface deposits with no candidates at all so we can flag them
+  // with a clear reason instead of an opaque "AI couldn't match" string. Also
+  // saves a Claude call on a batch that's mostly empty.
+  const depositsWithNoCandidates = new Set<string>();
+  for (const d of params.deposits) {
+    const { invs, pays } = candidatesFor(d);
+    if (invs.length === 0 && pays.length === 0) {
+      depositsWithNoCandidates.add(d.qbo_deposit_id);
+    }
+  }
+
+  const matchableDeposits = params.deposits.filter(
+    (d) => !depositsWithNoCandidates.has(d.qbo_deposit_id)
+  );
+
+  // Batch only the deposits that have candidates
+  for (let i = 0; i < matchableDeposits.length; i += BATCH_SIZE) {
+    const batch = matchableDeposits.slice(i, i + BATCH_SIZE);
 
     const compactBatch = batch.map((d) => {
       const { invs, pays } = candidatesFor(d);
@@ -294,9 +312,30 @@ Match each deposit to its underlying invoice(s). Return JSON only.`;
     }
   }
 
-  // Fill in deposits Claude didn't return for (rare; usually flagged)
+  // Fill in deposits Claude didn't return for, with diagnostic reasoning
+  // so the bookkeeper sees WHY each one failed instead of just "flagged".
   for (const dep of params.deposits) {
     if (allMatches.find((m) => m.qbo_deposit_id === dep.qbo_deposit_id)) continue;
+
+    let reasoning: string;
+    if (depositsWithNoCandidates.has(dep.qbo_deposit_id)) {
+      // Hard-fail: zero invoices and zero customer payments existed within
+      // ±30 days of this deposit. Either the client doesn't invoice through
+      // QBO (subscriptions / payment links / direct charges), or invoices
+      // exist further out. Either way, AI matching can't help here —
+      // bookkeeper needs to investigate manually or connect Stripe directly.
+      reasoning =
+        "No QBO invoices or customer payments within ±30 days of this deposit. " +
+        "This client may not invoice through QBO (subscriptions, direct charges), " +
+        "or matching invoices fall outside the 30-day window. Connect Stripe via " +
+        "the sidebar to pull exact charges from the Stripe API instead.";
+    } else {
+      reasoning =
+        "Candidates found in the ±30-day window but none summed to the deposit amount " +
+        "(allowing for a 1.5%-4.5% Stripe fee discrepancy). Likely a multi-period or " +
+        "multi-customer batch the AI couldn't disambiguate — review manually.";
+    }
+
     allMatches.push({
       qbo_deposit_id: dep.qbo_deposit_id,
       deposit_amount: dep.amount,
@@ -311,7 +350,7 @@ Match each deposit to its underlying invoice(s). Return JSON only.`;
       computed_tax: 0,
       tax_code: taxCode,
       ai_confidence: 0,
-      ai_reasoning: "No matching invoices identified.",
+      ai_reasoning: reasoning,
       decision: "flagged",
     });
   }
@@ -321,6 +360,22 @@ Match each deposit to its underlying invoice(s). Return JSON only.`;
     review: allMatches.filter((m) => m.decision === "needs_review").length,
     flagged: allMatches.filter((m) => m.decision === "flagged").length,
   };
+
+  // Surface a top-level warning when the run was effectively useless because
+  // QBO had no candidate invoices/payments in the window. Common cause: the
+  // client takes payment via Stripe subscriptions / payment links rather
+  // than QBO invoices, so AR matching can't work — Stripe Connect needed.
+  const noCandidatePct =
+    params.deposits.length === 0
+      ? 0
+      : depositsWithNoCandidates.size / params.deposits.length;
+  if (noCandidatePct >= 0.5) {
+    warnings.unshift(
+      `${depositsWithNoCandidates.size} of ${params.deposits.length} deposits had no QBO invoices or customer payments within ±30 days. ` +
+      `Either this client doesn't invoice through QBO, or matching invoices fall outside the window. ` +
+      `Connect Stripe via the sidebar for deterministic charge-level matching.`
+    );
+  }
 
   return {
     matches: allMatches,

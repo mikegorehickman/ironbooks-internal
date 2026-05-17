@@ -102,8 +102,28 @@ export function StripeReconReview({
 
   const isCanada = clientLink.jurisdiction === "CA";
 
+  // Top-level warnings — surface job.warnings (set by the matcher when e.g.
+  // most deposits had no QBO invoices in the window). Reading defensively
+  // since it's a jsonb column that may be null or an array.
+  const jobWarnings: string[] = Array.isArray((job as any).warnings)
+    ? ((job as any).warnings as any[]).filter((w) => typeof w === "string")
+    : [];
+
   return (
     <div>
+      {jobWarnings.length > 0 && (
+        <div className="mb-4 p-4 rounded-lg bg-amber-50 border border-amber-200">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1 text-sm text-amber-900">
+              {jobWarnings.map((w, i) => (
+                <div key={i}>{w}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className={`grid gap-3 mb-5 ${isCanada ? "grid-cols-5" : "grid-cols-3"}`}>
         <SummaryCard
@@ -269,7 +289,12 @@ function MatchRow({
             </div>
           )}
           {match.ai_reasoning && (
-            <div className="text-[11px] mt-0.5 italic text-ink-slate truncate">{match.ai_reasoning}</div>
+            <div
+              className="text-[11px] mt-0.5 italic text-ink-slate line-clamp-3"
+              title={match.ai_reasoning}
+            >
+              {match.ai_reasoning}
+            </div>
           )}
         </div>
 

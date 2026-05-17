@@ -156,14 +156,16 @@ export async function fetchInvoicesForRange(
   dateStart: string,
   dateEnd: string
 ): Promise<QBOInvoice[]> {
-  // Widen by 7 days on each side
+  // Widen by 30 days on each side. Stripe payouts can land weeks after
+  // invoices are issued (weekly ACH schedules, held funds, etc.) — a tight
+  // ±7-day window misses too many real pairings.
   const widened = (iso: string, days: number) => {
     const d = new Date(iso);
     d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().slice(0, 10);
   };
-  const widenedStart = widened(dateStart, -7);
-  const widenedEnd = widened(dateEnd, 7);
+  const widenedStart = widened(dateStart, -30);
+  const widenedEnd = widened(dateEnd, 30);
 
   const results: QBOInvoice[] = [];
   let page = 0;
@@ -225,8 +227,8 @@ export async function fetchCustomerPaymentsForRange(
     d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().slice(0, 10);
   };
-  const widenedStart = widened(dateStart, -7);
-  const widenedEnd = widened(dateEnd, 7);
+  const widenedStart = widened(dateStart, -30);
+  const widenedEnd = widened(dateEnd, 30);
 
   const results: QBOCustomerPayment[] = [];
   let page = 0;
