@@ -84,7 +84,7 @@ export function BankRulesFromReclassClient({
           or all vendors were already saved as bank rules.
         </p>
         <Link
-          href="/stripe-recon/new"
+          href={`/stripe-recon/new?client=${clientLinkId}`}
           className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white font-semibold px-6 py-2.5 rounded-lg"
         >
           Continue to Stripe Recon <ArrowRight size={16} />
@@ -111,7 +111,7 @@ export function BankRulesFromReclassClient({
           Future transactions matching these vendors will auto-categorize in QBO.
         </p>
         <Link
-          href="/stripe-recon/new"
+          href={`/stripe-recon/new?client=${clientLinkId}`}
           className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white font-semibold px-6 py-2.5 rounded-lg"
         >
           Continue to Stripe Recon <ArrowRight size={16} />
