@@ -133,79 +133,96 @@ export async function fetchTransactionsForAccount(
   transactionsPulled: number;
   transactionsSkippedUnsupported: number;
 }> {
-  const allLines: ReclassLine[] = [];
   let totalPulled = 0;
   let skippedUnsupported = 0;
 
-  for (const txType of SUPPORTED_TX_TYPES) {
-    let page = 0;
-    const pageSize = 1000;
-    let hasMore = true;
+  // Pull the 4 transaction types in PARALLEL. Each type independently
+  // paginates through its result set; previously this ran sequentially
+  // (Bill → Purchase → Expense → VendorCredit) which made every cleanup
+  // 3-4x slower than necessary. The rate limiter (~450/min per realm)
+  // throttles automatically if we'd exceed the budget.
+  const perTypeResults = await Promise.all(
+    SUPPORTED_TX_TYPES.map(async (txType) => {
+      const typeLines: ReclassLine[] = [];
+      let typePulled = 0;
+      let typeUnsupported = 0;
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
 
-    while (hasMore) {
-      const startPosition = page * pageSize + 1; // QBO is 1-indexed
-      const query = encodeURIComponent(
-        `SELECT * FROM ${txType} WHERE TxnDate >= '${dateStart}' AND TxnDate <= '${dateEnd}' STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`
-      );
+      while (hasMore) {
+        const startPosition = page * pageSize + 1; // QBO is 1-indexed
+        const query = encodeURIComponent(
+          `SELECT * FROM ${txType} WHERE TxnDate >= '${dateStart}' AND TxnDate <= '${dateEnd}' STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`
+        );
 
-      try {
-        const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
-        const txs: QBOTransaction[] = data.QueryResponse?.[txType] || [];
-        totalPulled += txs.length;
+        try {
+          const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
+          const txs: QBOTransaction[] = data.QueryResponse?.[txType] || [];
+          typePulled += txs.length;
 
-        for (const tx of txs) {
-          // Find lines that hit the source account
-          const matchingLines = (tx.Line || []).filter((line) => {
-            const detail = line.AccountBasedExpenseLineDetail;
-            return detail?.AccountRef?.value === accountId;
-          });
-
-          if (matchingLines.length === 0) continue;
-
-          // Detect status flags at transaction level
-          const isBankFed = !!tx.OnlineBankingTxnReference;
-          // Manual entry heuristic: no online banking ref AND no DocNumber suggests manual
-          const isManualEntry = !isBankFed && !tx.DocNumber;
-
-          const vendorName =
-            tx.VendorRef?.name ||
-            tx.EntityRef?.name ||
-            tx.PayeeRef?.name ||
-            "Unknown vendor";
-
-          for (const line of matchingLines) {
-            const isReconciled = line.Cleared === "Reconciled";
-
-            allLines.push({
-              transaction_id: tx.Id,
-              transaction_type: txType,
-              line_id: line.Id || "",
-              sync_token: tx.SyncToken,
-              transaction_date: tx.TxnDate,
-              transaction_amount: line.Amount || 0,
-              vendor_name: vendorName,
-              current_account_id: accountId,
-              current_account_name:
-                line.AccountBasedExpenseLineDetail?.AccountRef?.name || "",
-              description: line.Description || "",
-              private_note: tx.PrivateNote || "",
-              is_reconciled: isReconciled,
-              is_bank_fed: isBankFed,
-              is_manual_entry: isManualEntry,
+          for (const tx of txs) {
+            // Find lines that hit the source account
+            const matchingLines = (tx.Line || []).filter((line) => {
+              const detail = line.AccountBasedExpenseLineDetail;
+              return detail?.AccountRef?.value === accountId;
             });
-          }
-        }
 
-        // QBO returns at most pageSize results
-        hasMore = txs.length >= pageSize;
-        page++;
-      } catch (err: any) {
-        // Some transaction types may not be queryable - log and continue
-        console.warn(`Failed to query ${txType}:`, err.message);
-        skippedUnsupported++;
-        break;
+            if (matchingLines.length === 0) continue;
+
+            // Detect status flags at transaction level
+            const isBankFed = !!tx.OnlineBankingTxnReference;
+            // Manual entry heuristic: no online banking ref AND no DocNumber suggests manual
+            const isManualEntry = !isBankFed && !tx.DocNumber;
+
+            const vendorName =
+              tx.VendorRef?.name ||
+              tx.EntityRef?.name ||
+              tx.PayeeRef?.name ||
+              "Unknown vendor";
+
+            for (const line of matchingLines) {
+              const isReconciled = line.Cleared === "Reconciled";
+
+              typeLines.push({
+                transaction_id: tx.Id,
+                transaction_type: txType,
+                line_id: line.Id || "",
+                sync_token: tx.SyncToken,
+                transaction_date: tx.TxnDate,
+                transaction_amount: line.Amount || 0,
+                vendor_name: vendorName,
+                current_account_id: accountId,
+                current_account_name:
+                  line.AccountBasedExpenseLineDetail?.AccountRef?.name || "",
+                description: line.Description || "",
+                private_note: tx.PrivateNote || "",
+                is_reconciled: isReconciled,
+                is_bank_fed: isBankFed,
+                is_manual_entry: isManualEntry,
+              });
+            }
+          }
+
+          // QBO returns at most pageSize results
+          hasMore = txs.length >= pageSize;
+          page++;
+        } catch (err: any) {
+          // Some transaction types may not be queryable - log and continue
+          console.warn(`Failed to query ${txType}:`, err.message);
+          typeUnsupported++;
+          break;
+        }
       }
-    }
+      return { typeLines, typePulled, typeUnsupported };
+    })
+  );
+
+  const allLines: ReclassLine[] = [];
+  for (const r of perTypeResults) {
+    allLines.push(...r.typeLines);
+    totalPulled += r.typePulled;
+    skippedUnsupported += r.typeUnsupported;
   }
 
   return {
@@ -229,68 +246,82 @@ export async function fetchAllTransactionLines(
   transactionsPulled: number;
   transactionsSkippedUnsupported: number;
 }> {
-  const allLines: ReclassLine[] = [];
   let totalPulled = 0;
   let skippedUnsupported = 0;
 
-  for (const txType of SUPPORTED_TX_TYPES) {
-    let page = 0;
-    const pageSize = 1000;
-    let hasMore = true;
+  // Pull the 4 transaction types in PARALLEL. See fetchTransactionsForAccount
+  // above for the same pattern + rate-limit rationale.
+  const perTypeResults = await Promise.all(
+    SUPPORTED_TX_TYPES.map(async (txType) => {
+      const typeLines: ReclassLine[] = [];
+      let typePulled = 0;
+      let typeUnsupported = 0;
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
 
-    while (hasMore) {
-      const startPosition = page * pageSize + 1;
-      const query = encodeURIComponent(
-        `SELECT * FROM ${txType} WHERE TxnDate >= '${dateStart}' AND TxnDate <= '${dateEnd}' STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`
-      );
+      while (hasMore) {
+        const startPosition = page * pageSize + 1;
+        const query = encodeURIComponent(
+          `SELECT * FROM ${txType} WHERE TxnDate >= '${dateStart}' AND TxnDate <= '${dateEnd}' STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`
+        );
 
-      try {
-        const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
-        const txs: QBOTransaction[] = data.QueryResponse?.[txType] || [];
-        totalPulled += txs.length;
+        try {
+          const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
+          const txs: QBOTransaction[] = data.QueryResponse?.[txType] || [];
+          typePulled += txs.length;
 
-        for (const tx of txs) {
-          // Keep every line that points to an expense account
-          const matchingLines = (tx.Line || []).filter((line) => {
-            return !!line.AccountBasedExpenseLineDetail?.AccountRef?.value;
-          });
-          if (matchingLines.length === 0) continue;
-
-          const isBankFed = !!tx.OnlineBankingTxnReference;
-          const isManualEntry = !isBankFed && !tx.DocNumber;
-          const vendorName =
-            tx.VendorRef?.name || tx.EntityRef?.name || tx.PayeeRef?.name || "Unknown vendor";
-
-          for (const line of matchingLines) {
-            const isReconciled = line.Cleared === "Reconciled";
-            const detail = line.AccountBasedExpenseLineDetail!;
-            allLines.push({
-              transaction_id: tx.Id,
-              transaction_type: txType,
-              line_id: line.Id || "",
-              sync_token: tx.SyncToken,
-              transaction_date: tx.TxnDate,
-              transaction_amount: line.Amount || 0,
-              vendor_name: vendorName,
-              current_account_id: detail.AccountRef.value,
-              current_account_name: detail.AccountRef.name || "",
-              description: line.Description || "",
-              private_note: tx.PrivateNote || "",
-              is_reconciled: isReconciled,
-              is_bank_fed: isBankFed,
-              is_manual_entry: isManualEntry,
+          for (const tx of txs) {
+            // Keep every line that points to an expense account
+            const matchingLines = (tx.Line || []).filter((line) => {
+              return !!line.AccountBasedExpenseLineDetail?.AccountRef?.value;
             });
-          }
-        }
+            if (matchingLines.length === 0) continue;
 
-        hasMore = txs.length >= pageSize;
-        page++;
-      } catch (err: any) {
-        console.warn(`Failed to query ${txType}:`, err.message);
-        skippedUnsupported++;
-        break;
+            const isBankFed = !!tx.OnlineBankingTxnReference;
+            const isManualEntry = !isBankFed && !tx.DocNumber;
+            const vendorName =
+              tx.VendorRef?.name || tx.EntityRef?.name || tx.PayeeRef?.name || "Unknown vendor";
+
+            for (const line of matchingLines) {
+              const isReconciled = line.Cleared === "Reconciled";
+              const detail = line.AccountBasedExpenseLineDetail!;
+              typeLines.push({
+                transaction_id: tx.Id,
+                transaction_type: txType,
+                line_id: line.Id || "",
+                sync_token: tx.SyncToken,
+                transaction_date: tx.TxnDate,
+                transaction_amount: line.Amount || 0,
+                vendor_name: vendorName,
+                current_account_id: detail.AccountRef.value,
+                current_account_name: detail.AccountRef.name || "",
+                description: line.Description || "",
+                private_note: tx.PrivateNote || "",
+                is_reconciled: isReconciled,
+                is_bank_fed: isBankFed,
+                is_manual_entry: isManualEntry,
+              });
+            }
+          }
+
+          hasMore = txs.length >= pageSize;
+          page++;
+        } catch (err: any) {
+          console.warn(`Failed to query ${txType}:`, err.message);
+          typeUnsupported++;
+          break;
+        }
       }
-    }
+      return { typeLines, typePulled, typeUnsupported };
+    })
+  );
+
+  const allLines: ReclassLine[] = [];
+  for (const r of perTypeResults) {
+    allLines.push(...r.typeLines);
+    totalPulled += r.typePulled;
+    skippedUnsupported += r.typeUnsupported;
   }
 
   return {

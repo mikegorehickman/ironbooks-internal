@@ -49,13 +49,10 @@ export async function POST(
     // 2. Get valid QBO token (auto-refreshes)
     const accessToken = await getValidToken(clientLink.id, service as any);
 
-    // 3. Fetch QBO COA
-    const allQboAccounts = await fetchAllAccounts(clientLink.qbo_realm_id, accessToken);
-
-    // 3a. Restrict cleanup to P&L accounts only.
-    //   Balance Sheet accounts (AR/AP, banks, credit cards, fixed assets,
-    //   equity, liabilities) shouldn't be renamed/deleted/merged by this tool.
-    //   Their structure is determined by QBO mechanics, not the master COA.
+    // 3. Fetch QBO COA + transaction counts IN PARALLEL. These are two
+    //    independent QBO calls; the previous sequential pattern wasted
+    //    several seconds for no reason. Both must succeed for analyze to
+    //    proceed, so a single Promise.all is fine.
     const isPnLAccountType = (t: string | undefined): boolean => {
       if (!t) return false;
       const norm = t.toLowerCase().replace(/\s+/g, "");
@@ -67,15 +64,17 @@ export async function POST(
         norm === "costofgoodssold"
       );
     };
-    const qboAccounts = allQboAccounts.filter((a) => isPnLAccountType(a.AccountType));
 
-    // 3b. Fetch transaction counts for all accounts.
-    // CRITICAL for production: Claude must know which accounts have transactions
-    // so it suggests FLAG instead of DELETE. Otherwise it suggests deletes that
-    // QBO will reject at runtime.
-    const txCounts = await fetchTransactionCountsForAllAccounts(
-      clientLink.qbo_realm_id, accessToken
-    );
+    const [allQboAccounts, txCounts] = await Promise.all([
+      fetchAllAccounts(clientLink.qbo_realm_id, accessToken),
+      fetchTransactionCountsForAllAccounts(clientLink.qbo_realm_id, accessToken),
+    ]);
+
+    // 3a. Restrict cleanup to P&L accounts only.
+    //   Balance Sheet accounts (AR/AP, banks, credit cards, fixed assets,
+    //   equity, liabilities) shouldn't be renamed/deleted/merged by this tool.
+    //   Their structure is determined by QBO mechanics, not the master COA.
+    const qboAccounts = allQboAccounts.filter((a) => isPnLAccountType(a.AccountType));
 
     // Decorate accounts with transaction_count so Claude sees it in the prompt
     const accountsWithTxCounts = qboAccounts.map((a: any) => ({

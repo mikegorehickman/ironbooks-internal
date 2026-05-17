@@ -120,13 +120,29 @@ async function runDiscovery(
     return;
   }
 
-  // 2. Fetch supporting AR data
-  const invoices = await fetchInvoicesForRange(
-    clientLink.qbo_realm_id, accessToken, job.date_range_start, job.date_range_end
-  );
-  const payments = await fetchCustomerPaymentsForRange(
-    clientLink.qbo_realm_id, accessToken, job.date_range_start, job.date_range_end
-  );
+  // 2. Fetch supporting AR data in PARALLEL. Invoices, customer payments,
+  //    and (for the Stripe API path) customers are all independent QBO
+  //    queries — previously these ran one at a time, wasting several seconds.
+  //    For the QBO-AI path we skip the customers fetch since it's not used.
+  const needsCustomers = method === "stripe_api";
+  if (method === "stripe_api") {
+    if (
+      clientLink.stripe_connection_status !== "connected" ||
+      !clientLink.stripe_access_token
+    ) {
+      throw new Error(
+        "Stripe API method requested but this client doesn't have Stripe connected. Send them a Connect link from the sidebar first, or run with method=qbo_invoice_match."
+      );
+    }
+  }
+
+  const [invoices, payments, customers] = await Promise.all([
+    fetchInvoicesForRange(clientLink.qbo_realm_id, accessToken, job.date_range_start, job.date_range_end),
+    fetchCustomerPaymentsForRange(clientLink.qbo_realm_id, accessToken, job.date_range_start, job.date_range_end),
+    needsCustomers
+      ? fetchAllCustomers(clientLink.qbo_realm_id, accessToken)
+      : Promise.resolve([] as Awaited<ReturnType<typeof fetchAllCustomers>>),
+  ]);
 
   // 3. BRANCH: Stripe API path (deterministic) or QBO invoice-match (AI)
   let result: {
@@ -136,16 +152,6 @@ async function runDiscovery(
   };
 
   if (method === "stripe_api") {
-    // Verify Stripe is actually connected for this client
-    if (
-      clientLink.stripe_connection_status !== "connected" ||
-      !clientLink.stripe_access_token
-    ) {
-      throw new Error(
-        "Stripe API method requested but this client doesn't have Stripe connected. Send them a Connect link from the sidebar first, or run with method=qbo_invoice_match."
-      );
-    }
-    const customers = await fetchAllCustomers(clientLink.qbo_realm_id, accessToken);
     const platformLivemode =
       (process.env.STRIPE_SECRET_KEY || "").startsWith("sk_live_");
     const stripeResult = await reconcileViaStripeApi({

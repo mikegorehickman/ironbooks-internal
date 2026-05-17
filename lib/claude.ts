@@ -213,19 +213,39 @@ export async function analyzeCOA(params: {
     `[analyzeCOA] Splitting ${params.clientAccounts.length} accounts into ${batches.length} batches of up to ${BATCH_SIZE}`
   );
 
-  const batchResults: AnalysisResult[] = [];
-  for (let i = 0; i < batches.length; i++) {
-    console.log(`[analyzeCOA] Running batch ${i + 1}/${batches.length} (${batches[i].length} accounts)...`);
+  // Run batches in PARALLEL with a concurrency cap. Each batch is an
+  // independent Claude call analyzing a disjoint chunk of accounts —
+  // there's no inter-batch dependency. Previously this ran one batch at
+  // a time, making a 200-account COA take ~4× longer than necessary.
+  // Concurrency 3 stays well inside Anthropic's per-minute rate limit
+  // and avoids one slow batch blocking the whole train.
+  const CONCURRENCY = 3;
+  const batchResults: AnalysisResult[] = new Array(batches.length);
+  async function runBatch(idx: number) {
+    console.log(`[analyzeCOA] Running batch ${idx + 1}/${batches.length} (${batches[idx].length} accounts)...`);
+    const t0 = Date.now();
     const result = await _analyzeBatch({
       clientName: params.clientName,
       jurisdiction: params.jurisdiction,
       stateProvince: params.stateProvince,
-      batchAccounts: batches[i],
+      batchAccounts: batches[idx],
       compactMaster,
-      batchInfo: { current: i + 1, total: batches.length },
+      batchInfo: { current: idx + 1, total: batches.length },
     });
-    batchResults.push(result);
+    console.log(`[analyzeCOA] Batch ${idx + 1} done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    batchResults[idx] = result;
   }
+
+  // Simple bounded-concurrency queue
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const idx = next++;
+      if (idx >= batches.length) return;
+      await runBatch(idx);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => worker()));
 
   // Merge all batch outputs into a single AnalysisResult
   const merged = mergeAnalysisResults(batchResults, params.masterCOA, params.clientAccounts);
