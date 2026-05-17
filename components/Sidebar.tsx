@@ -86,8 +86,9 @@ export function Sidebar() {
                 .eq("executed", false),
               supabase
                 .from("reclassifications")
-                .select("id, reclass_jobs!reclass_job_id!inner(id)", { count: "exact", head: true })
-                .eq("decision", "flagged"),
+                .select("id", { count: "exact", head: true })
+                .eq("decision", "flagged")
+                .not("reclass_job_id", "is", null),
               supabase
                 .from("stripe_recon_matches")
                 .select("id", { count: "exact", head: true })
