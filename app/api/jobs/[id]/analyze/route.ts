@@ -92,8 +92,13 @@ export async function POST(
       .eq("jurisdiction", clientLink.jurisdiction)
       .eq("industry", industry)
       .order("sort_order");
-    // Fallback: painters baseline if this industry isn't seeded; then no-filter
+    // Fallback: painters baseline if this industry isn't seeded; then no-filter.
+    // Post-Migration 13, every supported industry should have rows — log if we
+    // ever hit this so it's obvious which industry needs seeding.
     if ((masterRows || []).length === 0 && industry !== "painters") {
+      console.warn(
+        `[analyze] No master_coa rows for industry="${industry}" jurisdiction="${clientLink.jurisdiction}" — falling back to painters template`
+      );
       const fb = await service
         .from("master_coa")
         .select("*")

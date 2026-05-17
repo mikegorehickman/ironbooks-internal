@@ -25,32 +25,18 @@ export default async function MasterCOAPage({
 
   const canEdit = profile && ["admin", "lead"].includes(profile.role);
 
-  // Pre-fetch both jurisdictions for fast tab switching, filtered to selected industry.
-  // If Migration 7 hasn't run yet, the industry column doesn't exist or no rows are
-  // backfilled — fall back to fetching without the industry filter so painters works.
+  // Pre-fetch both jurisdictions for fast tab switching, filtered to the
+  // selected industry. After Migration 13, every supported industry has its
+  // own seeded COA — no fallback to painters. An empty result means that
+  // industry/jurisdiction combo isn't seeded yet, and the editor will show
+  // an "empty state" rather than silently showing painters' data (which
+  // made it look like industry switching wasn't working).
   async function fetchByJurisdiction(jur: "US" | "CA") {
-    const filtered = await supabase
-      .from("master_coa")
-      .select("*")
-      .eq("jurisdiction", jur)
-      .eq("industry", validIndustry)
-      .order("sort_order");
-    if ((filtered.data || []).length > 0) return filtered;
-    // Fallback 1 — painters baseline (always populated)
-    if (validIndustry !== "painters") {
-      const painters = await supabase
-        .from("master_coa")
-        .select("*")
-        .eq("jurisdiction", jur)
-        .eq("industry", "painters")
-        .order("sort_order");
-      if ((painters.data || []).length > 0) return painters;
-    }
-    // Fallback 2 — pre-Migration-7 state, no industry column populated
     return supabase
       .from("master_coa")
       .select("*")
       .eq("jurisdiction", jur)
+      .eq("industry", validIndustry)
       .order("sort_order");
   }
 
