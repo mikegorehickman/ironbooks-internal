@@ -22,18 +22,18 @@ export async function GET() {
   const [coaQ, reclassQ, stripeQ] = await Promise.all([
     service
       .from("coa_actions")
-      .select(`id, job_id, coa_jobs!inner(id, status, client_links(id), users(id))`)
+      .select(`id, coa_jobs!inner(id, users!bookkeeper_id(id))`)
       .eq("action", "flag")
       .eq("executed", false),
 
     service
       .from("reclassifications")
-      .select(`id, reclass_job_id, reclass_jobs!reclass_job_id!inner(id, status, client_links(id), users(id))`)
+      .select(`id, reclass_jobs!reclass_job_id!inner(id, users!bookkeeper_id(id))`)
       .eq("decision", "flagged"),
 
     service
       .from("stripe_recon_matches")
-      .select(`id, job_id, stripe_recon_jobs!inner(id, status, client_links(id), users(id))`)
+      .select(`id, stripe_recon_jobs!inner(id, users!bookkeeper_id(id))`)
       .eq("decision", "flagged")
       .eq("executed", false),
   ]);

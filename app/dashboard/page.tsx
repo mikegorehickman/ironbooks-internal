@@ -134,16 +134,16 @@ export default async function DashboardPage() {
     const [coaFlagRes, reclassFlagRes, stripeFlagRes] = await Promise.all([
       service
         .from("coa_actions")
-        .select("id, coa_jobs!inner(id, client_links(id), users(id))")
+        .select("id, coa_jobs!inner(id, users!bookkeeper_id(id))")
         .eq("action", "flag")
         .eq("executed", false),
       service
         .from("reclassifications")
-        .select("id, reclass_jobs!reclass_job_id!inner(id, client_links(id), users(id))")
+        .select("id, reclass_jobs!reclass_job_id!inner(id, users!bookkeeper_id(id))")
         .eq("decision", "flagged"),
       service
         .from("stripe_recon_matches")
-        .select("id, stripe_recon_jobs!inner(id, client_links(id), users(id))")
+        .select("id, stripe_recon_jobs!inner(id, users!bookkeeper_id(id))")
         .eq("decision", "flagged")
         .eq("executed", false),
     ]);

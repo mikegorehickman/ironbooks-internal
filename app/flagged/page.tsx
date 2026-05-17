@@ -47,7 +47,7 @@ export default async function FlaggedPage() {
       .select(`
         id, job_id, qbo_account_id, current_name, current_type, transaction_count,
         ai_confidence, ai_reasoning, ai_suggested_target, flagged_reason,
-        coa_jobs!inner(id, status, created_at, bookkeeper_id, client_links(client_name, jurisdiction, state_province), users(full_name))
+        coa_jobs!inner(id, status, created_at, bookkeeper_id, client_links(client_name, jurisdiction, state_province), users!bookkeeper_id(full_name))
       `)
       .eq("action", "flag")
       .eq("executed", false)
@@ -58,7 +58,7 @@ export default async function FlaggedPage() {
       .select(`
         id, reclass_job_id, vendor_name, transaction_amount, transaction_date,
         from_account_name, to_account_name, ai_confidence, ai_reasoning, decision, description,
-        reclass_jobs!reclass_job_id!inner(id, status, created_at, bookkeeper_id, client_links(client_name, jurisdiction, state_province), users(full_name))
+        reclass_jobs!reclass_job_id!inner(id, status, created_at, bookkeeper_id, client_links(client_name, jurisdiction, state_province), users!bookkeeper_id(full_name))
       `)
       .eq("decision", "flagged")
       .order("transaction_date", { ascending: false })
