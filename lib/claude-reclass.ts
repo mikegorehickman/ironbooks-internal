@@ -698,19 +698,34 @@ Return STRICTLY valid JSON, no other text:
   "reasoning": "short sentence — what is this vendor and why this account"
 }`;
 
+  // Hard per-vendor timeout. The web_search tool can hang indefinitely if a
+  // particular search query stalls upstream (Anthropic's search backend, a
+  // slow target site, rate-limit retry storms). Without this race, ONE bad
+  // vendor freezes the entire reclass job in `status='executing'` forever
+  // (see Interial Painting incident, May 2026). 45s is generous — typical
+  // calls finish in 5–15s.
+  const WEB_SEARCH_TIMEOUT_MS = 45_000;
   try {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 1500,
-      tools: [
-        {
-          type: "web_search_20250305" as any,
-          name: "web_search",
-          max_uses: 2,
-        } as any,
-      ],
-      messages: [{ role: "user", content: userMessage }],
-    });
+    const response = await Promise.race([
+      client.messages.create({
+        model: MODEL,
+        max_tokens: 1500,
+        tools: [
+          {
+            type: "web_search_20250305" as any,
+            name: "web_search",
+            max_uses: 2,
+          } as any,
+        ],
+        messages: [{ role: "user", content: userMessage }],
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`web_search timeout after ${WEB_SEARCH_TIMEOUT_MS}ms`)),
+          WEB_SEARCH_TIMEOUT_MS
+        )
+      ),
+    ]);
 
     // The final text block is the JSON result (after any tool use)
     const textBlocks = response.content.filter((c: any) => c.type === "text");

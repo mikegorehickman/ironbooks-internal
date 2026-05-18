@@ -1,10 +1,20 @@
 import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
+import { sweepStaleJobs } from "@/lib/stale-jobs";
 import { Plus } from "lucide-react";
 import { ClientsList } from "./clients-list";
 
 export default async function ClientsPage() {
+  // Watchdog: auto-fail any job that's been hung in `executing` past its
+  // window before we render. Cheap (indexed UPDATEs, usually 0 rows) and
+  // means a bookkeeper hitting the clients page after a silent worker
+  // crash sees the row unblocked instead of a phantom "running" spinner.
+  // Errors are swallowed — never let the watchdog break page load.
+  await sweepStaleJobs().catch((e) =>
+    console.warn("[clients] sweepStaleJobs failed:", e?.message)
+  );
+
   const supabase = await createServerSupabase();
 
   const { data: { user } } = await supabase.auth.getUser();
