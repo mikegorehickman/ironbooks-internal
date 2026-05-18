@@ -6,6 +6,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { StripeReconReview } from "./review-client";
+import { UnmatchedPanel } from "./unmatched-panel";
 
 export default async function StripeReconReviewPage({
   params,
@@ -170,6 +171,53 @@ export default async function StripeReconReviewPage({
               </Link>
             </div>
           </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  // All-unmatched short-circuit. If we have deposits but every single one
+  // came back flagged with zero candidate invoices/payments, AR matching is
+  // structurally impossible for this client (they don't invoice through
+  // QBO — typically Stripe Payment Links / subscriptions / Stripe
+  // Invoicing). Surface a dedicated panel with a "send connect link" CTA
+  // and an "acknowledge & finish" path instead of dumping the bookkeeper
+  // into a 50-row grid of flagged rows with nothing to do.
+  const matchList = (matches as any[]) || [];
+  const isAllUnmatchedNoCandidates =
+    matchList.length > 0 &&
+    matchList.every(
+      (m) =>
+        m.decision === "flagged" &&
+        (!Array.isArray(m.candidate_invoices) || m.candidate_invoices.length === 0) &&
+        (!Array.isArray(m.candidate_payments) || m.candidate_payments.length === 0)
+    );
+
+  if (isAllUnmatchedNoCandidates) {
+    const totalAmount = matchList.reduce(
+      (s, m) => s + Number(m.deposit_amount || 0),
+      0
+    );
+    return (
+      <AppShell>
+        <TopBar
+          title={`Stripe Reconciliation — ${clientLink?.client_name}`}
+          subtitle="AR matching not possible — Stripe Connect needed"
+        />
+        <WorkflowStepper
+          currentStep="stripe"
+          currentState="active"
+          completedSteps={["coa", "reclass", "rules"]}
+        />
+        <div className="px-8 py-6">
+          <UnmatchedPanel
+            jobId={id}
+            clientLinkId={job.client_link_id as unknown as string}
+            clientName={clientLink?.client_name || "this client"}
+            depositCount={matchList.length}
+            totalAmount={totalAmount}
+            reclassJobId={(job.reclass_job_id as unknown as string) || null}
+          />
         </div>
       </AppShell>
     );

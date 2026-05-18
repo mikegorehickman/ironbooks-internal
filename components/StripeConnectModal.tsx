@@ -16,14 +16,20 @@ interface ClientLite {
 
 export function StripeConnectModal({
   onClose,
+  preselectedClientId,
 }: {
   onClose: () => void;
+  /** When provided, the modal opens with this client pre-selected and the
+   *  picker scrolled to it. Used by the stripe-recon "all unmatched" panel
+   *  so the bookkeeper goes straight from "AR matching failed" to
+   *  "generate connect link for THIS client" with no extra clicks. */
+  preselectedClientId?: string;
 }) {
   const [clients, setClients] = useState<ClientLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedId, setSelectedId] = useState<string>(preselectedClientId || "");
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState<{
     url: string;
@@ -74,7 +80,13 @@ export function StripeConnectModal({
         if (error) setError(error.message);
         else setClients(data || []);
         setLoading(false);
+        // Re-apply preselection after the list is in — covers the case
+        // where the prop was set but `clients` hadn't loaded yet.
+        if (preselectedClientId && !selectedId) {
+          setSelectedId(preselectedClientId);
+        }
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(
