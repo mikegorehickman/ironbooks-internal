@@ -12,6 +12,11 @@ export type FlaggedSource = "coa" | "reclass" | "stripe";
 export interface FlaggedItem {
   id: string;
   type: FlaggedSource;
+  source: FlaggedSource;       // duplicate of `type` for explicit grouping
+  job_id: string;
+  job_status: string;
+  bookkeeper_name: string;
+  job_created_at: string;
   headline: string;
   subheadline: string;
   amount: number | null;
@@ -24,17 +29,16 @@ export interface FlaggedItem {
   raw: any;
 }
 
-export interface FlaggedJob {
+export interface FlaggedClient {
   key: string;
-  source: FlaggedSource;
-  job_id: string;
+  client_link_id: string;
   client_name: string;
   jurisdiction: string;
   state_province: string;
-  bookkeeper_name: string;
-  bookkeeper_id: string;
-  job_status: string;
-  created_at: string;
+  sources: FlaggedSource[];        // unique sources represented
+  bookkeeper_names: string[];      // unique bookkeepers across all jobs
+  job_ids: string[];               // every job_id contributing items
+  latest_activity_at: string;      // most recent job's created_at
   items: FlaggedItem[];
 }
 
@@ -45,14 +49,14 @@ const SOURCE_META: Record<FlaggedSource, { icon: any; label: string; color: stri
 };
 
 export function FlaggedQueue({
-  jobs: initialJobs,
+  clients: initialClients,
   reviewerName,
 }: {
-  jobs: FlaggedJob[];
+  clients: FlaggedClient[];
   reviewerName: string;
 }) {
   const router = useRouter();
-  const [jobs, setJobs] = useState(initialJobs);
+  const [clients, setClients] = useState(initialClients);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   function toggleExpanded(key: string) {
@@ -64,7 +68,7 @@ export function FlaggedQueue({
   }
 
   async function resolveItem(
-    job: FlaggedJob,
+    client: FlaggedClient,
     item: FlaggedItem,
     decision: "approve" | "override" | "reject",
     overrideTarget?: string,
@@ -86,15 +90,15 @@ export function FlaggedQueue({
       alert(`Failed: ${error}`);
       return;
     }
-    // Remove from local state
-    setJobs((prev) =>
+    // Remove the item from this client's bucket; drop the client if empty.
+    setClients((prev) =>
       prev
-        .map((j) =>
-          j.key === job.key
-            ? { ...j, items: j.items.filter((it) => it.id !== item.id) }
-            : j
+        .map((c) =>
+          c.key === client.key
+            ? { ...c, items: c.items.filter((it) => it.id !== item.id) }
+            : c
         )
-        .filter((j) => j.items.length > 0)
+        .filter((c) => c.items.length > 0)
     );
     router.refresh();
   }
@@ -107,19 +111,29 @@ export function FlaggedQueue({
         are written to the audit log.
       </div>
 
-      {jobs.map((job) => {
-        const meta = SOURCE_META[job.source];
-        const Icon = meta.icon;
-        const isExpanded = expanded.has(job.key);
+      {clients.map((client) => {
+        const isExpanded = expanded.has(client.key);
+
+        // Items grouped by source so the expanded panel reads as
+        // "COA Cleanup (N) | Reclassify (M) | Stripe Recon (K)"
+        // instead of a flat mix.
+        const byCategory = new Map<FlaggedSource, FlaggedItem[]>();
+        for (const it of client.items) {
+          const arr = byCategory.get(it.source) || [];
+          arr.push(it);
+          byCategory.set(it.source, arr);
+        }
 
         return (
           <div
-            key={job.key}
+            key={client.key}
             className="rounded-xl bg-white border border-gray-200 overflow-hidden"
           >
-            {/* Job summary header (always visible) */}
+            {/* Client summary header (always visible). Aggregates every
+                flagged item across COA / reclass / stripe and across
+                multiple jobs into a single row. */}
             <button
-              onClick={() => toggleExpanded(job.key)}
+              onClick={() => toggleExpanded(client.key)}
               className="w-full px-5 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors text-left"
             >
               <div className="flex-shrink-0">
@@ -128,57 +142,88 @@ export function FlaggedQueue({
                   : <ChevronRight size={16} className="text-ink-slate" />}
               </div>
 
-              <div
-                className="rounded-lg flex items-center justify-center w-10 h-10 flex-shrink-0"
-                style={{ backgroundColor: meta.bg }}
-              >
-                <Icon size={18} style={{ color: meta.color }} />
+              <div className="rounded-lg flex items-center justify-center w-10 h-10 flex-shrink-0 bg-amber-100">
+                <Flag size={18} className="text-amber-700" />
               </div>
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-base text-navy">{job.client_name}</h3>
-                  <span
-                    className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
-                    style={{ color: meta.color, backgroundColor: meta.bg }}
-                  >
-                    {meta.label}
-                  </span>
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-light">
-                    {job.job_status}
-                  </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-base text-navy">{client.client_name}</h3>
+                  {client.sources.map((s) => {
+                    const sMeta = SOURCE_META[s];
+                    return (
+                      <span
+                        key={s}
+                        className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                        style={{ color: sMeta.color, backgroundColor: sMeta.bg }}
+                        title={`${(byCategory.get(s) || []).length} flagged ${sMeta.label} item(s)`}
+                      >
+                        {sMeta.label} · {(byCategory.get(s) || []).length}
+                      </span>
+                    );
+                  })}
                 </div>
-                <div className="text-xs text-ink-slate flex items-center gap-3 mt-1">
+                <div className="text-xs text-ink-slate flex items-center gap-3 mt-1 flex-wrap">
                   <span className="flex items-center gap-1">
-                    <User size={11} /> {job.bookkeeper_name}
+                    <User size={11} />
+                    {client.bookkeeper_names.slice(0, 2).join(", ")}
+                    {client.bookkeeper_names.length > 2 && ` +${client.bookkeeper_names.length - 2}`}
                   </span>
                   <span className="flex items-center gap-1">
-                    <MapPin size={11} /> {job.jurisdiction}{job.state_province ? ` · ${job.state_province}` : ""}
+                    <MapPin size={11} /> {client.jurisdiction}
+                    {client.state_province ? ` · ${client.state_province}` : ""}
                   </span>
-                  <span>Started {new Date(job.created_at).toLocaleDateString()}</span>
+                  <span>
+                    {client.job_ids.length} job{client.job_ids.length !== 1 ? "s" : ""}
+                  </span>
+                  <span>
+                    Last activity {new Date(client.latest_activity_at).toLocaleDateString()}
+                  </span>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0">
                 <span className="rounded-full bg-amber-100 text-amber-800 text-xs font-bold px-2.5 py-1">
-                  {job.items.length} {job.items.length === 1 ? "item" : "items"}
+                  {client.items.length} {client.items.length === 1 ? "item" : "items"}
                 </span>
               </div>
             </button>
 
-            {/* Expanded item list */}
+            {/* Expanded item list — grouped by source within the client */}
             {isExpanded && (
-              <div className="border-t border-gray-100 divide-y divide-gray-100">
-                {job.items.map((item) => (
-                  <ItemCard
-                    key={`${item.type}::${item.id}`}
-                    job={job}
-                    item={item}
-                    onResolve={(decision, overrideTarget, notes) =>
-                      resolveItem(job, item, decision, overrideTarget, notes)
-                    }
-                  />
-                ))}
+              <div className="border-t border-gray-100">
+                {(["coa", "reclass", "stripe"] as FlaggedSource[]).map((src) => {
+                  const list = byCategory.get(src);
+                  if (!list || list.length === 0) return null;
+                  const sMeta = SOURCE_META[src];
+                  const SIcon = sMeta.icon;
+                  return (
+                    <div key={src} className="border-b border-gray-100 last:border-0">
+                      <div
+                        className="px-5 py-2.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wider"
+                        style={{ color: sMeta.color, backgroundColor: sMeta.bg }}
+                      >
+                        <SIcon size={13} />
+                        {sMeta.label}
+                        <span className="text-[10px] font-semibold opacity-70">
+                          {list.length} item{list.length !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <div className="divide-y divide-gray-100">
+                        {list.map((item) => (
+                          <ItemCard
+                            key={`${item.type}::${item.id}`}
+                            client={client}
+                            item={item}
+                            onResolve={(decision, overrideTarget, notes) =>
+                              resolveItem(client, item, decision, overrideTarget, notes)
+                            }
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -222,11 +267,11 @@ function buildContext(item: FlaggedItem): string {
 }
 
 function ItemCard({
-  job,
+  client,
   item,
   onResolve,
 }: {
-  job: FlaggedJob;
+  client: FlaggedClient;
   item: FlaggedItem;
   onResolve: (decision: "approve" | "override" | "reject", overrideTarget?: string, notes?: string) => Promise<void>;
 }) {
@@ -255,13 +300,22 @@ function ItemCard({
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h4 className="font-bold text-sm text-navy">{item.headline}</h4>
             {item.amount !== null && (
               <span className="text-sm font-semibold text-navy">
                 ${Math.abs(item.amount).toFixed(2)}
               </span>
             )}
+            {/* Tiny job context — shows which specific job this flag came
+                from so reviewers can disambiguate when one client has
+                multiple jobs of the same source contributing flags. */}
+            <span
+              className="text-[10px] font-semibold uppercase tracking-wider text-ink-light"
+              title={`Job ${item.job_id.slice(0, 8)} · started ${new Date(item.job_created_at).toLocaleDateString()}`}
+            >
+              {item.job_status} · {item.bookkeeper_name}
+            </span>
             {confidencePct > 0 && (
               <span
                 className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded"
