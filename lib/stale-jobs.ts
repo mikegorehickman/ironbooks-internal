@@ -97,9 +97,10 @@ export async function sweepStaleJobs(): Promise<SweepResult> {
     .lt("execution_started_at", startedStaleCutoff)
     .select("id");
 
-  // stripe_recon_jobs — defensive; column shape is leaner here, gate only
-  // on created_at to keep it simple. If the table doesn't have these
-  // columns the update silently affects 0 rows.
+  // stripe_recon_jobs — uses status='discovering' during the QBO fetch
+  // phase (different status name than coa/reclass). We sweep both
+  // 'discovering' and 'executing' rows older than the never-started cutoff.
+  // The fetchStripeDeposits → QBO API call is the typical hang point.
   let stripeFailed = 0;
   try {
     const { data: sr } = await service
@@ -108,7 +109,7 @@ export async function sweepStaleJobs(): Promise<SweepResult> {
         status: "failed",
         error_message: errorMsgNeverStarted,
       } as any)
-      .eq("status", "executing")
+      .in("status", ["discovering", "executing"])
       .lt("created_at", neverStartedCutoff)
       .select("id");
     stripeFailed = sr?.length || 0;

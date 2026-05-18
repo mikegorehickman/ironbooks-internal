@@ -133,13 +133,24 @@ async function runDiscovery(
   );
 
   if (deposits.length === 0) {
+    // No Stripe-origin deposits → there's literally nothing to reconcile.
+    // We used to mark this 'in_review' but that left the row appearing as a
+    // pending/Continue-able job on the clients page (the resumable filter
+    // includes 'in_review'). Better to short-circuit to 'complete' with a
+    // clear warning so the bookkeeper sees "0 deposits, nothing to do" and
+    // the row clears off the active-work list. (Despres Painting, May 2026.)
     await service
       .from("stripe_recon_jobs")
       .update({
-        status: "in_review",
+        status: "complete",
         stripe_deposits_found: 0,
         ai_completed_at: new Date().toISOString(),
-        warnings: ["No Stripe-origin deposits found in the selected date range."] as any,
+        execution_completed_at: new Date().toISOString(),
+        warnings: [
+          "No Stripe-origin deposits found in the selected date range — nothing to reconcile. " +
+          "(If you expected deposits here, double-check the date range and that the deposits " +
+          "in QBO are tagged with a Stripe-recognizable source / payment method.)",
+        ] as any,
       } as any)
       .eq("id", jobId);
     return;
