@@ -1166,10 +1166,15 @@ export async function executeJob(jobId: string): Promise<{
           await logProgress(ctx, "cancellation_acknowledged", "Cancelled mid-run — exiting inactivate stage cleanly");
           return { success: false, errors, stats };
         }
-        try {
-          const current = accountMap.get(action.qbo_account_id!);
-          if (!current) continue;
+        // Resolve the account snapshot OUTSIDE the try block so it's visible
+        // in catch too. The previous version declared `current` inside try
+        // and referenced it from catch, which crashes with "current is not
+        // defined" on every QBO-limitation path (try/catch are separate
+        // lexical scopes for const/let).
+        const current = accountMap.get(action.qbo_account_id!);
+        if (!current) continue;
 
+        try {
           const inactive = await qbo.inactivateAccount(
             ctx.realmId, ctx.accessToken,
             action.qbo_account_id!, (current as any).SyncToken,
