@@ -1055,7 +1055,8 @@ export async function executeJob(jobId: string): Promise<{
                   action.qbo_account_id,
                   sourceAccount.SyncToken,
                   proposed,
-                  sourceAccount
+                  // wrap as options so renameAccount preserves SubAccount/ParentRef
+                  { currentAccount: sourceAccount as any }
                 );
                 renamedTo = proposed;
               } catch (renameErr: any) {

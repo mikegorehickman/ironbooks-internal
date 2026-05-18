@@ -67,6 +67,18 @@ export async function POST(
   const clientLink = (job as any).client_links;
   if (!clientLink) return NextResponse.json({ error: "Client missing" }, { status: 400 });
 
+  // Don't revert while the executor is still running — would race on the
+  // same QBO accounts. Tell the bookkeeper to Stop first.
+  if (job.status === "executing") {
+    return NextResponse.json(
+      {
+        error:
+          "This job is currently executing. Click Stop first (wait for the executor to acknowledge the cancel), then run Revert.",
+      },
+      { status: 409 }
+    );
+  }
+
   const { data: stageActions } = await service
     .from("coa_actions")
     .select("*")
@@ -160,7 +172,7 @@ async function runStageRevert(
             action.qbo_account_id,
             acct.SyncToken,
             action.current_name,
-            acct as any
+            { currentAccount: acct as any }
           );
           reverted++;
           break;
@@ -210,6 +222,8 @@ async function runStageRevert(
         case "merge": {
           // Undo merge:
           //   - Reactivate source if it was inactivated (full merge path)
+          //   - Rename source back to its original name if it was renamed
+          //     with a "(Pre-YYYY)" suffix (partial merge path)
           //   - Move transactions back from target to source using the
           //     Ironbooks merge audit memo
           const sourceId = action.qbo_account_id;
@@ -235,6 +249,52 @@ async function runStageRevert(
               skipped++;
               errors.push(`${action.current_name}: could not reactivate: ${e.message}`);
               continue;
+            }
+          }
+
+          // Partial-merge rename undo. If the original merge renamed the
+          // source to "(Pre-YYYY)" (result_data.partial_merge=true), and
+          // the source's current name still has that suffix, rename it
+          // back to the original.
+          const resultData: any = action.result_data || {};
+          const originalName: string = String(action.current_name || "");
+          if (
+            resultData.partial_merge &&
+            source &&
+            originalName &&
+            source.Name !== originalName &&
+            /\(Pre[\s\-]?\d{4}\)/i.test(source.Name || "")
+          ) {
+            try {
+              source = await renameAccount(
+                realmId,
+                accessToken,
+                sourceId,
+                source.SyncToken,
+                originalName,
+                { currentAccount: source }
+              );
+              await service.from("audit_log").insert({
+                job_id: jobId,
+                user_id: bookkeeperId,
+                event_type: "revert_stage_renamed_source_back",
+                request_payload: {
+                  source_was: resultData.source_renamed_to,
+                  source_now: originalName,
+                } as any,
+              });
+            } catch (e: any) {
+              // Don't fail the whole revert if the rename-back fails; the
+              // transactions still need to move. Log and continue.
+              await service.from("audit_log").insert({
+                job_id: jobId,
+                user_id: bookkeeperId,
+                event_type: "revert_stage_rename_back_failed",
+                request_payload: {
+                  source: action.current_name,
+                  error: String(e?.message || e).slice(0, 300),
+                } as any,
+              });
             }
           }
 

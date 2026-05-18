@@ -24,13 +24,14 @@ export default async function ClientsPage() {
       .eq("is_active", true)
       .in("role", ["admin", "lead", "bookkeeper"])
       .order("full_name"),
-    // Resumable cleanup jobs — anything mid-flight (executing, in_review,
-    // failed, cancelled with executed actions). The Continue button on
-    // each client row jumps straight to the most recent one.
+    // Resumable cleanup jobs — anything mid-flight where re-execute would
+    // actually do something useful. Status 'cancelled' is excluded
+    // because cancel flags all pending actions, so re-execute is a no-op
+    // (the bookkeeper should start a fresh cleanup instead).
     supabase
       .from("coa_jobs")
       .select("id, client_link_id, status, updated_at, execution_started_at")
-      .in("status", ["in_review", "executing", "failed", "cancelled"])
+      .in("status", ["in_review", "executing", "failed"])
       .order("updated_at", { ascending: false }),
   ]);
 
