@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { CheckCircle2, Loader2, AlertTriangle, ExternalLink, ArrowRight, StopCircle } from "lucide-react";
+import {
+  CheckCircle2, Loader2, AlertTriangle, ExternalLink, ArrowRight,
+  StopCircle, RotateCcw, FileDown,
+} from "lucide-react";
 import Link from "next/link";
 
 interface AuditEvent {
@@ -54,6 +57,27 @@ export function LiveExecution({
   const [autoStarted, setAutoStarted] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string>("");
+
+  async function handleDownloadReport() {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/error-report`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Ironbooks Error Report - ${jobId.slice(0, 8)}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Report download failed: ${e?.message || e}`);
+    }
+  }
 
   async function handleCancel(hard: boolean) {
     const confirmText = hard
@@ -244,6 +268,47 @@ export function LiveExecution({
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
           <p className="text-sm font-semibold text-navy mb-1">⚠ Some operations had issues:</p>
           <p className="text-xs text-ink-slate whitespace-pre-wrap">{status.error_message}</p>
+        </div>
+      )}
+
+      {/* Revert + Report banner — visible when the job failed OR has any
+          manual cleanup items. Lets the bookkeeper recover with one click
+          and download a Claude-friendly diagnosis report. */}
+      {(isFailed ||
+        status?.status === "cancelled" ||
+        (status?.manual_cleanup_items && status.manual_cleanup_items.length > 0)) && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="text-sm text-red-900 leading-relaxed">
+              <p className="font-semibold mb-1">Hit a problem — quick recovery actions:</p>
+              <p className="text-xs">
+                <strong>Revert</strong> stops the run and flags every remaining action so nothing
+                else runs. <strong>Download Error Report</strong> saves a Claude-friendly markdown
+                file of what happened so you can ask Claude to fix the underlying code.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {!isFailed && status?.status !== "cancelled" && (
+                <button
+                  onClick={() => handleCancel(false)}
+                  disabled={cancelling}
+                  className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded-lg"
+                  title="Stop the cleanup and flag remaining actions"
+                >
+                  <RotateCcw size={14} />
+                  {cancelling ? "Reverting…" : "Revert"}
+                </button>
+              )}
+              <button
+                onClick={handleDownloadReport}
+                className="inline-flex items-center gap-1.5 bg-navy hover:bg-ink-slate text-white text-xs font-semibold px-3 py-2 rounded-lg"
+                title="Download a markdown report you can paste into Claude for diagnosis"
+              >
+                <FileDown size={14} />
+                Download Error Report
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
