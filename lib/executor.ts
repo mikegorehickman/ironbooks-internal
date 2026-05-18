@@ -173,6 +173,24 @@ async function flagAction(ctx: ExecutionContext, action: any, reason: string) {
   });
 }
 
+/**
+ * Cooperative cancellation point. Returns true if the bookkeeper has hit
+ * the cancel endpoint (job.status === 'cancelled'). The executor's stage
+ * loops call this between actions; when it returns true the caller should
+ * `return` immediately so no further QBO writes happen.
+ *
+ * Cheap DB call — fine to invoke once per action. The cost is far less
+ * than even a single QBO API call we'd otherwise make.
+ */
+async function shouldCancel(ctx: ExecutionContext): Promise<boolean> {
+  const { data } = await ctx.supabase
+    .from("coa_jobs")
+    .select("status")
+    .eq("id", ctx.jobId)
+    .single();
+  return data?.status === "cancelled";
+}
+
 async function getBookkeeperName(ctx: ExecutionContext): Promise<string> {
   const { data } = await ctx.supabase
     .from("users")
@@ -485,6 +503,10 @@ export async function executeJob(jobId: string): Promise<{
         { stage: "create_parents", total: parentCreations.length });
 
       for (const action of parentCreations) {
+        if (await shouldCancel(ctx)) {
+          await logProgress(ctx, "cancellation_acknowledged", "Cancelled mid-run — exiting create-parents stage cleanly");
+          return { success: false, errors, stats };
+        }
         try {
           const created = await qbo.createAccount(ctx.realmId, ctx.accessToken, {
             name: action.new_name!,
@@ -578,6 +600,10 @@ export async function executeJob(jobId: string): Promise<{
         { stage: "create_children", total: childCreations.length });
 
       for (const action of childCreations) {
+        if (await shouldCancel(ctx)) {
+          await logProgress(ctx, "cancellation_acknowledged", "Cancelled mid-run — exiting create-children stage cleanly");
+          return { success: false, errors, stats };
+        }
         try {
           let parentId = parentIdMap.get(action.new_parent_name!);
           if (!parentId) {
@@ -662,6 +688,10 @@ export async function executeJob(jobId: string): Promise<{
       const accountMap = new Map(allAccounts.map((a) => [a.Id, a]));
 
       for (const action of renames) {
+        if (await shouldCancel(ctx)) {
+          await logProgress(ctx, "cancellation_acknowledged", "Cancelled mid-run — exiting rename stage cleanly");
+          return { success: false, errors, stats };
+        }
         try {
           const current = accountMap.get(action.qbo_account_id!);
           if (!current) throw new Error("Account no longer exists in QBO");
@@ -779,6 +809,10 @@ export async function executeJob(jobId: string): Promise<{
       const postRenameById = new Map(postRenameAccounts.map((a) => [a.Id, a]));
 
       for (const action of merges) {
+        if (await shouldCancel(ctx)) {
+          await logProgress(ctx, "cancellation_acknowledged", "Cancelled mid-run — exiting merge stage cleanly");
+          return { success: false, errors, stats };
+        }
         if (!action.new_name || !action.qbo_account_id) {
           await flagAction(ctx, action, "Merge has no target account name — skipping.");
           continue;
@@ -946,6 +980,14 @@ export async function executeJob(jobId: string): Promise<{
                   lines_total: linesToMove.length,
                 }
               );
+              // Mid-merge cancel check — piggybacks on the heartbeat so a
+              // user cancel during a big merge stops within ~50 lines
+              // instead of waiting for the whole merge to finish.
+              if (await shouldCancel(ctx)) {
+                await logProgress(ctx, "cancellation_acknowledged",
+                  `Cancelled mid-merge — ${linesReclassed} lines already moved, exiting cleanly`);
+                return { success: false, errors, stats };
+              }
             }
           }
 
@@ -1090,6 +1132,10 @@ export async function executeJob(jobId: string): Promise<{
       const accountMap = new Map(allAccounts.map((a) => [a.Id, a]));
 
       for (const action of deletions) {
+        if (await shouldCancel(ctx)) {
+          await logProgress(ctx, "cancellation_acknowledged", "Cancelled mid-run — exiting inactivate stage cleanly");
+          return { success: false, errors, stats };
+        }
         try {
           const current = accountMap.get(action.qbo_account_id!);
           if (!current) continue;

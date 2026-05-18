@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { CheckCircle2, Loader2, AlertTriangle, ExternalLink, ArrowRight } from "lucide-react";
+import { CheckCircle2, Loader2, AlertTriangle, ExternalLink, ArrowRight, StopCircle } from "lucide-react";
 import Link from "next/link";
 
 interface AuditEvent {
@@ -52,6 +52,32 @@ export function LiveExecution({
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [autoStarted, setAutoStarted] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string>("");
+
+  async function handleCancel(hard: boolean) {
+    const confirmText = hard
+      ? "HARD STOP this cleanup? This will invalidate the QBO token (you'll need to reconnect QuickBooks for this client). Use only if the regular stop isn't working."
+      : "Stop this cleanup? Already-completed actions stay applied. Remaining actions are skipped. The background process exits within ~60 seconds.";
+    if (!confirm(confirmText)) return;
+    setCancelling(true);
+    setCancelError("");
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hard }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+    } catch (e: any) {
+      setCancelError(e?.message || String(e));
+    } finally {
+      setCancelling(false);
+    }
+  }
   const lastSeen = useRef<string | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -167,6 +193,42 @@ export function LiveExecution({
             }}
           />
         </div>
+
+        {/* Stop button — visible while the job is running. The executor
+            checks job.status between every action and exits cleanly when
+            it sees 'cancelled'. Already-completed actions stay applied. */}
+        {isExecuting && (
+          <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-red-50 border border-red-100 mb-2">
+            <div className="text-xs text-red-900 leading-relaxed">
+              <strong>Need to stop this?</strong> Already-done actions stay applied. The
+              background process exits within ~60 seconds at the next action boundary.
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => handleCancel(false)}
+                disabled={cancelling}
+                className="inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded-lg"
+                title="Stop the cleanup at the next safe boundary"
+              >
+                <StopCircle size={14} />
+                {cancelling ? "Stopping…" : "Stop Cleanup"}
+              </button>
+              <button
+                onClick={() => handleCancel(true)}
+                disabled={cancelling}
+                className="text-[10px] text-red-700 hover:text-red-900 underline"
+                title="Hard stop — invalidates QBO token, exits within seconds. Use only if regular stop isn't working."
+              >
+                Hard stop
+              </button>
+            </div>
+          </div>
+        )}
+        {cancelError && (
+          <div className="p-2 mb-2 text-xs bg-red-50 border border-red-200 rounded text-red-800">
+            Cancel failed: {cancelError}
+          </div>
+        )}
 
         {/* Stats grid */}
         <div className="grid grid-cols-4 gap-3 mt-6">
