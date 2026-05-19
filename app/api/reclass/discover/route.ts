@@ -864,7 +864,7 @@ async function runFullCategorization(
   if (uniqueVendorsToSearch.size > 0) {
     // Cap at 50 vendors per run — anything beyond that is diminishing returns
     // and risks hitting the 300s function timeout.
-    const MAX_SEARCHES = 50;
+    const MAX_SEARCHES = 30;
     const vendorEntries = [...uniqueVendorsToSearch.entries()].slice(0, MAX_SEARCHES);
     if (uniqueVendorsToSearch.size > MAX_SEARCHES) {
       console.log(`[reclass] Capping web search at ${MAX_SEARCHES} of ${uniqueVendorsToSearch.size} vendors`);
@@ -873,11 +873,22 @@ async function runFullCategorization(
 
     const newBankRules: any[] = [];
     const totalBatches = Math.ceil(vendorEntries.length / CONCURRENCY);
+    const WEB_SEARCH_BUDGET_MS = 90_000; // hard wall-clock limit for entire phase
+    const webSearchStart = Date.now();
 
     // Run searches in parallel with a concurrency limit of 5 so we don't
     // blast the Anthropic API and stay well under the function timeout.
     const CONCURRENCY = 5;
     for (let i = 0; i < vendorEntries.length; i += CONCURRENCY) {
+      if (Date.now() - webSearchStart > WEB_SEARCH_BUDGET_MS) {
+        const remaining = vendorEntries.length - i;
+        console.warn(`[reclass] Web search budget exhausted after ${i} vendors — skipping ${remaining} remaining`);
+        await service
+          .from("reclass_jobs")
+          .update({ error_message: `[web_search] Budget exhausted — ${remaining} vendors skipped, will remain in needs_review` } as any)
+          .eq("id", jobId);
+        break;
+      }
       const batchNum = Math.floor(i / CONCURRENCY) + 1;
       const batch = vendorEntries.slice(i, i + CONCURRENCY);
       const batchVendorNames = batch.map(([, info]) => info.vendorName);

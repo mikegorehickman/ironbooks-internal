@@ -704,7 +704,7 @@ Return STRICTLY valid JSON, no other text:
   // vendor freezes the entire reclass job in `status='executing'` forever
   // (see Interial Painting incident, May 2026). 45s is generous — typical
   // calls finish in 5–15s.
-  const WEB_SEARCH_TIMEOUT_MS = 45_000;
+  const WEB_SEARCH_TIMEOUT_MS = 12_000;
   try {
     const response = await Promise.race([
       client.messages.create({
