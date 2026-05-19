@@ -862,51 +862,67 @@ async function runFullCategorization(
   }
 
   if (uniqueVendorsToSearch.size > 0) {
-    console.log(`[reclass] Web-searching ${uniqueVendorsToSearch.size} unique unknown vendors...`);
+    // Cap at 50 vendors per run — anything beyond that is diminishing returns
+    // and risks hitting the 300s function timeout.
+    const MAX_SEARCHES = 50;
+    const vendorEntries = [...uniqueVendorsToSearch.entries()].slice(0, MAX_SEARCHES);
+    if (uniqueVendorsToSearch.size > MAX_SEARCHES) {
+      console.log(`[reclass] Capping web search at ${MAX_SEARCHES} of ${uniqueVendorsToSearch.size} vendors`);
+    }
+    console.log(`[reclass] Web-searching ${vendorEntries.length} unique unknown vendors (concurrency=5)...`);
 
     const newBankRules: any[] = [];
-    for (const [normalized, info] of uniqueVendorsToSearch) {
-      try {
-        const result = await webSearchVendor({
-          vendorName: info.vendorName,
-          clientCity: clientCity || undefined,
-          availableAccounts,
-        });
-        if (result && result.target_account_id && result.confidence >= 0.65) {
-          // Update every transaction with the same vendor
-          for (const refId of info.refIds) {
-            const existing = decisionByRef.get(refId);
-            decisionByRef.set(refId, {
-              ref_id: refId,
-              target_account_id: result.target_account_id,
-              target_account_name: result.target_account_name,
-              confidence: result.confidence,
-              reasoning: result.reasoning,
-              decision:
-                result.confidence >= 0.80 ? "auto_approve" : "needs_review",
-              flagged_reason: existing?.flagged_reason,
+
+    // Run searches in parallel with a concurrency limit of 5 so we don't
+    // blast the Anthropic API and stay well under the function timeout.
+    const CONCURRENCY = 5;
+    for (let i = 0; i < vendorEntries.length; i += CONCURRENCY) {
+      const batch = vendorEntries.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map(async ([normalized, info]) => {
+          try {
+            const result = await webSearchVendor({
+              vendorName: info.vendorName,
+              clientCity: clientCity || undefined,
+              availableAccounts,
             });
+            return { normalized, info, result };
+          } catch (err: any) {
+            console.warn(`[reclass] Web search failed for "${info.vendorName}":`, err.message);
+            return { normalized, info, result: null };
           }
-          // Cache this match as a bank rule so future runs skip the search
-          newBankRules.push({
-            client_link_id: clientLink.id,
-            vendor_pattern: normalized,
+        })
+      );
+
+      for (const { normalized, info, result } of results) {
+        if (!result || !result.target_account_id || result.confidence < 0.65) continue;
+        for (const refId of info.refIds) {
+          const existing = decisionByRef.get(refId);
+          decisionByRef.set(refId, {
+            ref_id: refId,
+            target_account_id: result.target_account_id,
             target_account_name: result.target_account_name,
-            ai_confidence: result.confidence,
-            ai_reasoning: result.reasoning,
-            match_type: "CONTAINS",
-            status: "approved",
-            requires_approval: false,
-            created_by: job.bookkeeper_id,
-            pushed_to_qbo: false,
+            confidence: result.confidence,
+            reasoning: result.reasoning,
+            decision: result.confidence >= 0.80 ? "auto_approve" : "needs_review",
+            flagged_reason: existing?.flagged_reason,
           });
         }
-      } catch (err: any) {
-        console.warn(`[reclass] Web search failed for "${info.vendorName}":`, err.message);
+        newBankRules.push({
+          client_link_id: clientLink.id,
+          vendor_pattern: normalized,
+          target_account_name: result.target_account_name,
+          ai_confidence: result.confidence,
+          ai_reasoning: result.reasoning,
+          match_type: "CONTAINS",
+          status: "approved",
+          requires_approval: false,
+          created_by: job.bookkeeper_id,
+          pushed_to_qbo: false,
+        });
       }
     }
 
-    // Bulk-insert new bank rules in one shot (skip dupes via vendor_pattern uniqueness)
     if (newBankRules.length > 0) {
       try {
         await service
