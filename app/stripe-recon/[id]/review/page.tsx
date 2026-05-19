@@ -4,10 +4,11 @@ import { WorkflowStepper } from "@/components/WorkflowStepper";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { CheckCircle2, Loader2, Sparkles, ArrowRight } from "lucide-react";
+import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
 import { StripeReconReview } from "./review-client";
 import { UnmatchedPanel } from "./unmatched-panel";
 import { MarkCleanupCompleteButton } from "./mark-complete-button";
+import { UpgradeToStripeApiButton } from "./upgrade-button";
 
 export default async function StripeReconReviewPage({
   params,
@@ -45,15 +46,10 @@ export default async function StripeReconReviewPage({
     (job as any).method === "qbo_invoice_match" &&
     clientLink?.stripe_connection_status === "connected";
 
-  const upgradeHref = clientLink?.id
-    ? `/stripe-recon/new?${new URLSearchParams({
-        client: clientLink.id as unknown as string,
-        method: "stripe_api",
-        upgrade_from: id,
-        ...(job.date_range_start ? { start: job.date_range_start as unknown as string } : {}),
-        ...(job.date_range_end ? { end: job.date_range_end as unknown as string } : {}),
-      }).toString()}`
-    : "/stripe-recon/new";
+  const upgradeClientId = (clientLink?.id as unknown as string) ||
+    (job.client_link_id as unknown as string);
+  const upgradeRangeStart = (job.date_range_start as unknown as string) || null;
+  const upgradeRangeEnd = (job.date_range_end as unknown as string) || null;
 
   // Still discovering — show loader, auto-refresh
   if (job.status === "discovering" || !job.ai_completed_at) {
@@ -239,7 +235,10 @@ export default async function StripeReconReviewPage({
           {canUpgradeToStripeApi && (
             <UpgradeToStripeApiBanner
               clientName={clientLink?.client_name || "this client"}
-              href={upgradeHref}
+              jobId={id}
+              clientLinkId={upgradeClientId}
+              dateRangeStart={upgradeRangeStart}
+              dateRangeEnd={upgradeRangeEnd}
             />
           )}
           <UnmatchedPanel
@@ -277,7 +276,10 @@ export default async function StripeReconReviewPage({
         {canUpgradeToStripeApi && (
           <UpgradeToStripeApiBanner
             clientName={clientLink?.client_name || "this client"}
-            href={upgradeHref}
+            jobId={id}
+            clientLinkId={upgradeClientId}
+            dateRangeStart={upgradeRangeStart}
+            dateRangeEnd={upgradeRangeEnd}
           />
         )}
         <StripeReconReview
@@ -298,18 +300,26 @@ export default async function StripeReconReviewPage({
 
 /**
  * Banner rendered when the current recon used the QBO-AI matcher and
- * the client has since connected Stripe. One-click "Upgrade to Stripe
- * API" routes to /stripe-recon/new with method=stripe_api, the same
- * date range, and an upgrade_from breadcrumb. The execute step is
- * idempotent (strips prior [Ironbooks] lines before writing fresh
- * ones) so re-running on the same deposits is safe.
+ * the client has since connected Stripe. The CTA uses the dedicated
+ * UpgradeToStripeApiButton which acknowledges the current job FIRST
+ * (so the concurrency guard on the next discover doesn't bounce the
+ * user back here in a loop) and then navigates to /stripe-recon/new
+ * with the upgrade params. The execute step is idempotent (strips
+ * prior [Ironbooks] lines before writing fresh ones) so re-running
+ * on the same deposits is safe.
  */
 function UpgradeToStripeApiBanner({
   clientName,
-  href,
+  jobId,
+  clientLinkId,
+  dateRangeStart,
+  dateRangeEnd,
 }: {
   clientName: string;
-  href: string;
+  jobId: string;
+  clientLinkId: string;
+  dateRangeStart: string | null;
+  dateRangeEnd: string | null;
 }) {
   return (
     <div className="rounded-xl bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 p-5">
@@ -322,7 +332,7 @@ function UpgradeToStripeApiBanner({
             <strong className="text-purple-900">{clientName}</strong> has
             connected Stripe — upgrade this recon to the deterministic path
           </h3>
-          <p className="text-xs text-ink-slate mt-1 leading-relaxed">
+          <p className="text-xs text-ink-slate mt-1 leading-relaxed mb-3">
             This run used the <strong className="text-navy">QBO invoice matcher</strong> (AI).
             Now that Stripe is connected, you can re-run with the{" "}
             <strong className="text-navy">Stripe API</strong> path — exact
@@ -330,13 +340,15 @@ function UpgradeToStripeApiBanner({
             guessing. The previous AI-matched lines on each deposit are
             replaced automatically (no duplicates).
           </p>
-          <Link
-            href={href}
-            className="mt-3 inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-4 py-2 rounded-lg"
-          >
-            <ArrowRight size={14} />
-            Upgrade to Stripe API
-          </Link>
+          <div className="inline-block">
+            <UpgradeToStripeApiButton
+              jobId={jobId}
+              clientLinkId={clientLinkId}
+              dateRangeStart={dateRangeStart}
+              dateRangeEnd={dateRangeEnd}
+              variant="secondary"
+            />
+          </div>
         </div>
       </div>
     </div>

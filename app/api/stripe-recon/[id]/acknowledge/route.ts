@@ -27,6 +27,12 @@ export async function POST(
 
   const body = await request.json().catch(() => ({}));
   const note: string | undefined = body?.note;
+  // Optional `reason` overrides the default "client doesn't invoice via QBO"
+  // warning. Used by the Upgrade-to-Stripe-API flow which closes a prior
+  // qbo_invoice_match job so a new stripe_api job can run — the default
+  // warning ("Re-run after they connect Stripe") is the wrong text there
+  // because they ARE already connected.
+  const reason: string | undefined = body?.reason;
 
   const service = createServiceSupabase();
 
@@ -47,11 +53,12 @@ export async function POST(
     );
   }
 
-  const ackWarning =
+  const defaultAckWarning =
     `Acknowledged by bookkeeper without AR matching — no QBO invoices/payments existed within ±30 days of any deposit. ` +
     `Client likely takes payment via Stripe directly (Payment Links / subscriptions / Stripe Invoicing). ` +
-    `Re-run after they connect Stripe via the sidebar.` +
-    (note ? ` Note: ${note}` : "");
+    `Re-run after they connect Stripe via the sidebar.`;
+  const ackWarning =
+    (reason || defaultAckWarning) + (note ? ` Note: ${note}` : "");
 
   const existingWarnings: string[] = Array.isArray((job as any).warnings)
     ? ((job as any).warnings as any[]).filter((w) => typeof w === "string")

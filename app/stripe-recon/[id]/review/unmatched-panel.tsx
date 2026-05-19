@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
-  AlertTriangle, CreditCard, Loader2, ArrowRight, CheckCircle2, Sparkles,
+  AlertTriangle, CreditCard, Loader2, ArrowRight, CheckCircle2,
 } from "lucide-react";
 import { StripeConnectModal } from "@/components/StripeConnectModal";
+import { UpgradeToStripeApiButton } from "./upgrade-button";
 
 /**
  * Review-page sub-screen shown when EVERY Stripe deposit has zero QBO
@@ -55,13 +55,6 @@ export function UnmatchedPanel({
   const [acknowledging, setAcknowledging] = useState(false);
   const [error, setError] = useState<string>("");
 
-  const reRunHref = `/stripe-recon/new?${new URLSearchParams({
-    client: clientLinkId,
-    method: "stripe_api",
-    upgrade_from: jobId,
-    ...(dateRangeStart ? { start: dateRangeStart } : {}),
-    ...(dateRangeEnd ? { end: dateRangeEnd } : {}),
-  }).toString()}`;
 
   async function handleAcknowledge() {
     if (!confirm(
@@ -140,14 +133,14 @@ export function UnmatchedPanel({
                 where this one couldn&apos;t.
               </p>
             </div>
-            <Link
-              href={reRunHref}
-              className="w-full inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
-            >
-              <Sparkles size={16} />
-              Re-run with Stripe API
-              <ArrowRight size={14} />
-            </Link>
+            <UpgradeToStripeApiButton
+              jobId={jobId}
+              clientLinkId={clientLinkId}
+              dateRangeStart={dateRangeStart}
+              dateRangeEnd={dateRangeEnd}
+              variant="primary"
+              label="Re-run with Stripe API"
+            />
           </div>
         ) : (
           /* Path 1 (Stripe NOT connected): send Connect link to client. */
