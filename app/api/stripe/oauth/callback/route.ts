@@ -1,6 +1,7 @@
 import { createServiceSupabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
 import { exchangeCodeForTokens } from "@/lib/stripe-oauth";
+import { checkStripeAccountHealth } from "@/lib/stripe-health-check";
 
 /**
  * GET /api/stripe/oauth/callback?code=...&state=...
@@ -97,6 +98,17 @@ export async function GET(request: Request) {
     .update({ used_at: new Date().toISOString() } as any)
     .eq("id", connectToken.id);
 
+  // FAILSAFE: immediately ping /v1/payouts so we know whether this
+  // account has ever had a payout. Catches the "client connected the
+  // wrong (empty) Stripe account" case at handshake time — the new-recon
+  // form will surface a warning before a bookkeeper sinks time into a
+  // doomed reconciliation. Best-effort; never blocks the connect flow.
+  const health = await checkStripeAccountHealth({
+    accessToken: tokens.access_token,
+    clientLinkId: connectToken.client_link_id,
+    service,
+  });
+
   // Audit log
   await service.from("audit_log").insert({
     user_id: connectToken.created_by ?? null,
@@ -106,6 +118,8 @@ export async function GET(request: Request) {
       client_link_id: connectToken.client_link_id,
       stripe_account_id: tokens.stripe_user_id,
       livemode: tokens.livemode,
+      has_payouts: health.hasPayouts,
+      last_payout_at: health.lastPayoutAt,
     } as any,
   } as any);
 

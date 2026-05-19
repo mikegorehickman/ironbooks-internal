@@ -22,7 +22,7 @@ export default async function NewStripeReconPage() {
   // dropdown so it's obvious.
   const { data: clientLinks } = await service
     .from("client_links")
-    .select("id, client_name, jurisdiction, state_province, qbo_realm_id, double_client_id, double_client_name, stripe_connection_status, cleanup_completed_at")
+    .select("id, client_name, jurisdiction, state_province, qbo_realm_id, double_client_id, double_client_name, stripe_connection_status, cleanup_completed_at, stripe_has_payouts, stripe_last_payout_at, stripe_payouts_checked_at")
     .eq("is_active", true)
     .order("client_name");
 

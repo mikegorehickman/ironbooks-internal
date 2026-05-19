@@ -16,6 +16,15 @@ interface ClientLink {
    *  out. Still selectable for Stripe-recon (a legitimate delta op),
    *  but annotated in the dropdown so it's clear. */
   cleanup_completed_at?: string | null;
+  /** Failsafe metadata captured at OAuth-callback time (and on demand
+   *  later). When `stripe_has_payouts === false` we warn the
+   *  bookkeeper before they run a doomed recon — most often this
+   *  means the client connected the wrong Stripe account
+   *  (e.g. created a fresh one instead of logging into the existing
+   *  one that's been receiving payments). */
+  stripe_has_payouts?: boolean | null;
+  stripe_last_payout_at?: string | null;
+  stripe_payouts_checked_at?: string | null;
 }
 
 interface DateRangePreset {
@@ -52,6 +61,15 @@ export function NewStripeReconForm({ clientLinks }: { clientLinks: ClientLink[] 
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>("");
+  // For the "recheck Stripe health" inline action. Holds the most
+  // recently-rechecked values (overrides selectedClient.stripe_*) so a
+  // post-recheck UI update doesn't require a full page reload.
+  const [healthOverride, setHealthOverride] = useState<{
+    has_payouts: boolean | null;
+    last_payout_at: string | null;
+    checked_at: string | null;
+  } | null>(null);
+  const [rechecking, setRechecking] = useState(false);
   // When the API responds 409 with an existing_job_id, we hold it here so
   // the form can swap its generic error block for an actionable conflict
   // panel that links directly to the in-flight job.
@@ -63,6 +81,50 @@ export function NewStripeReconForm({ clientLinks }: { clientLinks: ClientLink[] 
   const selectedClient = clientLinks.find((c) => c.id === clientLinkId);
   const isStripeConnected =
     selectedClient?.stripe_connection_status === "connected";
+
+  // Effective health values — fresh recheck wins over the page-load
+  // snapshot. Allows the inline "Re-check" button to update the warning
+  // without a full reload.
+  const effectiveHasPayouts =
+    healthOverride !== null
+      ? healthOverride.has_payouts
+      : selectedClient?.stripe_has_payouts ?? null;
+  const effectiveLastPayoutAt =
+    healthOverride !== null
+      ? healthOverride.last_payout_at
+      : selectedClient?.stripe_last_payout_at ?? null;
+  const effectiveCheckedAt =
+    healthOverride !== null
+      ? healthOverride.checked_at
+      : selectedClient?.stripe_payouts_checked_at ?? null;
+
+  async function recheckHealth() {
+    if (!clientLinkId) return;
+    setRechecking(true);
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/stripe-recheck`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setHealthOverride({
+        has_payouts: data.stripe_has_payouts ?? null,
+        last_payout_at: data.stripe_last_payout_at ?? null,
+        checked_at: data.stripe_payouts_checked_at ?? null,
+      });
+    } catch (e: any) {
+      // Inline failure — just log; the warning panel is informational.
+      console.warn("[stripe-recheck]", e?.message);
+    } finally {
+      setRechecking(false);
+    }
+  }
+
+  // Reset the override whenever the selected client changes so we don't
+  // leak one client's recheck result onto another.
+  useEffect(() => {
+    setHealthOverride(null);
+  }, [clientLinkId]);
 
   // Default to Stripe API when connected, QBO matching otherwise. The user
   // can override on the form.
@@ -278,6 +340,89 @@ export function NewStripeReconForm({ clientLinks }: { clientLinks: ClientLink[] 
               : ""}
           </div>
         )}
+
+        {/* FAILSAFE: warn when the connected Stripe account has no payout
+            history. Most common cause is the client connected the wrong
+            Stripe account at OAuth time (created a new one instead of
+            logging into the existing one). Without this guard a bookkeeper
+            would only find out by running a doomed recon — the James
+            Painting LLC incident. */}
+        {selectedClient?.stripe_connection_status === "connected" &&
+          effectiveHasPayouts === false && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-900 space-y-2">
+              <div className="font-bold">
+                ⚠ The connected Stripe account has no payout history
+              </div>
+              <div className="leading-relaxed">
+                {selectedClient.client_name}&apos;s connected Stripe account
+                shows <strong>zero payouts</strong> in its entire history. If
+                you expect Stripe deposits to exist (QBO has them, or the
+                client says so), the wrong Stripe account is likely connected
+                — they may have created a fresh account on the Connect link
+                instead of logging into the existing one that&apos;s been
+                receiving payments.
+              </div>
+              <div className="leading-relaxed">
+                <strong>Fix:</strong> open the{" "}
+                <strong>Stripe Connect Link</strong> button in the sidebar,
+                Disconnect this client, then send a fresh link with explicit
+                instructions to log into the right Stripe account. Re-run the
+                recon after they reconnect.
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                {effectiveCheckedAt && (
+                  <span className="text-[10px] text-red-700/70">
+                    Last checked {new Date(effectiveCheckedAt).toLocaleString()}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={recheckHealth}
+                  disabled={rechecking}
+                  className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-red-800 hover:text-red-950 underline disabled:opacity-60"
+                >
+                  {rechecking ? "Re-checking…" : "Re-check now"}
+                </button>
+              </div>
+            </div>
+          )}
+
+        {/* Inverse: the account has payouts. Quiet green badge so the
+            bookkeeper has a positive signal that the right account is
+            connected — especially helpful for clients with similar names
+            or for clients who've reconnected. */}
+        {selectedClient?.stripe_connection_status === "connected" &&
+          effectiveHasPayouts === true && (
+            <div className="p-2 rounded-lg bg-green-50 border border-green-200 text-[11px] text-green-900">
+              ✓ Stripe account looks healthy
+              {effectiveLastPayoutAt && (
+                <>
+                  {" · Last payout "}
+                  <strong>{effectiveLastPayoutAt.slice(0, 10)}</strong>
+                </>
+              )}
+            </div>
+          )}
+
+        {/* Never-checked case: legacy connections from before the
+            health-check migration. Surface a small prompt so the
+            bookkeeper can populate it on demand. */}
+        {selectedClient?.stripe_connection_status === "connected" &&
+          effectiveHasPayouts === null && (
+            <div className="p-2 rounded-lg bg-gray-50 border border-gray-200 text-[11px] text-ink-slate flex items-center justify-between">
+              <span>
+                Stripe health not yet checked for this client (legacy connection).
+              </span>
+              <button
+                type="button"
+                onClick={recheckHealth}
+                disabled={rechecking}
+                className="font-semibold text-teal hover:text-teal-dark disabled:opacity-60"
+              >
+                {rechecking ? "Checking…" : "Check now"}
+              </button>
+            </div>
+          )}
 
         {/* Client */}
         <div>
