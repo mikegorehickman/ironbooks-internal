@@ -2,25 +2,26 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
-  AlertTriangle, CreditCard, Loader2, ArrowRight, CheckCircle2,
+  AlertTriangle, CreditCard, Loader2, ArrowRight, CheckCircle2, Sparkles,
 } from "lucide-react";
 import { StripeConnectModal } from "@/components/StripeConnectModal";
 
 /**
  * Review-page sub-screen shown when EVERY Stripe deposit has zero QBO
- * candidates within ±30 days (the Despres Painting class of failure — the
- * client doesn't invoice through QBO, so AR matching is structurally
- * impossible). Two clear actions:
+ * candidates within ±30 days. Splits into two flavors:
  *
- * 1. Send Stripe Connect link → opens the existing connect modal with this
- *    client pre-selected, so the bookkeeper can generate the link + copy
- *    the branded email in two clicks.
- * 2. Acknowledge & finish → marks the recon job complete with an explicit
- *    audit note, redirects to the parent reclass job (or /clients if
- *    standalone). The deposits will need to be reconciled later, but
- *    Despres-style clients can be "finished" for this cycle without
- *    leaving phantom flagged rows in the bookkeeper's queue.
+ *  - Client is NOT yet Stripe-connected: this is the Despres scenario.
+ *    Primary CTA "Send Stripe Connect link" + secondary "Acknowledge
+ *    & finish" so the bookkeeper can close out this cycle and pick
+ *    it up later.
+ *
+ *  - Client IS already Stripe-connected (e.g. James Painting): the
+ *    Connect-link CTA is redundant. The primary action here is "Re-run
+ *    with Stripe API" — the deterministic path doesn't need QBO
+ *    invoices at all, so re-running will succeed where the AI matcher
+ *    couldn't. Acknowledge & finish stays as the secondary option.
  */
 export function UnmatchedPanel({
   jobId,
@@ -29,6 +30,9 @@ export function UnmatchedPanel({
   depositCount,
   totalAmount,
   reclassJobId,
+  stripeConnected,
+  dateRangeStart,
+  dateRangeEnd,
 }: {
   jobId: string;
   clientLinkId: string;
@@ -36,11 +40,28 @@ export function UnmatchedPanel({
   depositCount: number;
   totalAmount: number;
   reclassJobId: string | null;
+  /** Whether this client currently has Stripe connected. When true, the
+   *  panel surfaces a "Re-run with Stripe API" CTA instead of pushing
+   *  another Connect link (the AI matcher only failed because there
+   *  are no QBO invoices to match against — Stripe API doesn't need
+   *  them, so the re-run will succeed). */
+  stripeConnected: boolean;
+  /** Used to pre-fill the same date range on the Stripe-API re-run. */
+  dateRangeStart: string | null;
+  dateRangeEnd: string | null;
 }) {
   const router = useRouter();
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
   const [error, setError] = useState<string>("");
+
+  const reRunHref = `/stripe-recon/new?${new URLSearchParams({
+    client: clientLinkId,
+    method: "stripe_api",
+    upgrade_from: jobId,
+    ...(dateRangeStart ? { start: dateRangeStart } : {}),
+    ...(dateRangeEnd ? { end: dateRangeEnd } : {}),
+  }).toString()}`;
 
   async function handleAcknowledge() {
     if (!confirm(
@@ -100,26 +121,56 @@ export function UnmatchedPanel({
           doesn&apos;t exist, so there&apos;s nothing for the AI to match against.
         </div>
 
-        {/* Path 1: Send connect link */}
-        <div className="pt-2 border-t border-gray-100 space-y-3">
-          <div>
-            <p className="text-sm font-semibold text-navy">
-              Recommended: Connect Stripe for deterministic matching
-            </p>
-            <p className="text-xs text-ink-slate mt-1">
-              Once {clientName} connects Stripe, the recon pulls exact charges,
-              fees, and customers directly from Stripe — no AI guessing, no
-              QBO invoices required. Generate a link and email it in two clicks:
-            </p>
+        {stripeConnected ? (
+          /* Path 1 (Stripe IS connected): re-run with the deterministic
+             Stripe API path. This is the right CTA when the client has
+             already connected — the AI matcher just failed because
+             there are no QBO invoices, but the Stripe API path doesn't
+             need them. */
+          <div className="pt-2 border-t border-gray-100 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-navy">
+                ✓ {clientName} is connected to Stripe — re-run with the deterministic path
+              </p>
+              <p className="text-xs text-ink-slate mt-1">
+                The AI matcher couldn&apos;t match these deposits because there
+                are no QBO invoices. The <strong>Stripe API</strong> path
+                doesn&apos;t need QBO invoices — it pulls exact charges, fees,
+                and customers straight from Stripe. Re-run will succeed
+                where this one couldn&apos;t.
+              </p>
+            </div>
+            <Link
+              href={reRunHref}
+              className="w-full inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+            >
+              <Sparkles size={16} />
+              Re-run with Stripe API
+              <ArrowRight size={14} />
+            </Link>
           </div>
-          <button
-            onClick={() => setConnectModalOpen(true)}
-            className="w-full inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
-          >
-            <CreditCard size={16} />
-            Send Stripe Connect link to {clientName}
-          </button>
-        </div>
+        ) : (
+          /* Path 1 (Stripe NOT connected): send Connect link to client. */
+          <div className="pt-2 border-t border-gray-100 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-navy">
+                Recommended: Connect Stripe for deterministic matching
+              </p>
+              <p className="text-xs text-ink-slate mt-1">
+                Once {clientName} connects Stripe, the recon pulls exact charges,
+                fees, and customers directly from Stripe — no AI guessing, no
+                QBO invoices required. Generate a link and email it in two clicks:
+              </p>
+            </div>
+            <button
+              onClick={() => setConnectModalOpen(true)}
+              className="w-full inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+            >
+              <CreditCard size={16} />
+              Send Stripe Connect link to {clientName}
+            </button>
+          </div>
+        )}
 
         {/* Path 2: Acknowledge */}
         <div className="pt-3 border-t border-gray-100 space-y-3">
@@ -128,10 +179,9 @@ export function UnmatchedPanel({
               Or: acknowledge and finish the account
             </p>
             <p className="text-xs text-ink-slate mt-1">
-              If you don&apos;t want to wait for {clientName} to connect, you can
-              close out this cycle and come back later. The deposits stay
-              flagged in the database with an audit note so you can pick this
-              up when they&apos;re ready.
+              {stripeConnected
+                ? `If you don't want to re-run right now, you can close out this cycle. The deposits stay flagged in the database with an audit note so you can pick this up later.`
+                : `If you don't want to wait for ${clientName} to connect, you can close out this cycle and come back later. The deposits stay flagged in the database with an audit note so you can pick this up when they're ready.`}
             </p>
           </div>
           {error && (

@@ -36,8 +36,12 @@ export default async function StripeReconReviewPage({
   // AI-matched [Ironbooks] lines on each deposit with deterministic
   // charges/fees/customers from Stripe. The execute step strips prior
   // tagged lines before writing fresh ones, so the upgrade is safe.
+  //
+  // We allow this on in_review jobs (most common — the bookkeeper hasn't
+  // acknowledged yet) as well as complete jobs. Discovering / executing
+  // are excluded because the existing run is still mid-flight.
   const canUpgradeToStripeApi =
-    job.status === "complete" &&
+    (job.status === "complete" || job.status === "in_review") &&
     (job as any).method === "qbo_invoice_match" &&
     clientLink?.stripe_connection_status === "connected";
 
@@ -245,6 +249,9 @@ export default async function StripeReconReviewPage({
             depositCount={matchList.length}
             totalAmount={totalAmount}
             reclassJobId={(job.reclass_job_id as unknown as string) || null}
+            stripeConnected={clientLink?.stripe_connection_status === "connected"}
+            dateRangeStart={(job.date_range_start as unknown as string) || null}
+            dateRangeEnd={(job.date_range_end as unknown as string) || null}
           />
           <div className="max-w-2xl">
             <MarkCleanupCompleteButton
