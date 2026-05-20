@@ -23,17 +23,20 @@ interface Props {
 export function OnboardingBoard({ bookkeepers, bookkeeperFilter, canEdit }: Props) {
   const [columns, setColumns] = useState<Record<string, { cards: KanbanCard[]; total: number }>>({});
   const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [openCard, setOpenCard] = useState<{ card: KanbanCard; stage: string } | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [pages, setPages] = useState<Record<string, number>>({});
 
   const fetchData = useCallback(async (page = 0, append = false) => {
     if (!append) setLoading(true);
+    setApiError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: "20" });
       if (bookkeeperFilter) params.set("bookkeeper_id", bookkeeperFilter);
       const res = await fetch(`/api/kanban/onboarding?${params}`);
       const data = await res.json();
+      if (!res.ok) { setApiError(data.error || `HTTP ${res.status}`); setLoading(false); return; }
       if (append) {
         setColumns((prev) => {
           const next = { ...prev };
@@ -81,6 +84,14 @@ export function OnboardingBoard({ bookkeepers, bookkeeperFilter, canEdit }: Prop
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="animate-spin text-teal" size={28} />
+      </div>
+    );
+  }
+
+  if (apiError) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-sm text-red-800">
+        <strong>API error:</strong> {apiError}
       </div>
     );
   }

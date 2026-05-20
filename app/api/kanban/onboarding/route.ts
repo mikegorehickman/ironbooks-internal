@@ -49,18 +49,20 @@ export async function GET(request: Request) {
       qbo_realm_id
     `)
     .eq("is_active", true)
-    .is("cleanup_completed_at", null)
-    .eq("kanban_on_hold", false);
+    .is("cleanup_completed_at", null);
 
   if (bookkeeperFilter) {
     query = query.eq("assigned_bookkeeper_id", bookkeeperFilter);
   }
 
   const { data: clients, error } = await query.order("client_name");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!clients?.length) return NextResponse.json({ columns: emptyColumns() });
+  if (error) return NextResponse.json({ error: `client_links query: ${error.message}` }, { status: 500 });
 
-  const clientIds = clients.map((c) => c.id);
+  // Filter on_hold in JS — new column may not be in PostgREST schema cache yet
+  const activeClients = (clients || []).filter((c: any) => !c.kanban_on_hold);
+  if (!activeClients.length) return NextResponse.json({ columns: emptyColumns() });
+
+  const clientIds = activeClients.map((c) => c.id);
 
   // Most recent COA job per client
   const { data: coaJobs } = await service
@@ -126,7 +128,7 @@ export async function GET(request: Request) {
     awaiting_stripe: [],
   };
 
-  for (const client of clients) {
+  for (const client of activeClients) {
     const coa = latestCoa.get(client.id);
     const reclass = latestReclass.get(client.id);
     const bk = client.assigned_bookkeeper_id ? bkById.get(client.assigned_bookkeeper_id) : null;
