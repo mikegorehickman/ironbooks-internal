@@ -29,6 +29,7 @@ export function ReclassDiscoveryPending({
   const [webSearchProgress, setWebSearchProgress] = useState<{ done: number; total: number } | null>(null);
   const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
   const [skippingAi, setSkippingAi] = useState(false);
+  const [skipAiSent, setSkipAiSent] = useState(false);
   const [skipAiError, setSkipAiError] = useState("");
 
   useEffect(() => {
@@ -127,8 +128,9 @@ export function ReclassDiscoveryPending({
         const data = await res.json().catch(() => ({}));
         setSkipAiError(data.error || `Failed (${res.status})`);
       }
-      // On success the AI loop will finish its current batch (≤45s) then
-      // transition to web_search_paused. Polling continues normally.
+      // On success the AI loop aborts its current batch immediately (HTTP request
+      // is cancelled), then transitions straight to in_review. Polling continues normally.
+      setSkipAiSent(true);
     } catch {
       setSkipAiError("Network error — try again");
     } finally {
@@ -406,7 +408,7 @@ export function ReclassDiscoveryPending({
                 : "Batched call for unknown vendors"}
             </div>
           </div>
-          {stage === "ai" && !skippingAi && (
+          {stage === "ai" && !skippingAi && !skipAiSent && (
             <button
               onClick={skipAi}
               disabled={skippingAi}
@@ -422,9 +424,9 @@ export function ReclassDiscoveryPending({
               Skip AI
             </button>
           )}
-          {stage === "ai" && skippingAi && (
+          {stage === "ai" && (skippingAi || skipAiSent) && (
             <span style={{ fontSize: 12, fontWeight: 600, color: "#D97706", flexShrink: 0 }}>
-              Skipping…
+              {skippingAi ? "Sending…" : "Stopping AI, going to review…"}
             </span>
           )}
           {skipAiError && (

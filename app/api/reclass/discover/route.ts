@@ -946,7 +946,10 @@ async function runFullCategorization(
   // 8. Check if any rows need web search (flagged or low-confidence needs_review).
   //    If yes: pause here and let the bookkeeper drive web search in chunks via
   //    /api/reclass/[id]/web-search-chunk. If no: go straight to in_review.
-  const needsWebSearch = reclassRows.some(
+  //    Exception: if the bookkeeper clicked "Skip AI", bypass web search entirely
+  //    so they land directly on the review screen without an extra click.
+  const aiWasSkipped = aiController.signal.aborted;
+  const needsWebSearch = !aiWasSkipped && reclassRows.some(
     (r) =>
       (r.decision === "flagged" || r.decision === "needs_review") &&
       (r.ai_confidence ?? 0) < 0.7 &&
