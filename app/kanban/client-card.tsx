@@ -64,17 +64,19 @@ export function ClientCard({ card, stage, onOpen, onRefresh, canEdit }: ClientCa
 
       {/* Badges row */}
       <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
-        {/* Stripe badge — only shown when detected */}
+        {/* Stripe badge — only shown when detected, pending, or connected */}
         {card.stripe_detected && (
           <span
             className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
               card.stripe_connected
                 ? "bg-green-50 text-green-700 border border-green-200"
+                : card.stripe_pending
+                ? "bg-blue-50 text-blue-700 border border-blue-200"
                 : "bg-amber-50 text-amber-700 border border-amber-200"
             }`}
           >
             <Zap size={9} />
-            {card.stripe_connected ? "Stripe ✓" : "Stripe needed"}
+            {card.stripe_connected ? "Stripe ✓" : card.stripe_pending ? "Stripe pending" : "Stripe needed"}
           </span>
         )}
 

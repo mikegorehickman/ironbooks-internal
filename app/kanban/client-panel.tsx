@@ -144,9 +144,10 @@ export function ClientPanel({ card, stage, bookkeepers, canEdit, onClose, onRefr
               </div>
               {!card.stripe_connected && (
                 <div className="space-y-2">
-                  {card.stripe_request_sent_at && (
+                  {card.stripe_link_sent_at && (
                     <p className="text-xs text-amber-700">
-                      Request sent {fmtDate(card.stripe_request_sent_at)}
+                      Link generated {fmtDate(card.stripe_link_sent_at)}
+                      {card.stripe_link_sent_by ? ` by ${card.stripe_link_sent_by}` : ""}
                     </p>
                   )}
                   {stripeUrl ? (

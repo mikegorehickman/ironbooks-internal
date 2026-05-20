@@ -76,6 +76,18 @@ export async function GET(request: Request) {
     .in("client_link_id", clientIds)
     .order("created_at", { ascending: false });
 
+  // Most recent stripe connect token per client (for attribution)
+  const { data: stripeTokens } = await service
+    .from("stripe_connect_tokens")
+    .select("client_link_id, created_at, created_by, users!created_by(full_name)")
+    .in("client_link_id", clientIds)
+    .order("created_at", { ascending: false });
+
+  const latestStripeToken = new Map<string, any>();
+  for (const t of stripeTokens || []) {
+    if (!latestStripeToken.has(t.client_link_id)) latestStripeToken.set(t.client_link_id, t);
+  }
+
   // Note counts per client
   const { data: noteCounts } = await service
     .from("client_notes")
@@ -119,15 +131,21 @@ export async function GET(request: Request) {
     const reclass = latestReclass.get(client.id);
     const bk = client.assigned_bookkeeper_id ? bkById.get(client.assigned_bookkeeper_id) : null;
     const stripeConnected = client.stripe_connection_status === "connected";
+    const stripePending = client.stripe_connection_status === "pending";
+    const token = latestStripeToken.get(client.id);
 
     const card = {
       id: client.id,
       client_name: client.client_name,
       jurisdiction: client.jurisdiction,
       state_province: client.state_province,
-      stripe_detected: client.stripe_detected,
+      // Show stripe badge if detected, pending, or connected
+      stripe_detected: client.stripe_detected || stripePending || stripeConnected,
       stripe_connected: stripeConnected,
+      stripe_pending: stripePending,
       stripe_request_sent_at: client.stripe_request_sent_at,
+      stripe_link_sent_by: token ? (token.users as any)?.full_name ?? null : null,
+      stripe_link_sent_at: token?.created_at ?? null,
       due_date: client.due_date,
       note_count: noteCountMap.get(client.id) || 0,
       bookkeeper: bk ? { id: bk.id, full_name: bk.full_name, avatar_url: bk.avatar_url } : null,
@@ -141,8 +159,8 @@ export async function GET(request: Request) {
       continue;
     }
 
-    // Active COA job
-    if (coa && ACTIVE_STATUSES.has(coa.status)) {
+    // Active or failed COA job — failed stays visible in column
+    if (coa && (ACTIVE_STATUSES.has(coa.status) || coa.status === "failed")) {
       columns.coa_in_progress.push(card);
       continue;
     }

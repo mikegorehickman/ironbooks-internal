@@ -11,7 +11,10 @@ export interface KanbanCard {
   state_province: string | null;
   stripe_detected: boolean;
   stripe_connected: boolean;
+  stripe_pending: boolean;
   stripe_request_sent_at: string | null;
+  stripe_link_sent_by: string | null;
+  stripe_link_sent_at: string | null;
   due_date: string | null;
   note_count: number;
   bookkeeper: KanbanBookkeeper | null;
