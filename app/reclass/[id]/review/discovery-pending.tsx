@@ -2,9 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, AlertCircle, CheckCircle2, Search, Sparkles, Database, X } from "lucide-react";
+import Link from "next/link";
+import { Loader2, AlertCircle, CheckCircle2, Search, Sparkles, Database, X, RotateCcw } from "lucide-react";
 
-export function ReclassDiscoveryPending({ jobId }: { jobId: string }) {
+export function ReclassDiscoveryPending({
+  jobId,
+  clientLinkId,
+  workflow,
+}: {
+  jobId: string;
+  clientLinkId?: string;
+  workflow?: string;
+}) {
   const router = useRouter();
   const [status, setStatus] = useState<string>("starting");
   const [stats, setStats] = useState<any>(null);
@@ -73,14 +82,59 @@ export function ReclassDiscoveryPending({ jobId }: { jobId: string }) {
   }
 
   if (error) {
+    // Build a retry URL — drops the bookkeeper into the new-reclass form
+    // pre-selected on this client. They pick the source account + dates
+    // again (the failed job's source/dates aren't known to be safe to
+    // reuse without confirmation, and re-picking takes <10 seconds).
+    const retryHref = clientLinkId
+      ? `/reclass/new?client=${clientLinkId}${
+          workflow ? `&workflow=${encodeURIComponent(workflow)}` : ""
+        }`
+      : "/reclass/new";
+
+    const isWatchdogFailure = /watchdog/i.test(error);
+
     return (
-      <div className="bg-white rounded-2xl border border-gray-100 p-8">
+      <div className="bg-white rounded-2xl border border-gray-100 p-8 space-y-5">
         <div className="flex items-start gap-3 p-4 bg-red-50 text-red-800 rounded-lg">
           <AlertCircle className="flex-shrink-0 mt-0.5" size={20} />
           <div>
             <div className="font-semibold mb-1">Discovery failed</div>
             <div className="text-sm">{error}</div>
+            {isWatchdogFailure && (
+              <div className="text-xs mt-2 text-red-700/80 leading-relaxed">
+                Most often a transient Anthropic / web-search hang. Starting a
+                fresh reclass usually succeeds — the AI batches and per-vendor
+                web search both have explicit timeouts now, so a single stalled
+                call won&apos;t block the whole job again.
+              </div>
+            )}
           </div>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <Link
+            href={retryHref}
+            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+          >
+            <RotateCcw size={14} />
+            Start a fresh reclass for this client
+          </Link>
+          <Link
+            href="/dashboard"
+            className="text-sm font-semibold text-ink-slate hover:text-navy"
+          >
+            Back to dashboard
+          </Link>
+          <a
+            href={`/api/jobs/${jobId}/error-report`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-semibold text-ink-slate hover:text-navy underline ml-auto"
+            title="Markdown error report — share with engineering if this keeps happening"
+          >
+            Download error report
+          </a>
         </div>
       </div>
     );

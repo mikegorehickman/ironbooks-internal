@@ -36,8 +36,10 @@ export default async function ReclassReviewPage({
     );
   }
 
-  // If discovery still running, show pending page
-  if (job.status === "executing" || !job.ai_completed_at) {
+  // If discovery still running OR auto-failed-by-watchdog, show pending page.
+  // (`failed` jobs that never completed discovery still land here; the
+  // discovery-pending component renders the failure UI with a retry CTA.)
+  if (job.status === "executing" || job.status === "failed" || !job.ai_completed_at) {
     return (
       <AppShell>
         <TopBar
@@ -46,7 +48,11 @@ export default async function ReclassReviewPage({
         />
         <WorkflowStepper currentStep="reclass" currentState="active" completedSteps={["coa"]} />
         <div className="px-8 py-6 max-w-4xl">
-          <ReclassDiscoveryPending jobId={id} />
+          <ReclassDiscoveryPending
+            jobId={id}
+            clientLinkId={(job as any).client_link_id}
+            workflow={(job as any).workflow || "full_categorization"}
+          />
         </div>
       </AppShell>
     );

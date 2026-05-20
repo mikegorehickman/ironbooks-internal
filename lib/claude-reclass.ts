@@ -568,12 +568,37 @@ ${JSON.stringify(compactBatch, null, 2)}
 
 Classify each line. Return JSON only.`;
 
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      system: FULL_CAT_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-    });
+    // Hard per-batch timeout. Without this, one stalled Anthropic call
+    // (network hiccup, model degradation, rate-limit retry storm) hangs
+    // the entire reclass discovery — which then gets killed by the
+    // 15-min stale-job watchdog with no audit trail. 90s is generous —
+    // typical batches finish in 5-15s. If a batch genuinely times out,
+    // we skip it with a warning rather than nuking the whole job;
+    // those lines fall through to web-search fallback or stay
+    // unclassified for the bookkeeper to handle in review.
+    const BATCH_TIMEOUT_MS = 90_000;
+    let response: Awaited<ReturnType<typeof client.messages.create>>;
+    try {
+      response = await Promise.race([
+        client.messages.create({
+          model: MODEL,
+          max_tokens: 16000,
+          system: FULL_CAT_SYSTEM_PROMPT,
+          messages: [{ role: "user", content: userMessage }],
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Anthropic batch timeout after ${BATCH_TIMEOUT_MS}ms`)),
+            BATCH_TIMEOUT_MS
+          )
+        ),
+      ]);
+    } catch (err: any) {
+      warnings.push(
+        `Batch ${i / FULL_CAT_BATCH_SIZE + 1}: ${err?.message || err}. Lines skipped — will fall through to web-search or stay unclassified.`
+      );
+      continue;
+    }
 
     const textBlock = response.content.find((c) => c.type === "text");
     if (!textBlock || textBlock.type !== "text") {
