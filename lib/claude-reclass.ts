@@ -270,8 +270,8 @@ const FULL_CAT_SYSTEM_PROMPT = `You are the Ironbooks AI Bookkeeper categorizing
 
 You'll receive transaction lines (vendor, amount, date, description, current account) and the full list of valid target accounts. For each line, pick the BEST target account and a confidence score.
 
-═══ DECISIVENESS — BE AGGRESSIVE ═══
-The previous version of this prompt was way too conservative. Junior bookkeepers were getting 277 flagged out of 339 transactions. That's unacceptable. You should aim for 80%+ auto-approve.
+═══ DECISIVENESS ═══
+Aim for 80%+ of lines at auto-approve confidence (0.92+). Well-known vendors like gas stations, paint suppliers, hardware stores, and telecom companies are unambiguous — classify them at high confidence without second-guessing.
 
 When a vendor matches a well-known business pattern, you have HIGH confidence (0.92+). Don't second-guess yourself on Esso, Home Depot, Sherwin-Williams, etc. These are unambiguous.
 
@@ -451,6 +451,8 @@ Return STRICTLY valid JSON:
 No markdown, no preamble. Just the JSON.`;
 
 const FULL_CAT_BATCH_SIZE = 20;
+const BATCH_TIMEOUT_MS = 90_000;
+const BATCH_MAX_RETRIES = 1;
 
 /**
  * Classify every transaction line against the new COA.
@@ -542,8 +544,9 @@ export async function categorizeAllTransactions(params: {
     subtype: a.account_subtype,
   }));
 
-  // Build account lookup for validation
+  // Build account lookups for validation (ID-first, name-based fallback)
   const accountById = new Map(params.availableAccounts.map((a) => [a.qbo_account_id, a]));
+  const accountByName = new Map(params.availableAccounts.map((a) => [a.account_name.toLowerCase(), a]));
 
   // Batch through Claude
   const totalBatches = Math.ceil(linesToClassify.length / FULL_CAT_BATCH_SIZE);
@@ -576,39 +579,51 @@ ${JSON.stringify(compactBatch, null, 2)}
 
 Classify each line. Return JSON only.`;
 
-    // Hard per-batch timeout. AbortController cancels the underlying HTTP
-    // request. External signal (skip AI) is forwarded so the bookkeeper can
-    // cancel the whole AI phase immediately.
-    const BATCH_TIMEOUT_MS = 45_000;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error(`Anthropic batch timeout after ${BATCH_TIMEOUT_MS}ms`)), BATCH_TIMEOUT_MS);
-    if (params.signal) {
-      params.signal.addEventListener("abort", () => {
-        controller.abort(params.signal!.reason || new Error("AI step cancelled"));
-      }, { once: true });
-    }
-    let response: Awaited<ReturnType<typeof client.messages.create>>;
-    try {
-      response = await client.messages.create(
-        {
-          model: MODEL,
-          max_tokens: 16000,
-          system: FULL_CAT_SYSTEM_PROMPT,
-          messages: [{ role: "user", content: userMessage }],
-        },
-        { signal: controller.signal }
+    // Hard per-batch timeout with one automatic retry.
+    // AbortController cancels the underlying HTTP request. External signal
+    // (skip AI) is forwarded so the bookkeeper can cancel the whole AI phase.
+    let response: Awaited<ReturnType<typeof client.messages.create>> | null = null;
+    let batchErr: any = null;
+    for (let attempt = 0; attempt <= BATCH_MAX_RETRIES; attempt++) {
+      if (params.signal?.aborted) break;
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(new Error(`Anthropic batch timeout after ${BATCH_TIMEOUT_MS}ms`)),
+        BATCH_TIMEOUT_MS
       );
-    } catch (err: any) {
-      if (params.signal?.aborted) {
-        warnings.push(`AI categorization cancelled by user after ${i} lines.`);
-        break;
+      if (params.signal) {
+        params.signal.addEventListener("abort", () => {
+          controller.abort(params.signal!.reason || new Error("AI step cancelled"));
+        }, { once: true });
       }
+      try {
+        response = await client.messages.create(
+          {
+            model: MODEL,
+            max_tokens: 16000,
+            system: FULL_CAT_SYSTEM_PROMPT,
+            messages: [{ role: "user", content: userMessage }],
+          },
+          { signal: controller.signal }
+        );
+        batchErr = null;
+        break; // success
+      } catch (err: any) {
+        batchErr = err;
+        if (params.signal?.aborted) break; // user cancelled — stop retrying
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    if (params.signal?.aborted) {
+      warnings.push(`AI categorization cancelled by user after ${i} lines.`);
+      break;
+    }
+    if (batchErr || !response) {
       warnings.push(
-        `Batch ${i / FULL_CAT_BATCH_SIZE + 1}: ${err?.message || err}. Lines skipped — will fall through to web-search or stay unclassified.`
+        `Batch ${Math.floor(i / FULL_CAT_BATCH_SIZE) + 1}: ${batchErr?.message || "no response"} (tried ${BATCH_MAX_RETRIES + 1}x). Lines will fall through to web-search or stay unclassified.`
       );
       continue;
-    } finally {
-      clearTimeout(timer);
     }
 
     const textBlock = response.content.find((c) => c.type === "text");
@@ -635,8 +650,12 @@ Classify each line. Return JSON only.`;
       const sourceLine = batch.find((l) => l.ref_id === d.ref_id);
       if (!sourceLine) continue;
 
-      // Validate target exists
-      const targetAccount = d.target_account_id ? accountById.get(d.target_account_id) : null;
+      // Validate target — try ID first, then name-based fallback (Claude sometimes returns
+      // the correct name but an invented or misquoted ID).
+      const targetAccount =
+        (d.target_account_id ? accountById.get(d.target_account_id) : null) ||
+        (d.target_account_name ? accountByName.get(d.target_account_name.toLowerCase()) : null) ||
+        null;
       const confidence = Math.max(0, Math.min(1, d.confidence));
       const absAmount = Math.abs(sourceLine.amount);
 
