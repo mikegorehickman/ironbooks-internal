@@ -669,6 +669,7 @@ export function ReclassReview({
               showApproveReject={false}
               masterAccounts={masterAccounts}
               onTargetChange={setTarget}
+              onApproveChoice={(id) => bulkApprove([id])}
             />
           </>
         )}
@@ -852,6 +853,7 @@ function RowTable({
   onApprove,
   onReject,
   onMoveToAskClient,
+  onApproveChoice,
 }: {
   rows: Reclassification[];
   showConfidence: boolean;
@@ -867,6 +869,11 @@ function RowTable({
   /** If provided, renders an "Ask Client" button per row so a single
    *  needs_review / flagged item can be punted to the client. */
   onMoveToAskClient?: (id: string) => void;
+  /** If provided, renders an "Approve choice" button per row that promotes
+   *  the row to approved using whatever target is currently set (AI's pick or
+   *  bookkeeper override). Used on the Ask Client tab so the bookkeeper can
+   *  one-click confirm a row without the email-to-client step. */
+  onApproveChoice?: (id: string) => void;
 }) {
   if (rows.length === 0) {
     return <div className="p-8 text-center text-ink-slate text-sm">No transactions in this category.</div>;
@@ -898,6 +905,9 @@ function RowTable({
             )}
             {onMoveToAskClient && (
               <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Ask Client?</th>
+            )}
+            {onApproveChoice && (
+              <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Approve</th>
             )}
           </tr>
         </thead>
@@ -1009,6 +1019,34 @@ function RowTable({
                     <HelpCircle size={11} />
                     Ask Client
                   </button>
+                </td>
+              )}
+              {onApproveChoice && (
+                <td className="px-4 py-2.5 text-right">
+                  {(() => {
+                    const hasTarget =
+                      !!r.bookkeeper_override_target_id ||
+                      !!(r.bookkeeper_override_target_name && r.bookkeeper_override_target_name !== "") ||
+                      (!!r.to_account_id && r.to_account_id !== "") ||
+                      !!(r.to_account_name && r.to_account_name !== "");
+                    if (!hasTarget) {
+                      return (
+                        <span className="text-[11px] text-ink-slate italic" title="Pick a target from the Map to Master dropdown first">
+                          set target first
+                        </span>
+                      );
+                    }
+                    return (
+                      <button
+                        onClick={() => onApproveChoice(r.id)}
+                        className="text-xs px-2 py-1 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 inline-flex items-center gap-1"
+                        title="Approve this row's target and move to Auto-Approved (skips the email-to-client step)"
+                      >
+                        <CheckCircle2 size={11} />
+                        Approve
+                      </button>
+                    );
+                  })()}
                 </td>
               )}
             </tr>
