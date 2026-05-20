@@ -65,22 +65,29 @@ export default async function BankRulesFromReclassPage({
     try {
       const accessToken = await getValidToken(job.client_link_id, service as any);
       const allAccounts = await fetchAllAccounts(qboRealmId, accessToken);
-      availablePnLAccounts = allAccounts
+      const pnl = allAccounts
         .filter((a) => a.Active !== false && isPnLAccountType(a.AccountType))
-        .map((a) => ({ id: a.Id, name: a.Name, type: a.AccountType }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .map((a) => ({ id: a.Id, name: a.Name, type: a.AccountType }));
+      console.log(
+        `[bank-rules ${id}] QBO returned ${allAccounts.length} accounts total, ${pnl.length} P&L active. Account types: ${[...new Set(allAccounts.map((a) => a.AccountType))].join(", ")}`
+      );
+      availablePnLAccounts = pnl.sort((a, b) => a.name.localeCompare(b.name));
     } catch (err: any) {
-      console.warn("[bank-rules] Could not fetch P&L accounts:", err.message);
+      console.warn(`[bank-rules ${id}] Could not fetch P&L accounts:`, err.message);
     }
   }
 
+  // Include needs_review rows too — the AI mapped them to a target, the
+  // bookkeeper just hasn't explicitly confirmed. Showing them here lets the
+  // bookkeeper opt in/out of creating a bank rule per row. ask_client and
+  // flagged rows are excluded because they don't have a confident target.
   const { data: rows } = await service
     .from("reclassifications")
     .select(
       "vendor_name, vendor_pattern_normalized, to_account_id, to_account_name, bookkeeper_override_target_id, bookkeeper_override_target_name, transaction_amount, decision"
     )
     .eq("reclass_job_id", id)
-    .in("decision", ["auto_approve", "approved"])
+    .in("decision", ["auto_approve", "approved", "needs_review"])
     .not("vendor_name", "is", null);
 
   type ReclassRow = {
@@ -163,6 +170,31 @@ export default async function BankRulesFromReclassPage({
     totalAmount: number;
   }>;
 
+  // Build the FINAL dropdown list: live QBO P&L accounts UNION the targets the
+  // AI/bookkeeper picked in this job's rows. Catches accounts the AI chose but
+  // that aren't (or no longer are) in the live QBO P&L list — without this,
+  // those accounts vanish from the dropdown and the bookkeeper sees a smaller
+  // list than what was actually used.
+  const dropdownById = new Map<string, { id: string; name: string; type: string }>();
+  for (const a of availablePnLAccounts) {
+    dropdownById.set(a.id, a);
+  }
+  for (const rule of proposedRules) {
+    if (!rule.targetAccountId) continue;
+    if (dropdownById.has(rule.targetAccountId)) continue;
+    dropdownById.set(rule.targetAccountId, {
+      id: rule.targetAccountId,
+      name: rule.targetAccountName,
+      type: "(from classification)",
+    });
+  }
+  const availableAccountsForDropdown = Array.from(dropdownById.values()).sort(
+    (a, b) => a.name.localeCompare(b.name)
+  );
+  console.log(
+    `[bank-rules ${id}] Dropdown final: ${availableAccountsForDropdown.length} accounts (${availablePnLAccounts.length} live QBO P&L + ${availableAccountsForDropdown.length - availablePnLAccounts.length} from classification)`
+  );
+
   return (
     <AppShell>
       <TopBar
@@ -181,7 +213,7 @@ export default async function BankRulesFromReclassPage({
           clientLinkId={job.client_link_id}
           clientName={clientName}
           proposedRules={proposedRules}
-          availableAccounts={availablePnLAccounts}
+          availableAccounts={availableAccountsForDropdown}
           cleanupRangeStart={(job as any).date_range_start || null}
           cleanupRangeEnd={(job as any).date_range_end || null}
         />
