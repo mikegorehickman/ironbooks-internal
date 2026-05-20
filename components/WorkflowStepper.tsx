@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Check, Circle, Loader2 } from "lucide-react";
 
-export type WorkflowStep = "coa" | "reclass" | "stripe" | "rules";
+export type WorkflowStep = "coa" | "reclass" | "stripe" | "rules" | "bs";
 export type StepState = "pending" | "active" | "complete" | "skipped";
 
 interface StepDef {
@@ -29,6 +29,10 @@ const STEPS: StepDef[] = [
   {
     key: "stripe", num: 4, label: "Stripe Recon",
     href: (cid) => cid ? `/stripe-recon/new?client=${cid}` : "/stripe-recon/new",
+  },
+  {
+    key: "bs", num: 5, label: "Balance Sheet",
+    href: (cid) => cid ? `/balance-sheet/${cid}` : "/clients",
   },
 ];
 

@@ -1037,6 +1037,13 @@ function ClientCard({
               New Cleanup
             </Link>
             <Link
+              href={`/balance-sheet/${client.id}`}
+              className="px-3 py-1.5 rounded-md text-xs font-semibold bg-teal-light text-teal hover:bg-teal/20"
+              title="Balance Sheet cleanup — reconcile accounts, UF→A/R matching"
+            >
+              BS
+            </Link>
+            <Link
               href={`/rules/new?client=${client.id}`}
               className="px-3 py-1.5 rounded-md text-xs font-semibold bg-teal-light text-teal hover:bg-teal/20"
             >
