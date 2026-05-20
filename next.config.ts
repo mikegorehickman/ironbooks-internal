@@ -18,7 +18,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@react-pdf/renderer"],
   experimental: {
     serverActions: {
-      allowedOrigins: ["localhost:3000", "ironbooks.paintergrowth.com", "internal.ironbooks.com"],
+      allowedOrigins: ["localhost:3000", "snap.ironbooks.com", "internal.ironbooks.com"],
     },
   },
 };
