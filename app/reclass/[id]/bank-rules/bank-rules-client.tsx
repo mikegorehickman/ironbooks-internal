@@ -299,16 +299,33 @@ export function BankRulesFromReclassClient({
   }
 
   if (created !== null) {
+    // Branch the success copy: real-create vs skipped. created=0 fires
+    // when the bookkeeper clicked "Skip without creating" — celebrating
+    // "0 bank rules created" would be confusing.
+    const skipped = created === 0;
     return (
       <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center space-y-4">
         <div className="flex justify-center">
-          <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center">
-            <CheckCircle2 className="text-emerald-600" size={32} />
+          <div
+            className={`w-16 h-16 rounded-full flex items-center justify-center ${
+              skipped ? "bg-gray-100" : "bg-emerald-100"
+            }`}
+          >
+            <CheckCircle2
+              className={skipped ? "text-ink-slate" : "text-emerald-600"}
+              size={32}
+            />
           </div>
         </div>
-        <h2 className="text-2xl font-bold text-navy">{created} bank rules created</h2>
+        <h2 className="text-2xl font-bold text-navy">
+          {skipped
+            ? "Bank rules step skipped"
+            : `${created} bank rule${created === 1 ? "" : "s"} created`}
+        </h2>
         <p className="text-ink-slate text-sm max-w-sm mx-auto">
-          Future transactions matching these vendors will auto-categorize in QBO.
+          {skipped
+            ? "No rules created from this reclass — moving on to the next step."
+            : "Future transactions matching these vendors will auto-categorize in QBO."}
         </p>
         <NextStepFooter />
       </div>
@@ -425,10 +442,29 @@ export function BankRulesFromReclassClient({
         <div className="p-4 bg-red-50 text-red-800 rounded-lg text-sm">{error}</div>
       )}
 
-      <div className="flex items-center justify-end gap-4">
+      <div className="flex items-center justify-end gap-4 flex-wrap">
         <span className="text-sm text-ink-slate">
           {selected.size} of {proposedRules.length} selected
         </span>
+
+        {/* Skip path — bookkeeper doesn't want to create any rules
+            from this reclass. Setting created=0 hops into the
+            NextStepFooter branch, which routes to Stripe Recon (or
+            the do-another-period / mark-complete screen if there are
+            zero Stripe deposits). Same destination as a successful
+            create, just no rules persisted. */}
+        <button
+          type="button"
+          onClick={() => setCreated(0)}
+          disabled={submitting}
+          className="text-sm font-semibold text-ink-slate hover:text-navy disabled:opacity-60 underline"
+          title="Skip without creating rules"
+        >
+          {selected.size === 0
+            ? "Skip — no rules to create →"
+            : "Skip without creating →"}
+        </button>
+
         <button
           onClick={handleSubmit}
           disabled={selected.size === 0 || submitting}
