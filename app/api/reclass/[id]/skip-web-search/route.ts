@@ -32,14 +32,27 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (job.status !== "executing") {
-    return NextResponse.json({ error: "Job is not currently executing" }, { status: 400 });
+  if (job.status === "web_search_paused") {
+    // Job is between chunks — skip is instant, no in-flight requests to cancel.
+    await service
+      .from("reclass_jobs")
+      .update({ status: "in_review", error_message: null } as any)
+      .eq("id", jobId);
+    return NextResponse.json({ ok: true, instant: true });
   }
 
-  await service
-    .from("reclass_jobs")
-    .update({ error_message: "[skip_web_search]" } as any)
-    .eq("id", jobId);
+  if (job.status === "executing") {
+    // A chunk is actively running. Set the signal; the chunk's skip poller
+    // detects it within 2s and aborts all in-flight web search requests.
+    await service
+      .from("reclass_jobs")
+      .update({ error_message: "[skip_web_search]" } as any)
+      .eq("id", jobId);
+    return NextResponse.json({ ok: true, instant: false });
+  }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(
+    { error: `Job is not in a skippable state (status: ${job.status})` },
+    { status: 400 }
+  );
 }

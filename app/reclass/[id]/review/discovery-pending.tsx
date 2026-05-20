@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, AlertCircle, CheckCircle2, Search, Sparkles, Database, X, RotateCcw, XCircle } from "lucide-react";
+import { Loader2, AlertCircle, CheckCircle2, Search, Sparkles, Database, X, RotateCcw, XCircle, PlayCircle } from "lucide-react";
 
 export function ReclassDiscoveryPending({
   jobId,
@@ -24,6 +24,9 @@ export function ReclassDiscoveryPending({
   const [skipped, setSkipped] = useState(false);
   const [skipError, setSkipError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [continuing, setContinuing] = useState(false);
+  const [continueError, setContinueError] = useState("");
+  const [webSearchProgress, setWebSearchProgress] = useState<{ done: number; total: number } | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setElapsed((s) => s + 1), 1000);
@@ -42,6 +45,7 @@ export function ReclassDiscoveryPending({
 
         setStatus(data.status);
         setStats(data.stats);
+        if (data.web_search_progress) setWebSearchProgress(data.web_search_progress);
 
         if (data.error_message?.startsWith("[web_search]")) {
           setWebSearchLog((prev) => {
@@ -62,6 +66,8 @@ export function ReclassDiscoveryPending({
           window.location.href = `/reclass/${jobId}/execute`;
           return;
         }
+        // web_search_paused: stop polling, show the Continue/Skip UI
+        if (data.status === "web_search_paused") return;
 
         setTimeout(poll, 2000);
       } catch (e: any) {
@@ -93,12 +99,63 @@ export function ReclassDiscoveryPending({
         const data = await res.json().catch(() => ({}));
         setSkipError(data.error || `Failed (${res.status})`);
       } else {
-        setSkipped(true);
+        const data = await res.json().catch(() => ({}));
+        if (data.instant) {
+          // Was paused, skip was instant — reload to show review
+          window.location.reload();
+        } else {
+          setSkipped(true);
+        }
       }
     } catch {
       setSkipError("Network error — try again");
     } finally {
       setSkipping(false);
+    }
+  }
+
+  async function continueWebSearch() {
+    setContinuing(true);
+    setContinueError("");
+    try {
+      const res = await fetch(`/api/reclass/${jobId}/web-search-chunk`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setContinueError(data.error || `Failed (${res.status})`);
+        setContinuing(false);
+      } else {
+        // Chunk kicked off — update status and resume polling
+        setStatus("executing");
+        setWebSearchLog([]);
+        // Resume poll loop
+        let cancelled = false;
+        async function resumePoll() {
+          if (cancelled) return;
+          try {
+            const r = await fetch(`/api/reclass/${jobId}/status`);
+            if (!r.ok) return;
+            const d = await r.json();
+            setStatus(d.status);
+            setStats(d.stats);
+            if (d.web_search_progress) setWebSearchProgress(d.web_search_progress);
+            if (d.error_message?.startsWith("[web_search]")) {
+              setWebSearchLog((prev) => {
+                const entry = `${new Date().toLocaleTimeString()} ${d.error_message}`;
+                return prev.includes(entry) ? prev : [...prev, entry];
+              });
+            }
+            if (d.status === "in_review") { window.location.reload(); return; }
+            if (d.status === "failed") { setError(d.error_message || "Discovery failed"); return; }
+            if (d.status === "web_search_paused") { setContinuing(false); return; }
+            if (!cancelled) setTimeout(resumePoll, 2000);
+          } catch {}
+        }
+        resumePoll();
+        return () => { cancelled = true; };
+      }
+    } catch {
+      setContinueError("Network error — try again");
+      setContinuing(false);
     }
   }
 
@@ -161,11 +218,86 @@ export function ReclassDiscoveryPending({
     );
   }
 
-  // Drive stage from actual server progress, not a fixed time schedule.
-  // Once the server starts emitting [web_search] log lines we know we're in
-  // that stage. Earlier stages fall back to elapsed as a rough indicator.
+  // ── WEB SEARCH PAUSED ──────────────────────────────────────────────────────
+  if (status === "web_search_paused" && !continuing) {
+    const done = webSearchProgress?.done ?? 0;
+    const total = webSearchProgress?.total ?? 0;
+    const remaining = total - done;
+
+    return (
+      <div className="bg-white rounded-2xl border border-gray-100 p-8 space-y-5">
+        <div className="flex items-start gap-3 p-4 bg-teal-lighter text-teal rounded-lg">
+          <CheckCircle2 className="flex-shrink-0 mt-0.5" size={20} />
+          <div>
+            <div className="font-semibold mb-1">AI categorization complete</div>
+            <div className="text-sm text-ink-slate">
+              {total > 0
+                ? `${done} of ${total} vendors web-searched so far. ${remaining} remaining — each search takes ~5–15 s.`
+                : "Some vendors couldn't be confidently categorized. Web search can improve accuracy."}
+            </div>
+          </div>
+        </div>
+
+        {total > 0 && (
+          <div>
+            <div className="flex justify-between text-xs text-ink-slate mb-1.5">
+              <span>{done} vendors searched</span>
+              <span>{remaining} remaining</span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-2">
+              <div
+                className="bg-teal h-2 rounded-full transition-all"
+                style={{ width: `${total > 0 ? Math.round((done / total) * 100) : 0}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={continueWebSearch}
+            disabled={continuing}
+            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg disabled:opacity-50"
+          >
+            <PlayCircle size={15} />
+            {remaining > 0 ? `Search next ${Math.min(20, remaining)} vendors` : "Finish web search"}
+          </button>
+
+          {!skipped && !skipping && (
+            <button
+              onClick={skipWebSearch}
+              disabled={skipping}
+              className="inline-flex items-center gap-2 text-sm font-semibold text-ink-slate hover:text-navy border border-gray-200 px-4 py-2.5 rounded-lg disabled:opacity-50"
+            >
+              <X size={13} />
+              Skip remaining
+            </button>
+          )}
+          {skipped && (
+            <span className="text-sm font-semibold text-amber-600">Skipping…</span>
+          )}
+          {skipError && (
+            <span className="text-sm font-semibold text-red-600">{skipError}</span>
+          )}
+          {continueError && (
+            <span className="text-sm font-semibold text-red-600">{continueError}</span>
+          )}
+        </div>
+
+        <p className="text-xs text-ink-slate">
+          Web search looks up each unknown vendor online to confirm what type of business it is.
+          Results are cached — vendors already in your bank rules skip the search.
+          You can skip at any time; unsearched vendors stay in the review queue.
+        </p>
+      </div>
+    );
+  }
+
+  // Drive stage from actual server progress.
+  // webSearchLog entries = confirmed in web search stage.
+  // continuing = bookkeeper clicked Continue, a chunk is running.
   const stage =
-    webSearchLog.length > 0 ? "web_search"
+    (webSearchLog.length > 0 || continuing) ? "web_search"
     : elapsed < 5 ? "pulling"
     : elapsed < 15 ? "knowledge_base"
     : "ai";

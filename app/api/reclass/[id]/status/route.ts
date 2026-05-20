@@ -67,13 +67,53 @@ export async function GET(
   const completed = executed || 0;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
+  // Parse web search progress from error_message when paused/running a chunk.
+  // Format: "[web_search_progress] done/total"
+  let webSearchProgress: { done: number; total: number } | null = null;
+  const wsMatch = (job.error_message || "").match(/\[web_search_progress\]\s*(\d+)\/(\d+)/);
+  if (wsMatch) {
+    webSearchProgress = { done: parseInt(wsMatch[1], 10), total: parseInt(wsMatch[2], 10) };
+  }
+  // While a chunk is actively running (status=executing, ai_completed_at set),
+  // derive progress from live row counts so the spinner shows meaningful numbers.
+  if (!webSearchProgress && job.ai_completed_at && job.status === "executing") {
+    const [searchedRes, remainingRes] = await Promise.all([
+      supabase
+        .from("reclassifications")
+        .select("vendor_name")
+        .eq("reclass_job_id", jobId)
+        .ilike("ai_reasoning", "(web search%")
+        .not("vendor_name", "is", null),
+      supabase
+        .from("reclassifications")
+        .select("vendor_name")
+        .eq("reclass_job_id", jobId)
+        .in("decision", ["flagged", "needs_review"])
+        .lt("ai_confidence", 0.7)
+        .not("ai_reasoning", "ilike", "(web search%")
+        .not("vendor_name", "is", null),
+    ]);
+    const done = new Set(searchedRes.data?.map((r: any) => r.vendor_name)).size;
+    const remaining = new Set(remainingRes.data?.map((r: any) => r.vendor_name)).size;
+    if (done + remaining > 0) {
+      webSearchProgress = { done, total: done + remaining };
+    }
+  }
+
+  // Pass the raw error_message to the UI only for [web_search] progress lines.
+  // Suppress [web_search_progress] bookkeeping lines (those are internal state).
+  const uiErrorMessage = (job.error_message || "").startsWith("[web_search_progress]")
+    ? null
+    : job.error_message;
+
   return NextResponse.json({
     status: job.status,
     workflow: job.workflow,
     execution_started_at: job.execution_started_at,
     execution_completed_at: job.execution_completed_at,
     duration_seconds: job.execution_duration_seconds,
-    error_message: job.error_message,
+    error_message: uiErrorMessage,
+    web_search_progress: webSearchProgress,
     progress: {
       total,
       completed,

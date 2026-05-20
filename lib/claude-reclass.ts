@@ -684,7 +684,7 @@ export async function webSearchVendor(params: {
   vendorName: string;
   clientCity?: string;
   availableAccounts: AvailableAccount[];
-}): Promise<{
+}, opts?: { signal?: AbortSignal }): Promise<{
   target_account_id: string | null;
   target_account_name: string | null;
   confidence: number;
@@ -730,6 +730,16 @@ Return STRICTLY valid JSON, no other text:
       () => controller.abort(new Error(`web_search timeout after ${WEB_SEARCH_TIMEOUT_MS}ms`)),
       WEB_SEARCH_TIMEOUT_MS
     );
+    // Forward external abort (e.g. skip signal) into our controller
+    if (opts?.signal) {
+      if (opts.signal.aborted) {
+        clearTimeout(timer);
+        throw opts.signal.reason || new Error("Aborted");
+      }
+      opts.signal.addEventListener("abort", () => {
+        controller.abort(opts!.signal!.reason || new Error("Aborted externally"));
+      }, { once: true });
+    }
     let response: Awaited<ReturnType<typeof client.messages.create>>;
     try {
       response = await client.messages.create(

@@ -36,10 +36,10 @@ export default async function ReclassReviewPage({
     );
   }
 
-  // If discovery still running OR auto-failed-by-watchdog, show pending page.
-  // (`failed` jobs that never completed discovery still land here; the
-  // discovery-pending component renders the failure UI with a retry CTA.)
-  if (job.status === "executing" || job.status === "failed" || !job.ai_completed_at) {
+  // Show the pending/progress UI while discovering or waiting for web search chunks.
+  // `web_search_paused` = AI done, waiting for bookkeeper to click Continue.
+  // `failed` = watchdog caught a hang — pending component shows retry CTA.
+  if (job.status === "executing" || job.status === "web_search_paused" || job.status === "failed" || !job.ai_completed_at) {
     return (
       <AppShell>
         <TopBar

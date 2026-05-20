@@ -16,7 +16,6 @@ import { fetchAllAccounts, createAccount } from "@/lib/qbo";
 import {
   classifyVendorGroups,
   categorizeAllTransactions,
-  webSearchVendor,
   type ReclassClassification,
   type AvailableAccount,
   type FullCategorizationLine,
@@ -138,7 +137,7 @@ export async function POST(request: Request) {
   // line, Job B (working from a pre-A snapshot) tries to reclassify the
   // same line and gets a "no matching line" failure. Block same-client
   // parallel; different clients in parallel are still fully supported.
-  const ACTIVE_RECLASS_STATUSES = ["executing", "in_review"];
+  const ACTIVE_RECLASS_STATUSES = ["executing", "in_review", "web_search_paused"];
   const { data: rivalReclassJobs } = await service
     .from("reclass_jobs")
     .select("id, status, workflow")
@@ -835,155 +834,12 @@ async function runFullCategorization(
   for (const [ref, d] of preMatched) decisionByRef.set(ref, d);
   for (const d of aiResult.decisions) decisionByRef.set(d.ref_id, d);
 
-  // 6.5. WEB SEARCH PASS for low-confidence Claude results.
-  //   Only fires on UNIQUE vendor names (we dedupe so we don't waste API calls on
-  //   the same vendor repeated 20 times). Results are written back to bank_rules
-  //   so re-runs and other transactions for the same vendor skip web search.
-  const clientCity = (clientLink as any).state_province || null;
-  const lowConfDecisions = aiResult.decisions.filter(
-    (d) => d.decision === "flagged" || (d.decision === "needs_review" && d.confidence < 0.7)
-  );
-
-  // Dedupe by normalized vendor name — search each unique vendor only once
-  const lineByRef = new Map<string, ReclassLine>();
-  for (const l of inScopeLines) {
-    lineByRef.set(`${l.transaction_id}::${l.line_id}`, l);
-  }
-  const uniqueVendorsToSearch = new Map<string, { vendorName: string; refIds: string[] }>();
-  for (const d of lowConfDecisions) {
-    const line = lineByRef.get(d.ref_id);
-    if (!line || !line.vendor_name) continue;
-    const norm = normalizeForBankRule(line.vendor_name);
-    if (!norm) continue;
-    if (!uniqueVendorsToSearch.has(norm)) {
-      uniqueVendorsToSearch.set(norm, { vendorName: line.vendor_name, refIds: [] });
-    }
-    uniqueVendorsToSearch.get(norm)!.refIds.push(d.ref_id);
-  }
-
-  if (uniqueVendorsToSearch.size > 0) {
-    // Cap at 20 vendors per run — each search can take up to 25s;
-    // beyond 20 the marginal value drops and total time would exceed budget.
-    const MAX_SEARCHES = 20;
-    const vendorEntries = [...uniqueVendorsToSearch.entries()].slice(0, MAX_SEARCHES);
-    if (uniqueVendorsToSearch.size > MAX_SEARCHES) {
-      console.log(`[reclass] Capping web search at ${MAX_SEARCHES} of ${uniqueVendorsToSearch.size} vendors`);
-    }
-    console.log(`[reclass] Web-searching ${vendorEntries.length} unique unknown vendors (concurrency=5)...`);
-
-    const CONCURRENCY = 5;
-    const newBankRules: any[] = [];
-    const totalBatches = Math.ceil(vendorEntries.length / CONCURRENCY);
-    const WEB_SEARCH_BUDGET_MS = 120_000; // hard wall-clock limit for entire phase (20 vendors × 25s max = 100s worst-case, plus buffer)
-    const webSearchStart = Date.now();
-    for (let i = 0; i < vendorEntries.length; i += CONCURRENCY) {
-      if (Date.now() - webSearchStart > WEB_SEARCH_BUDGET_MS) {
-        const remaining = vendorEntries.length - i;
-        console.warn(`[reclass] Web search budget exhausted after ${i} vendors — skipping ${remaining} remaining`);
-        await service
-          .from("reclass_jobs")
-          .update({ error_message: `[web_search] Budget exhausted — ${remaining} vendors skipped, will remain in needs_review` } as any)
-          .eq("id", jobId);
-        break;
-      }
-      const batchNum = Math.floor(i / CONCURRENCY) + 1;
-      const batch = vendorEntries.slice(i, i + CONCURRENCY);
-      const batchVendorNames = batch.map(([, info]) => info.vendorName);
-
-      // Check if bookkeeper requested skip before starting this batch
-      const { data: jobCheck } = await service
-        .from("reclass_jobs")
-        .select("error_message")
-        .eq("id", jobId)
-        .single();
-      if ((jobCheck as any)?.error_message === "[skip_web_search]") {
-        const remaining = vendorEntries.length - i;
-        console.log(`[reclass] Web search skipped by user — ${remaining} vendors remain in needs_review`);
-        break;
-      }
-
-      // Write live progress to error_message (cleared on success, overwritten on failure)
-      await service
-        .from("reclass_jobs")
-        .update({
-          error_message: `[web_search] Batch ${batchNum}/${totalBatches} • ${batchVendorNames.join(" • ")}`,
-        } as any)
-        .eq("id", jobId);
-
-      const results = await Promise.all(
-        batch.map(async ([normalized, info]) => {
-          try {
-            const result = await webSearchVendor({
-              vendorName: info.vendorName,
-              clientCity: clientCity || undefined,
-              availableAccounts,
-            });
-            return { normalized, info, result };
-          } catch (err: any) {
-            console.warn(`[reclass] Web search failed for "${info.vendorName}":`, err.message);
-            return { normalized, info, result: null };
-          }
-        })
-      );
-
-      // Post-batch skip check — catches the case where the user clicked Skip
-      // while this batch was running (common for single-batch jobs where the
-      // pre-batch check fires before the user has a chance to click).
-      const { data: postBatchCheck } = await service
-        .from("reclass_jobs")
-        .select("error_message")
-        .eq("id", jobId)
-        .single();
-      const skipAfterBatch = (postBatchCheck as any)?.error_message === "[skip_web_search]";
-
-      for (const { normalized, info, result } of results) {
-        if (!result || !result.target_account_id || result.confidence < 0.65) continue;
-        for (const refId of info.refIds) {
-          const existing = decisionByRef.get(refId);
-          decisionByRef.set(refId, {
-            ref_id: refId,
-            target_account_id: result.target_account_id,
-            target_account_name: result.target_account_name,
-            confidence: result.confidence,
-            reasoning: result.reasoning,
-            decision: result.confidence >= 0.80 ? "auto_approve" : "needs_review",
-            flagged_reason: existing?.flagged_reason,
-          });
-        }
-        newBankRules.push({
-          client_link_id: clientLink.id,
-          vendor_pattern: normalized,
-          target_account_name: result.target_account_name,
-          ai_confidence: result.confidence,
-          ai_reasoning: result.reasoning,
-          match_type: "CONTAINS",
-          status: "approved",
-          requires_approval: false,
-          created_by: job.bookkeeper_id,
-          pushed_to_qbo: false,
-        });
-      }
-
-      if (skipAfterBatch) {
-        const remaining = vendorEntries.length - i - CONCURRENCY;
-        if (remaining > 0) {
-          console.log(`[reclass] Web search skipped by user after batch ${batchNum} — ${remaining} vendors remain in needs_review`);
-        }
-        break;
-      }
-    }
-
-    if (newBankRules.length > 0) {
-      try {
-        await service
-          .from("bank_rules")
-          .upsert(newBankRules, { onConflict: "client_link_id,vendor_pattern", ignoreDuplicates: false } as any);
-        console.log(`[reclass] Cached ${newBankRules.length} new bank rules from web search`);
-      } catch (err: any) {
-        console.warn(`[reclass] Failed to cache bank rules:`, err.message);
-      }
-    }
-  }
+  // 6.5. WEB SEARCH PHASE — now handled by the chunked /web-search-chunk endpoint.
+  //   Discovery inserts all rows with initial AI decisions, then pauses for the
+  //   bookkeeper to drive web search in chunks of 20 vendors. This prevents the
+  //   entire discovery job from hanging on a slow/stuck web search call, and lets
+  //   the bookkeeper skip or continue at their own pace.
+  //   (No inline web search loop here anymore.)
 
   for (const line of inScopeLines) {
     const refId = `${line.transaction_id}::${line.line_id}`;
@@ -1043,7 +899,7 @@ async function runFullCategorization(
     else stats.flagged++;
   }
 
-  // 7. Bulk insert
+  // 7. Bulk insert all rows (initial AI decisions — web search will upgrade some later)
   const BATCH_SIZE = 500;
   for (let i = 0; i < reclassRows.length; i += BATCH_SIZE) {
     const batch = reclassRows.slice(i, i + BATCH_SIZE);
@@ -1052,36 +908,73 @@ async function runFullCategorization(
   }
 
   if (stats.skipAlreadyCorrect > 0) {
-    console.log(
-      `[reclass] ${stats.skipAlreadyCorrect} transactions already in the correct account — skipped (re-run after migration).`
-    );
+    console.log(`[reclass] ${stats.skipAlreadyCorrect} already-correct transactions skipped.`);
   }
   if (stats.askClient > 0) {
-    console.log(
-      `[reclass] ${stats.askClient} lines detected as bank transfers — routed to ask_client.`
-    );
+    console.log(`[reclass] ${stats.askClient} bank-transfer lines routed to ask_client.`);
   }
 
   const uniqueVendors = new Set(lines.map((l) => l.vendor_name).filter(Boolean)).size;
 
-  await service
-    .from("reclass_jobs")
-    .update({
-      status: "in_review",
-      transactions_pulled: transactionsPulled,
-      transactions_in_scope: stats.inScope,
-      transactions_auto_approve: stats.autoApprove,
-      transactions_needs_review: stats.needsReview,
-      transactions_flagged: stats.flagged,
-      transactions_skipped_reconciled: stats.skipReconciled,
-      transactions_skipped_closed: stats.skipClosedQbo + stats.skipClosedDouble,
-      transactions_skipped_unsupported: stats.skipUnsupported,
-      unique_vendors_count: uniqueVendors,
-      ai_completed_at: new Date().toISOString(),
-      warnings: aiResult.warnings.length > 0 ? (aiResult.warnings as any) : null,
-      error_message: null,
-    } as any)
-    .eq("id", jobId);
+  // 8. Check if any rows need web search (flagged or low-confidence needs_review).
+  //    If yes: pause here and let the bookkeeper drive web search in chunks via
+  //    /api/reclass/[id]/web-search-chunk. If no: go straight to in_review.
+  const needsWebSearch = reclassRows.some(
+    (r) =>
+      (r.decision === "flagged" || r.decision === "needs_review") &&
+      (r.ai_confidence ?? 0) < 0.7 &&
+      r.vendor_name &&
+      r.vendor_name !== ""
+  );
+
+  // Dedupe vendor names for the count shown in the UI
+  const webSearchVendorSet = new Set<string>();
+  for (const r of reclassRows) {
+    if (
+      (r.decision === "flagged" || r.decision === "needs_review") &&
+      (r.ai_confidence ?? 0) < 0.7 &&
+      r.vendor_name
+    ) {
+      webSearchVendorSet.add(r.vendor_name);
+    }
+  }
+
+  const baseUpdate = {
+    transactions_pulled: transactionsPulled,
+    transactions_in_scope: stats.inScope,
+    transactions_auto_approve: stats.autoApprove,
+    transactions_needs_review: stats.needsReview,
+    transactions_flagged: stats.flagged,
+    transactions_skipped_reconciled: stats.skipReconciled,
+    transactions_skipped_closed: stats.skipClosedQbo + stats.skipClosedDouble,
+    transactions_skipped_unsupported: stats.skipUnsupported,
+    unique_vendors_count: uniqueVendors,
+    ai_completed_at: new Date().toISOString(),
+    warnings: aiResult.warnings.length > 0 ? (aiResult.warnings as any) : null,
+  };
+
+  if (needsWebSearch) {
+    await service
+      .from("reclass_jobs")
+      .update({
+        ...baseUpdate,
+        status: "web_search_paused",
+        // Store total vendor count in error_message for UI display.
+        // The web-search-chunk route will update this as chunks complete.
+        error_message: `[web_search_progress] 0/${webSearchVendorSet.size}`,
+      } as any)
+      .eq("id", jobId);
+    console.log(`[reclass] AI done — ${webSearchVendorSet.size} vendors need web search. Pausing for bookkeeper.`);
+  } else {
+    await service
+      .from("reclass_jobs")
+      .update({
+        ...baseUpdate,
+        status: "in_review",
+        error_message: null,
+      } as any)
+      .eq("id", jobId);
+  }
 }
 
 /**
