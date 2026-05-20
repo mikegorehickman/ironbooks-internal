@@ -86,10 +86,9 @@ export function BankRulesFromReclassClient({
     )
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!data) return;
         setDepositCheck({
-          count: data.count ?? null,
-          total_amount: data.total_amount ?? null,
+          count: data?.count ?? null,
+          total_amount: data?.total_amount ?? null,
           loading: false,
         });
       })
