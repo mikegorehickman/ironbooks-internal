@@ -16,6 +16,26 @@ import { lookupVendor, normalizeVendorForLookup } from "./vendor-knowledge";
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = "claude-opus-4-7";
 
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  let lastErr: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      const isOverloaded =
+        err?.status === 529 ||
+        err?.error?.type === "overloaded_error" ||
+        /overloaded/i.test(err?.message || "");
+      if (!isOverloaded || attempt === maxRetries) throw err;
+      const delayMs = Math.pow(2, attempt + 1) * 1000;
+      console.warn(`[claude-reclass] Overloaded (attempt ${attempt + 1}/${maxRetries + 1}) — retrying in ${delayMs / 1000}s`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 const AUTO_APPROVE_THRESHOLD = 0.95;
 const NEEDS_REVIEW_THRESHOLD = 0.7;
 
@@ -132,12 +152,14 @@ ${JSON.stringify(compactGroups, null, 2)}
 
 Classify each vendor group. Return the structured JSON.`;
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 12000,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: userMessage }],
-  });
+  const response = await withRetry(() =>
+    client.messages.create({
+      model: MODEL,
+      max_tokens: 12000,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userMessage }],
+    })
+  );
 
   const textBlock = response.content.find((c) => c.type === "text");
   if (!textBlock || textBlock.type !== "text") {
@@ -597,14 +619,16 @@ Classify each line. Return JSON only.`;
         }, { once: true });
       }
       try {
-        response = await client.messages.create(
-          {
-            model: MODEL,
-            max_tokens: 16000,
-            system: FULL_CAT_SYSTEM_PROMPT,
-            messages: [{ role: "user", content: userMessage }],
-          },
-          { signal: controller.signal }
+        response = await withRetry(() =>
+          client.messages.create(
+            {
+              model: MODEL,
+              max_tokens: 16000,
+              system: FULL_CAT_SYSTEM_PROMPT,
+              messages: [{ role: "user", content: userMessage }],
+            },
+            { signal: controller.signal }
+          )
         );
         batchErr = null;
         break; // success

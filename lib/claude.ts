@@ -161,6 +161,34 @@ Below 0.70 : Use FLAG with a specific reason
   "summary": "one paragraph"
 }`;
 
+// ============== RETRY HELPER ==============
+
+/**
+ * Retry a Claude API call on transient 529 overloaded errors with exponential backoff.
+ * Any other error (auth, invalid input, etc.) is re-thrown immediately.
+ */
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  let lastErr: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      const isOverloaded =
+        err?.status === 529 ||
+        err?.error?.type === "overloaded_error" ||
+        /overloaded/i.test(err?.message || "");
+      if (!isOverloaded || attempt === maxRetries) throw err;
+      const delayMs = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+      console.warn(
+        `[claude] Overloaded (attempt ${attempt + 1}/${maxRetries + 1}) — retrying in ${delayMs / 1000}s`
+      );
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 // ============== ANALYZE ==============
 
 /**
@@ -293,14 +321,14 @@ ${JSON.stringify(compactClient, null, 2)}
 Analyze each client account in this batch and return your structured JSON response.
 If this is a batch, do NOT worry about missing_required_accounts — that's calculated separately. Return [] for missing_required_accounts.`.trim();
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 16000,
-    system: SYSTEM_PROMPT,
-    messages: [
-      { role: 'user', content: userMessage },
-    ],
-  });
+  const response = await withRetry(() =>
+    client.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userMessage }],
+    })
+  );
 
   if (response.stop_reason === 'max_tokens') {
     const inputTokens = response.usage?.input_tokens ?? 0;
@@ -532,11 +560,13 @@ Provide your recommendation as JSON:
   "considerations": ["important factors Lisa should know"]
 }`;
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    messages: [{ role: 'user', content: userMessage }],
-  });
+  const response = await withRetry(() =>
+    client.messages.create({
+      model: MODEL,
+      max_tokens: 1500,
+      messages: [{ role: "user", content: userMessage }],
+    })
+  );
 
   const textBlock = response.content.find(c => c.type === 'text');
   if (!textBlock || textBlock.type !== 'text') {
