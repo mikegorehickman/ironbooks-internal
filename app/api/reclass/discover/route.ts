@@ -218,8 +218,23 @@ async function runDiscovery(jobId: string) {
   if (!job) throw new Error("Job not found");
   const clientLink = (job as any).client_links;
 
-  // Get fresh QBO token
-  const accessToken = await getValidToken(clientLink.id, service as any);
+  // Get fresh QBO token. invalid_grant means the refresh token was
+  // revoked (client disconnected QBO, password reset, or token aged out
+  // past 100 days). Rewrite to a remediation-friendly error so the
+  // bookkeeper knows to reconnect instead of seeing raw OAuth JSON.
+  let accessToken: string;
+  try {
+    accessToken = await getValidToken(clientLink.id, service as any);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (/invalid_grant|token refresh failed|Incorrect Token type/i.test(msg)) {
+      throw new Error(
+        `QBO connection is no longer valid for ${clientLink.client_name || "this client"}. ` +
+        `Reconnect QBO from the client's Settings → QuickBooks page, then re-run reclass.`
+      );
+    }
+    throw err;
+  }
 
   // ─────────── FULL CATEGORIZATION pipeline ───────────
   if (job.workflow === "full_categorization") {

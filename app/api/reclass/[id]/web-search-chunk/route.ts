@@ -74,13 +74,40 @@ export async function POST(
     } catch (err: any) {
       console.error(`[web-search-chunk] Failed for job ${id}:`, err);
       const svc = createServiceSupabase();
-      await svc
+      // Count prior consecutive failures by parsing the current error_message
+      // for `[web_search_error retries=N]`. After 3 failures, give up on
+      // web search and hand the job to the bookkeeper as `in_review` so a
+      // transient Anthropic outage can't permanently park the job — the
+      // decisions made before web search are valid; the low-confidence
+      // vendors just show up as needs_review.
+      const { data: cur } = await svc
         .from("reclass_jobs")
-        .update({
-          status: "web_search_paused",
-          error_message: `[web_search_error] ${err.message} — click Continue to retry`,
-        } as any)
-        .eq("id", id);
+        .select("error_message")
+        .eq("id", id)
+        .single();
+      const prevMsg: string = (cur as any)?.error_message || "";
+      const m = prevMsg.match(/retries=(\d+)/);
+      const retries = (m ? parseInt(m[1], 10) : 0) + 1;
+      const MAX_RETRIES = 3;
+
+      if (retries >= MAX_RETRIES) {
+        await svc
+          .from("reclass_jobs")
+          .update({
+            status: "in_review",
+            error_message:
+              `Web search failed ${retries}× (${err.message}). Skipped web search — finish review manually; low-confidence vendors show as needs_review.`,
+          } as any)
+          .eq("id", id);
+      } else {
+        await svc
+          .from("reclass_jobs")
+          .update({
+            status: "web_search_paused",
+            error_message: `[web_search_error retries=${retries}] ${err.message} — click Continue to retry`,
+          } as any)
+          .eq("id", id);
+      }
     }
   });
 
