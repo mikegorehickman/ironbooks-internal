@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, Component, type ReactNode } from "react";
+import { CommsTracker } from "./comms-tracker";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -55,6 +56,17 @@ interface ClientRow {
    *  Used by the Continue button. Null when the client has no active /
    *  failed / cancelled jobs. */
   resumable_job: { id: string; status: string } | null;
+  // Comms tracker (Ask Client email / Stripe Connect / Cleanup PDF)
+  // All optional — populated by the server when the columns exist.
+  ask_client_email_created_at?: string | null;
+  ask_client_email_sent_at?: string | null;
+  ask_client_email_body?: string | null;
+  stripe_request_created_at?: string | null;
+  stripe_request_sent_confirmed_at?: string | null;
+  cleanup_completed_at?: string | null;
+  cleanup_range_start?: string | null;
+  cleanup_range_end?: string | null;
+  cleanup_pdf_sent_at?: string | null;
 }
 
 interface Bookkeeper {
@@ -982,6 +994,28 @@ function ClientCard({
             Last cleanup {formatRelativeDate(client.last_cleanup_at)}
           </div>
         )}
+      </div>
+
+      {/* Comms trackers — Ask Client / Stripe / PDF */}
+      <div className="mb-3">
+        <CommsTracker
+          compact
+          data={{
+            client_link_id: client.id,
+            client_name: client.client_name,
+            ask_client_email_created_at: client.ask_client_email_created_at ?? null,
+            ask_client_email_sent_at: client.ask_client_email_sent_at ?? null,
+            ask_client_email_body: client.ask_client_email_body ?? null,
+            stripe_request_created_at: client.stripe_request_created_at ?? null,
+            stripe_request_sent_confirmed_at:
+              client.stripe_request_sent_confirmed_at ?? null,
+            stripe_connection_status: client.stripe_connection_status ?? null,
+            cleanup_completed_at: client.cleanup_completed_at ?? null,
+            cleanup_range_start: client.cleanup_range_start ?? null,
+            cleanup_range_end: client.cleanup_range_end ?? null,
+            cleanup_pdf_sent_at: client.cleanup_pdf_sent_at ?? null,
+          }}
+        />
       </div>
 
       <div className="flex gap-2">

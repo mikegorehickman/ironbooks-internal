@@ -26,14 +26,20 @@ export default async function ClientsPage() {
 
   const canEdit = profile && ["admin", "lead"].includes(profile.role);
 
-  const [clientsRes, linksRes, bookkeepersRes, resumableCoaRes] = await Promise.all([
+  const [
+    clientsRes,
+    linksRes,
+    bookkeepersRes,
+    resumableCoaRes,
+    stripeTokensRes,
+  ] = await Promise.all([
     supabase.from("client_list_view").select("*").order("client_name"),
     // client_list_view doesn't expose double_client_name, stripe fields, or
     // the cleanup-completion markers — pull from client_links and merge.
     supabase
       .from("client_links")
       .select(
-        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by"
+        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at"
       ),
     supabase
       .from("users")
@@ -50,6 +56,14 @@ export default async function ClientsPage() {
       .select("id, client_link_id, status, updated_at, execution_started_at")
       .in("status", ["in_review", "executing", "failed"])
       .order("updated_at", { ascending: false }),
+
+    // Latest Stripe Connect token per client — drives the "stripe link
+    // generated" indicator on the card view. We can't ask for "most
+    // recent per client" in one query, so we pull all and dedupe in JS.
+    supabase
+      .from("stripe_connect_tokens")
+      .select("client_link_id, created_at")
+      .order("created_at", { ascending: false }),
   ]);
 
   const linksData = linksRes.data || [];
@@ -116,12 +130,59 @@ export default async function ClientsPage() {
     resumableJobByClient.set(j.client_link_id, { id: j.id, status: j.status });
   }
 
+  // Most recent Stripe Connect token per client (for the "request
+  // created" indicator on the card view's comms tracker).
+  const latestStripeTokenByClient = new Map<string, string>();
+  for (const t of stripeTokensRes.data || []) {
+    if (!t.client_link_id) continue;
+    if (latestStripeTokenByClient.has(t.client_link_id)) continue;
+    latestStripeTokenByClient.set(t.client_link_id, t.created_at as string);
+  }
+
+  // Lookup maps for the comms-tracker columns (added in migration 26).
+  // Cast through any because the regenerated types haven't been pulled.
+  const askEmailCreatedById = new Map<string, string | null>();
+  const askEmailSentById = new Map<string, string | null>();
+  const askEmailBodyById = new Map<string, string | null>();
+  const stripeSentConfirmedById = new Map<string, string | null>();
+  const pdfSentById = new Map<string, string | null>();
+  for (const l of linksData) {
+    askEmailCreatedById.set(l.id, (l as any).ask_client_email_created_at ?? null);
+    askEmailSentById.set(l.id, (l as any).ask_client_email_sent_at ?? null);
+    askEmailBodyById.set(l.id, (l as any).ask_client_email_body ?? null);
+    stripeSentConfirmedById.set(
+      l.id,
+      (l as any).stripe_request_sent_confirmed_at ?? null
+    );
+    pdfSentById.set(l.id, (l as any).cleanup_pdf_sent_at ?? null);
+  }
+
   const enrichedClients = (clientsRes.data || []).map((c) => ({
     ...c,
     double_client_name: c.id ? nameById.get(c.id) ?? null : null,
     stripe_connection_status: c.id ? stripeStatusById.get(c.id) ?? null : null,
     due_date: c.id ? dueDateById.get(c.id) ?? null : null,
     resumable_job: c.id ? resumableJobByClient.get(c.id) ?? null : null,
+    // Comms tracker
+    ask_client_email_created_at: c.id ? askEmailCreatedById.get(c.id) ?? null : null,
+    ask_client_email_sent_at: c.id ? askEmailSentById.get(c.id) ?? null : null,
+    ask_client_email_body: c.id ? askEmailBodyById.get(c.id) ?? null : null,
+    stripe_request_created_at: c.id
+      ? latestStripeTokenByClient.get(c.id) ?? null
+      : null,
+    stripe_request_sent_confirmed_at: c.id
+      ? stripeSentConfirmedById.get(c.id) ?? null
+      : null,
+    cleanup_completed_at: c.id
+      ? completionById.get(c.id)?.cleanup_completed_at ?? null
+      : null,
+    cleanup_range_start: c.id
+      ? completionById.get(c.id)?.cleanup_range_start ?? null
+      : null,
+    cleanup_range_end: c.id
+      ? completionById.get(c.id)?.cleanup_range_end ?? null
+      : null,
+    cleanup_pdf_sent_at: c.id ? pdfSentById.get(c.id) ?? null : null,
   }));
 
   // Bookkeeper names — needed for the "submitted by" column in the
