@@ -39,8 +39,16 @@ const NEVER_STARTED_RECLASS_MS = 25 * 60 * 1000;
 // batch (`[ai_progress] X/Y`) and at each phase boundary. So updated_at is
 // the real "is it doing anything" signal — created_at alone falsely kills
 // 80-batch jobs that take 30+ minutes but are making steady progress.
-// We require BOTH: job is at least 25 min old AND no progress in 5 min.
-const RECLASS_SILENT_MS = 5 * 60 * 1000;
+// We require BOTH: job is at least 25 min old AND no progress in 15 min.
+//
+// 15 min (raised from 5) because the legitimately quiet windows can be long:
+//   - QBO transaction fetch on a multi-year date range: 2-5 min silent
+//   - Bulk insert of thousands of reclassifications rows: 2-5 min silent
+//   - Anthropic 529 retry chain: ~14s backoff on top of 75s timeout per call
+// 15 min still catches truly stuck jobs (the worker would emit at least one
+// phase or progress marker within that window if it's actually doing work).
+// (Lionetti Painting, May 2026: legitimately busy job killed at 5-min mark.)
+const RECLASS_SILENT_MS = 15 * 60 * 1000;
 
 // 45 min: QBO write phases run serially per action with rate-limit waits.
 // Even a giant cleanup (hundreds of actions) finishes well inside this.
@@ -71,7 +79,7 @@ export async function sweepStaleJobs(): Promise<SweepResult> {
   const errorMsgNeverStarted =
     "Auto-failed by watchdog: stuck in executing status with no execution_started_at for >15 min (likely AI discovery / web_search hang).";
   const errorMsgNeverStartedReclass =
-    "Auto-failed by watchdog: reclass discovery has been silent for >5 min after >25 min total runtime (likely AI categorization or web-search hang).";
+    "Auto-failed by watchdog: reclass discovery has been silent for >15 min after >25 min total runtime (likely AI categorization or web-search hang).";
   const errorMsgStartedStale =
     "Auto-failed by watchdog: execution_started_at older than 45 min with no completion (likely crashed mid-loop).";
 

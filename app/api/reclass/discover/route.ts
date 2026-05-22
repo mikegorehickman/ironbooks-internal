@@ -620,14 +620,29 @@ async function runFullCategorization(
 
   const threshold = (job as any).auto_approve_threshold || 500;
 
-  // 1. Pull every line in the date range
-  const { lines, transactionsPulled, transactionsSkippedUnsupported } =
-    await fetchAllTransactionLines(
+  // 1. Pull every line in the date range. This QBO call can take 2-5 min for
+  //    multi-year date ranges on busy clients. Set up a 2-min heartbeat so
+  //    the watchdog (which kills jobs silent for >15 min) sees fresh
+  //    updated_at while the fetch is in flight.
+  const fetchStartedAt = Date.now();
+  const fetchHeartbeat = setInterval(() => {
+    const sec = Math.floor((Date.now() - fetchStartedAt) / 1000);
+    setPhase(`pulling_transactions (${sec}s elapsed)`).catch(() => {});
+  }, 120_000);
+  let lines: ReclassLine[], transactionsPulled: number, transactionsSkippedUnsupported: number;
+  try {
+    const result = await fetchAllTransactionLines(
       clientLink.qbo_realm_id,
       accessToken,
       job.date_range_start,
       job.date_range_end
     );
+    lines = result.lines;
+    transactionsPulled = result.transactionsPulled;
+    transactionsSkippedUnsupported = result.transactionsSkippedUnsupported;
+  } finally {
+    clearInterval(fetchHeartbeat);
+  }
 
   await setPhase("fetching_accounts");
 
@@ -970,12 +985,20 @@ async function runFullCategorization(
 
   await setPhase(`saving (${reclassRows.length} rows)`);
 
-  // 7. Bulk insert all rows (initial AI decisions — web search will upgrade some later)
+  // 7. Bulk insert all rows (initial AI decisions — web search will upgrade some later).
+  // Heartbeat: update phase after each batch so the watchdog sees fresh
+  // updated_at during what can be a multi-minute insert on big clients.
   const BATCH_SIZE = 500;
+  const totalInsertBatches = Math.ceil(reclassRows.length / BATCH_SIZE);
   for (let i = 0; i < reclassRows.length; i += BATCH_SIZE) {
     const batch = reclassRows.slice(i, i + BATCH_SIZE);
     const { error: insertErr } = await service.from("reclassifications").insert(batch);
     if (insertErr) throw new Error(`Insert batch failed: ${insertErr.message}`);
+    const insertBatchIdx = Math.floor(i / BATCH_SIZE) + 1;
+    // Bump updated_at with progress info every batch so the watchdog (which
+    // kills jobs silent for >15 min) never false-fires on a slow-but-working
+    // bulk insert.
+    await setPhase(`saving (${insertBatchIdx * BATCH_SIZE > reclassRows.length ? reclassRows.length : insertBatchIdx * BATCH_SIZE}/${reclassRows.length} rows)`);
   }
 
   if (stats.skipAlreadyCorrect > 0) {
