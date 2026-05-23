@@ -2,6 +2,7 @@
 
 import { useState, useMemo, Component, type ReactNode } from "react";
 import { CommsTracker } from "./comms-tracker";
+import { PyTaxesWidget } from "./py-taxes-widget";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -68,6 +69,9 @@ interface ClientRow {
   cleanup_range_start?: string | null;
   cleanup_range_end?: string | null;
   cleanup_pdf_sent_at?: string | null;
+  // Prior-year taxes filing status (migration 32)
+  py_taxes_filed?: boolean;
+  py_taxes_filed_through_year?: number | null;
 }
 
 interface Bookkeeper {
@@ -995,6 +999,17 @@ function ClientCard({
             Last cleanup {formatRelativeDate(client.last_cleanup_at)}
           </div>
         )}
+      </div>
+
+      {/* Prior-year taxes status — controls whether reclass should touch
+          pre-filed years. Sits above the comms tracker for visibility. */}
+      <div className="mb-2">
+        <PyTaxesWidget
+          clientLinkId={client.id}
+          pyTaxesFiled={!!client.py_taxes_filed}
+          pyTaxesFiledThroughYear={client.py_taxes_filed_through_year ?? null}
+          compact
+        />
       </div>
 
       {/* Comms trackers — Ask Client / Stripe / PDF */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw, ChevronDown } from "lucide-react";
 import { ClientCard } from "./client-card";
 import { ClientPanel } from "./client-panel";
@@ -33,6 +33,19 @@ export function OnboardingBoard({ bookkeepers, bookkeeperFilter, canEdit }: Prop
   const [openCard, setOpenCard] = useState<{ card: KanbanCard; stage: string } | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [pages, setPages] = useState<Record<string, number>>({});
+  // Refs to each column for the jump-to buttons in the toolbar
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const columnRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  function jumpToColumn(key: OnboardingStage) {
+    const target = columnRefs.current[key];
+    const scroller = scrollerRef.current;
+    if (!target || !scroller) return;
+    // Use scrollIntoView with inline:'start' so the column lands at the
+    // left edge of the visible area. Smooth so it's clearly a navigation
+    // event, not a layout shift.
+    target.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "start" });
+  }
 
   const fetchData = useCallback(async (page = 0, append = false) => {
     if (!append) setLoading(true);
@@ -116,13 +129,48 @@ export function OnboardingBoard({ bookkeepers, bookkeeperFilter, canEdit }: Prop
         </button>
       </div>
 
-      <div className="flex gap-4 overflow-x-auto pb-4 min-h-[calc(100vh-260px)]">
+      {/* Sticky jump-to-column toolbar — clicking any chip scrolls the
+          kanban container so that column lands at the left of the
+          visible area. Useful on narrow screens where 4–6 columns don't
+          all fit. */}
+      <div className="sticky top-0 z-10 -mx-1 px-1 py-2 mb-3 bg-[#FAFBFC]/95 backdrop-blur border-b border-gray-100">
+        <div className="flex items-center gap-2 overflow-x-auto">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-light shrink-0 mr-1">
+            Jump to:
+          </span>
+          {COLUMNS.map(({ key, label, color }) => {
+            const total = columns[key]?.total || 0;
+            return (
+              <button
+                key={key}
+                onClick={() => jumpToColumn(key)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-xs font-semibold text-navy whitespace-nowrap transition-colors"
+              >
+                <span
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: color }}
+                />
+                {label}
+                <span className="text-[10px] text-ink-slate bg-gray-100 px-1.5 rounded-full">
+                  {total}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div ref={scrollerRef} className="flex gap-4 overflow-x-auto pb-4 min-h-[calc(100vh-260px)]">
         {COLUMNS.map(({ key, label, color }) => {
           const col = columns[key] || { cards: [], total: 0 };
           const hasMore = col.cards.length < col.total;
 
           return (
-            <div key={key} className="flex-shrink-0 w-72 flex flex-col">
+            <div
+              key={key}
+              ref={(el) => { columnRefs.current[key] = el; }}
+              className="flex-shrink-0 w-72 flex flex-col scroll-mt-4"
+            >
               {/* Column header */}
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />

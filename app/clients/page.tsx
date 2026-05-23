@@ -39,7 +39,7 @@ export default async function ClientsPage() {
     supabase
       .from("client_links")
       .select(
-        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required"
+        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required, py_taxes_filed, py_taxes_filed_through_year"
       ),
     supabase
       .from("users")
@@ -147,6 +147,8 @@ export default async function ClientsPage() {
   const stripeSentConfirmedById = new Map<string, string | null>();
   const pdfSentById = new Map<string, string | null>();
   const stripeNotRequiredById = new Map<string, boolean>();
+  const pyTaxesFiledById = new Map<string, boolean>();
+  const pyTaxesFiledThroughYearById = new Map<string, number | null>();
   for (const l of linksData) {
     askEmailCreatedById.set(l.id, (l as any).ask_client_email_created_at ?? null);
     askEmailSentById.set(l.id, (l as any).ask_client_email_sent_at ?? null);
@@ -157,6 +159,11 @@ export default async function ClientsPage() {
     );
     pdfSentById.set(l.id, (l as any).cleanup_pdf_sent_at ?? null);
     stripeNotRequiredById.set(l.id, !!(l as any).stripe_not_required);
+    pyTaxesFiledById.set(l.id, !!(l as any).py_taxes_filed);
+    pyTaxesFiledThroughYearById.set(
+      l.id,
+      (l as any).py_taxes_filed_through_year ?? null
+    );
   }
 
   const enrichedClients = (clientsRes.data || []).map((c) => ({
@@ -186,6 +193,10 @@ export default async function ClientsPage() {
       ? completionById.get(c.id)?.cleanup_range_end ?? null
       : null,
     cleanup_pdf_sent_at: c.id ? pdfSentById.get(c.id) ?? null : null,
+    py_taxes_filed: c.id ? pyTaxesFiledById.get(c.id) ?? false : false,
+    py_taxes_filed_through_year: c.id
+      ? pyTaxesFiledThroughYearById.get(c.id) ?? null
+      : null,
   }));
 
   // Bookkeeper names — needed for the "submitted by" column in the
