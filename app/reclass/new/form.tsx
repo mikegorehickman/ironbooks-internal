@@ -15,6 +15,10 @@ interface ClientLink {
   qbo_realm_id: string;
   double_client_id: string | null;
   double_client_name: string | null;
+  // From migration 32 — drives the PY-aware date range banner/default.
+  // Both fields are present-but-defaults when the migration hasn't shipped yet.
+  py_taxes_filed?: boolean;
+  py_taxes_filed_through_year?: number | null;
 }
 
 interface QboAccount {
@@ -168,6 +172,26 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
       setDateRangeEnd(p.end);
     }
   }, [datePresetId, datePresets]);
+
+  // ── PY-taxes-aware date clamp ────────────────────────────────────────
+  // When the selected client has filed taxes through year Y, the reclass
+  // job should start no earlier than (Y+1)-01-01. Clamps automatically
+  // any time the client changes or the date range is set (preset or
+  // default). The banner below the picker explains it to the bookkeeper.
+  const pyFiledThroughYear =
+    selectedClient?.py_taxes_filed && selectedClient.py_taxes_filed_through_year
+      ? selectedClient.py_taxes_filed_through_year
+      : null;
+  const unfiledStartDate = pyFiledThroughYear ? `${pyFiledThroughYear + 1}-01-01` : null;
+  const dateRangeCrossesFiledBoundary =
+    !!(unfiledStartDate && dateRangeStart && dateRangeStart < unfiledStartDate);
+
+  useEffect(() => {
+    if (!unfiledStartDate || !dateRangeStart) return;
+    if (dateRangeStart < unfiledStartDate) {
+      setDateRangeStart(unfiledStartDate);
+    }
+  }, [unfiledStartDate, dateRangeStart]);
 
   const daysDiff =
     dateRangeStart && dateRangeEnd
@@ -441,6 +465,33 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
             ))}
           </select>
         </div>
+
+        {/* PY-taxes banner — surfaces the unfiled-year boundary so the
+            bookkeeper knows what dates this reclass should cover. The
+            date range above is auto-clamped to (year+1)-01-01 when
+            taxes are filed. */}
+        {selectedClient && pyFiledThroughYear && (
+          <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm">
+            <Calendar size={16} className="text-emerald-700 flex-shrink-0 mt-0.5" />
+            <div className="text-emerald-900">
+              <strong>Taxes filed through {pyFiledThroughYear}</strong>
+              <span className="text-emerald-700">
+                {" "}· this reclass will start no earlier than {unfiledStartDate} to keep filed books untouched.
+              </span>
+            </div>
+          </div>
+        )}
+        {selectedClient && !pyFiledThroughYear && selectedClient.py_taxes_filed === false && (
+          <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+            <AlertCircle size={16} className="text-amber-700 flex-shrink-0 mt-0.5" />
+            <div className="text-amber-900 flex-1">
+              <strong>PY taxes flagged as not yet filed.</strong>
+              <span className="text-amber-800">
+                {" "}Reclass will touch any year. If a prior year IS actually filed, update the client&apos;s PY-taxes setting on the client card before continuing.
+              </span>
+            </div>
+          </div>
+        )}
 
         {workflow === "full_categorization" && clientLinkId && (
           <>

@@ -21,6 +21,39 @@ export default async function NewReclassPage() {
     .is("cleanup_completed_at", null)
     .order("client_name");
 
+  // Fetch py_taxes_* separately so the page survives if migration 32 isn't
+  // applied yet. Same fail-soft pattern as the /clients page.
+  const pyTaxesByClient = new Map<string, { filed: boolean; year: number | null }>();
+  const pyTaxesQuery = await supabase
+    .from("client_links")
+    .select("id, py_taxes_filed, py_taxes_filed_through_year");
+  if (!pyTaxesQuery.error) {
+    for (const r of (pyTaxesQuery.data as any[]) || []) {
+      if (!r.id) continue;
+      pyTaxesByClient.set(r.id, {
+        filed: !!r.py_taxes_filed,
+        year: r.py_taxes_filed_through_year ?? null,
+      });
+    }
+  } else {
+    console.warn(
+      "[reclass/new] py_taxes columns unavailable; PY-aware date defaults will be off until migration 32 is applied. Error:",
+      pyTaxesQuery.error.message
+    );
+  }
+
+  // Merge py_taxes onto each client link so the form can default the date
+  // range to the unfiled window and warn if the bookkeeper picks a range
+  // that crosses a filed-year boundary.
+  const enrichedClientLinks = ((clientLinks as any[]) || []).map((c: any) => {
+    const pt = pyTaxesByClient.get(c.id);
+    return {
+      ...c,
+      py_taxes_filed: pt?.filed ?? false,
+      py_taxes_filed_through_year: pt?.year ?? null,
+    };
+  });
+
   return (
     <AppShell>
       <TopBar
@@ -29,7 +62,7 @@ export default async function NewReclassPage() {
       />
       <WorkflowStepper currentStep="reclass" currentState="active" completedSteps={["coa"]} />
       <div className="px-8 py-6 max-w-4xl">
-        <NewReclassForm clientLinks={clientLinks || []} />
+        <NewReclassForm clientLinks={enrichedClientLinks} />
       </div>
     </AppShell>
   );
