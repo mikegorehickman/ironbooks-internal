@@ -13,6 +13,10 @@ interface Scan {
   status: string;
   created_at: string;
   uf_account_qbo_id: string | null;
+  uf_account_name: string | null;
+  uf_account_current_balance: number | null;
+  scan_from: string | null;
+  scan_to: string | null;
   uf_payments_total: number;
   matched_count: number;
   orphan_count: number;
@@ -445,10 +449,73 @@ export function UfAuditClient({
               of UF has no matching bank deposit — the money never landed in any bank account.
               Group by customer below and pick a resolution.
             </>
+          ) : scan.uf_payments_total === 0 ? (
+            <>No Receive-Payments or Sales-Receipts in the scan window.</>
           ) : (
             "All UF payments are matched to deposits. 🎉"
           )}
         </div>
+
+        {/* Account info line — always shows so the bookkeeper can verify
+            we scanned the RIGHT account. Critical diagnostic when results
+            look surprising. */}
+        {(scan.uf_account_name || scan.uf_account_qbo_id) && (
+          <div className="mt-2 text-[11px] text-ink-light flex items-center gap-2 flex-wrap">
+            <span>
+              Scanned:{" "}
+              <strong className="text-ink-slate">
+                {scan.uf_account_name || `Account ${scan.uf_account_qbo_id}`}
+              </strong>
+              {scan.uf_account_current_balance != null && (
+                <>
+                  {" "}
+                  · Current QBO balance:{" "}
+                  <strong className="text-ink-slate">
+                    ${formatMoney(scan.uf_account_current_balance)}
+                  </strong>
+                </>
+              )}
+              {scan.scan_from && (
+                <>
+                  {" "}· Window: {scan.scan_from} → {scan.scan_to}
+                </>
+              )}
+            </span>
+          </div>
+        )}
+
+        {/* The "I have a real UF balance but the scanner found nothing"
+            warning. Most common cause: previous bookkeeper posted customer
+            payments as Journal Entries hitting UF (Dr UF / Cr A/R) instead
+            of using the proper Receive Payment workflow. UF Audit only sees
+            Payment + SalesReceipt today. Send the bookkeeper to BS COA
+            viewer where they can drill straight into the UF transactions. */}
+        {scan.uf_payments_total === 0 &&
+          scan.uf_account_current_balance != null &&
+          Math.abs(scan.uf_account_current_balance) >= 1 && (
+            <div className="mt-3 p-3 bg-orange-50 border border-orange-300 rounded-lg text-xs text-orange-900">
+              <div className="font-bold mb-1">
+                ⚠ Heads up — UF balance is{" "}
+                ${formatMoney(Math.abs(scan.uf_account_current_balance))} but the
+                scanner found zero Receive-Payments or Sales-Receipts.
+              </div>
+              <div className="mb-2">
+                That usually means the entries hitting Undeposited Funds were
+                posted as <strong>Journal Entries</strong> or <strong>manual Deposits</strong> —
+                not the proper Receive Payment workflow. UF Audit currently
+                only scans Payment/SalesReceipt objects (extension to JE
+                lines is on the roadmap).
+              </div>
+              <a
+                href={`/balance-sheet/${clientLinkId}/coa`}
+                className="font-bold underline hover:no-underline"
+              >
+                → Open BS COA viewer and drill into the UF account
+              </a>{" "}
+              to see the actual transactions, then post offsetting JEs
+              manually until the JE-scanner ships.
+            </div>
+          )}
       </div>
 
       {/* Filter tabs */}

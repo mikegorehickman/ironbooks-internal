@@ -68,6 +68,8 @@ export interface UFAuditPayment {
 
 export interface UfAuditScanResult {
   uf_account_qbo_id: string;
+  uf_account_name: string;
+  uf_account_current_balance: number;
   scan_from: string;
   scan_to: string;
   payments_total: number;
@@ -95,6 +97,26 @@ export async function scanUfAudit(
   const since = new Date(Date.now() - lookbackDays * 86_400_000)
     .toISOString()
     .slice(0, 10);
+
+  // Pull the UF account itself so we can show name + current balance in the
+  // results UI. Critical for the "scan returned 0 but UF balance is $338K"
+  // diagnostic — without this, the bookkeeper can't tell if the picker
+  // grabbed the wrong account or if the entries are non-Payment.
+  let ufAccountName = "Undeposited Funds";
+  let ufAccountCurrentBalance = 0;
+  try {
+    const acctQuery = encodeURIComponent(
+      `SELECT Id, Name, CurrentBalance FROM Account WHERE Id = '${ufAccountId}'`
+    );
+    const acctData = await qboRequest<any>(realmId, accessToken, `/query?query=${acctQuery}`);
+    const acctRow = acctData?.QueryResponse?.Account?.[0];
+    if (acctRow) {
+      ufAccountName = String(acctRow.Name || ufAccountName);
+      ufAccountCurrentBalance = Number(acctRow.CurrentBalance || 0);
+    }
+  } catch (err: any) {
+    console.warn("[uf-audit] UF account lookup failed:", err?.message);
+  }
 
   // Helper to fetch a paginated query
   async function fetchAllPayments(table: "Payment" | "SalesReceipt") {
@@ -235,6 +257,8 @@ export async function scanUfAudit(
 
   return {
     uf_account_qbo_id: ufAccountId,
+    uf_account_name: ufAccountName,
+    uf_account_current_balance: Math.round(ufAccountCurrentBalance * 100) / 100,
     scan_from: since,
     scan_to: new Date().toISOString().slice(0, 10),
     payments_total: payments.length,
