@@ -86,9 +86,10 @@ export async function scanUfAudit(
   ufAccountId: string,
   options?: { lookbackDays?: number }
 ): Promise<UfAuditScanResult> {
-  // Lookback window. Defaults to 730 days (2 years) — UF orphans can be
-  // VERY old (years of unrecorded deposits accumulate).
-  const lookbackDays = options?.lookbackDays ?? 730;
+  // Lookback window. Defaults to 1825 days (5 years) — UF orphans can be
+  // VERY old (years of unrecorded deposits accumulate). 2 years was too
+  // tight for messes that pre-date our engagement.
+  const lookbackDays = options?.lookbackDays ?? 1825;
   const since = new Date(Date.now() - lookbackDays * 86_400_000)
     .toISOString()
     .slice(0, 10);
