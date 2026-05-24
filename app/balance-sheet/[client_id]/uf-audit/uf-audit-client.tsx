@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   Loader2, RefreshCw, Search, AlertTriangle, CheckCircle2, X,
   Send, ChevronDown, ChevronRight, Wallet, ArrowLeft, ArrowRight,
-  AlertCircle, Mail, FileSpreadsheet,
+  AlertCircle, Mail, FileSpreadsheet, Copy, Code,
 } from "lucide-react";
 
 interface Scan {
@@ -82,6 +82,17 @@ export function UfAuditClient({
   const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<"orphan" | "matched" | "all">("orphan");
+  // Email modal state — built when the bookkeeper clicks "Draft client email"
+  const [emailDraft, setEmailDraft] = useState<{
+    subject: string;
+    email_text: string;
+    email_html: string;
+    customer_count: number;
+    payment_count: number;
+    total_amount: number;
+  } | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailFilter, setEmailFilter] = useState<"ask_client" | "all_unresolved">("all_unresolved");
 
   async function loadScan(sId: string) {
     setLoading(true);
@@ -210,6 +221,44 @@ export function UfAuditClient({
       setError(e?.message || "Finalize failed");
     } finally {
       setFinalizing(false);
+    }
+  }
+
+  async function draftEmail(filter: "ask_client" | "all_unresolved") {
+    if (!scan) return;
+    setEmailLoading(true);
+    setError("");
+    try {
+      const res = await fetch(
+        `/api/clients/${clientLinkId}/uf-audit/${scan.id}/email-draft`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filter }),
+        }
+      );
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      if (body.payment_count === 0) {
+        setError(
+          filter === "ask_client"
+            ? "No orphans marked 'Ask Client' yet — try 'All unresolved' to draft for everything not yet finalized."
+            : "No unresolved orphans — nothing to email about."
+        );
+        return;
+      }
+      setEmailDraft({
+        subject: body.subject,
+        email_text: body.email_text,
+        email_html: body.email_html,
+        customer_count: body.customer_count,
+        payment_count: body.payment_count,
+        total_amount: body.total_amount,
+      });
+    } catch (e: any) {
+      setError(e?.message || "Failed to draft email");
+    } finally {
+      setEmailLoading(false);
     }
   }
 
@@ -357,14 +406,29 @@ export function UfAuditClient({
               </span>
             </div>
           </div>
-          <button
-            onClick={startScan}
-            disabled={scanning}
-            className="text-xs font-semibold text-ink-slate hover:text-navy inline-flex items-center gap-1 disabled:opacity-50"
-          >
-            <RefreshCw size={11} />
-            Re-scan
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => draftEmail(emailFilter)}
+              disabled={emailLoading || scan.orphan_count === 0}
+              className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+              title={`Draft a branded email to ${clientName}'s owner asking what happened to each orphan payment`}
+            >
+              {emailLoading ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <Mail size={12} />
+              )}
+              Draft client email
+            </button>
+            <button
+              onClick={startScan}
+              disabled={scanning}
+              className="text-xs font-semibold text-ink-slate hover:text-navy inline-flex items-center gap-1 disabled:opacity-50"
+            >
+              <RefreshCw size={11} />
+              Re-scan
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-4 gap-3 mt-4 text-sm">
           <SummaryStat label="UF balance" value={`$${formatMoney(scan.total_uf_balance)}`} />
@@ -505,6 +569,20 @@ export function UfAuditClient({
 
       {scan.status === "finalized" && (
         <FinalizedSummary scan={scan} items={items} clientLinkId={clientLinkId} />
+      )}
+
+      {emailDraft && (
+        <EmailDraftModal
+          clientName={clientName}
+          draft={emailDraft}
+          filter={emailFilter}
+          onFilterChange={(f) => {
+            setEmailFilter(f);
+            setEmailDraft(null);
+            draftEmail(f);
+          }}
+          onClose={() => setEmailDraft(null)}
+        />
       )}
     </div>
   );
@@ -763,6 +841,261 @@ function FinalizedSummary({ scan, items, clientLinkId }: { scan: Scan; items: It
           BS workflow
           <ArrowRight size={13} />
         </Link>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Branded copy-paste modal. Two copy buttons:
+ *   - "Copy formatted" — writes BOTH text/html + text/plain to the clipboard
+ *     via ClipboardItem, so pasting into Gmail / Double / Outlook preserves
+ *     the branded layout. Plain-text fallback for things like Notepad.
+ *   - "Copy plain" — just the plain-text version (when you want a
+ *     no-formatting paste, e.g. into an SMS or a code block).
+ */
+function EmailDraftModal({
+  clientName,
+  draft,
+  filter,
+  onFilterChange,
+  onClose,
+}: {
+  clientName: string;
+  draft: {
+    subject: string;
+    email_text: string;
+    email_html: string;
+    customer_count: number;
+    payment_count: number;
+    total_amount: number;
+  };
+  filter: "ask_client" | "all_unresolved";
+  onFilterChange: (f: "ask_client" | "all_unresolved") => void;
+  onClose: () => void;
+}) {
+  const [copiedFormatted, setCopiedFormatted] = useState(false);
+  const [copiedPlain, setCopiedPlain] = useState(false);
+  const [copiedSubject, setCopiedSubject] = useState(false);
+  const [copiedHtml, setCopiedHtml] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  const [preview, setPreview] = useState<"rendered" | "plain" | "html">("rendered");
+
+  async function copyFormatted() {
+    setCopyError("");
+    try {
+      // ClipboardItem with both text/html + text/plain — Gmail / Double /
+      // Outlook all paste the HTML variant when pasted into rich-text fields;
+      // plain text is the fallback for plain-text fields.
+      if (typeof ClipboardItem === "undefined") {
+        // Older browsers — fall back to plain text only
+        await navigator.clipboard.writeText(draft.email_text);
+        setCopiedPlain(true);
+        setTimeout(() => setCopiedPlain(false), 2000);
+        return;
+      }
+      const item = new ClipboardItem({
+        "text/html": new Blob([draft.email_html], { type: "text/html" }),
+        "text/plain": new Blob([draft.email_text], { type: "text/plain" }),
+      });
+      await navigator.clipboard.write([item]);
+      setCopiedFormatted(true);
+      setTimeout(() => setCopiedFormatted(false), 2000);
+    } catch (e: any) {
+      setCopyError(
+        "Clipboard blocked — use the Plain Text or HTML buttons below as a fallback."
+      );
+    }
+  }
+
+  async function copyPlain() {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(draft.email_text);
+      setCopiedPlain(true);
+      setTimeout(() => setCopiedPlain(false), 2000);
+    } catch {
+      setCopyError("Clipboard blocked — select the text manually below.");
+    }
+  }
+
+  async function copyHtml() {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(draft.email_html);
+      setCopiedHtml(true);
+      setTimeout(() => setCopiedHtml(false), 2000);
+    } catch {
+      setCopyError("Clipboard blocked — select the HTML below manually.");
+    }
+  }
+
+  async function copySubject() {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(draft.subject);
+      setCopiedSubject(true);
+      setTimeout(() => setCopiedSubject(false), 2000);
+    } catch {
+      setCopyError("Clipboard blocked.");
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto"
+      style={{ backgroundColor: "rgba(15, 31, 46, 0.6)", backdropFilter: "blur(4px)" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full my-8 flex flex-col">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <Mail size={18} className="text-purple-600" />
+              <h3 className="text-lg font-bold text-navy">
+                Draft client email — {clientName}
+              </h3>
+            </div>
+            <p className="text-xs text-ink-slate mt-1">
+              {draft.payment_count} payment{draft.payment_count === 1 ? "" : "s"} across{" "}
+              {draft.customer_count} customer{draft.customer_count === 1 ? "" : "s"} ·{" "}
+              total ${draft.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-ink-slate hover:text-navy">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Filter toggle */}
+        <div className="px-6 pt-3 flex items-center gap-2 text-xs">
+          <span className="font-semibold text-ink-slate">Include:</span>
+          <button
+            onClick={() => onFilterChange("all_unresolved")}
+            className={`px-2 py-1 rounded font-semibold ${
+              filter === "all_unresolved"
+                ? "bg-navy text-white"
+                : "bg-white border border-gray-200 text-ink-slate hover:bg-gray-50"
+            }`}
+          >
+            All unresolved orphans
+          </button>
+          <button
+            onClick={() => onFilterChange("ask_client")}
+            className={`px-2 py-1 rounded font-semibold ${
+              filter === "ask_client"
+                ? "bg-navy text-white"
+                : "bg-white border border-gray-200 text-ink-slate hover:bg-gray-50"
+            }`}
+          >
+            Only items marked &ldquo;Ask Client&rdquo;
+          </button>
+        </div>
+
+        {/* Subject line */}
+        <div className="px-6 pt-3 flex items-center gap-2 text-sm">
+          <span className="text-xs font-semibold text-ink-slate uppercase tracking-wider w-16">Subject</span>
+          <input
+            type="text"
+            value={draft.subject}
+            readOnly
+            className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-navy font-medium text-sm"
+          />
+          <button
+            onClick={copySubject}
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded bg-navy hover:bg-ink-light text-white text-xs font-semibold"
+          >
+            {copiedSubject ? <CheckCircle2 size={11} /> : <Copy size={11} />}
+            {copiedSubject ? "Copied" : "Copy"}
+          </button>
+        </div>
+
+        {/* Preview tabs */}
+        <div className="px-6 pt-4 flex items-center gap-1 border-b border-gray-100">
+          {(["rendered", "plain", "html"] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPreview(p)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-t ${
+                preview === p
+                  ? "bg-gray-50 text-navy border-b-2 border-teal"
+                  : "text-ink-slate hover:text-navy"
+              }`}
+            >
+              {p === "rendered" && "Rendered preview"}
+              {p === "plain" && "Plain text"}
+              {p === "html" && "HTML source"}
+            </button>
+          ))}
+        </div>
+
+        {/* Preview body */}
+        <div className="flex-1 overflow-y-auto bg-gray-50 px-6 py-4 max-h-[55vh]">
+          {preview === "rendered" && (
+            <div
+              className="bg-white rounded border border-gray-200 p-2"
+              // The rendered HTML is the same we're going to paste into the
+              // bookkeeper's mail client. Sandboxed-ish: it's our own template
+              // so safe to use dangerouslySetInnerHTML.
+              dangerouslySetInnerHTML={{ __html: draft.email_html }}
+            />
+          )}
+          {preview === "plain" && (
+            <pre className="text-xs font-mono whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-4 text-navy">
+              {draft.email_text}
+            </pre>
+          )}
+          {preview === "html" && (
+            <pre className="text-[10px] font-mono whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-4 text-ink-slate overflow-x-auto">
+              {draft.email_html}
+            </pre>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="px-6 py-4 border-t border-gray-100 bg-white rounded-b-2xl">
+          {copyError && (
+            <div className="text-xs text-red-700 font-semibold mb-2">{copyError}</div>
+          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={copyFormatted}
+              className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-sm font-bold px-4 py-2 rounded-lg"
+            >
+              {copiedFormatted ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+              {copiedFormatted ? "Copied ✓" : "Copy formatted (paste anywhere)"}
+            </button>
+            <button
+              onClick={copyPlain}
+              className="inline-flex items-center gap-1.5 bg-navy hover:bg-ink-light text-white text-xs font-semibold px-3 py-2 rounded-lg"
+            >
+              {copiedPlain ? <CheckCircle2 size={11} /> : <Copy size={11} />}
+              {copiedPlain ? "Copied" : "Copy plain text"}
+            </button>
+            <button
+              onClick={copyHtml}
+              className="inline-flex items-center gap-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-ink-slate text-xs font-semibold px-3 py-2 rounded-lg"
+              title="Copy the raw HTML — useful if you want to inspect / edit the source before sending"
+            >
+              {copiedHtml ? <CheckCircle2 size={11} /> : <Code size={11} />}
+              {copiedHtml ? "Copied" : "Copy HTML"}
+            </button>
+            <button
+              onClick={onClose}
+              className="ml-auto text-xs font-semibold text-ink-slate hover:text-navy px-2"
+            >
+              Close
+            </button>
+          </div>
+          <p className="text-[11px] text-ink-light mt-2 leading-relaxed">
+            <strong>Tip:</strong> &ldquo;Copy formatted&rdquo; preserves the table layout when you
+            paste into Gmail, Double, or Outlook. If you&rsquo;re pasting somewhere
+            plain-text-only (terminal, Slack code block), use &ldquo;Copy plain text&rdquo; instead.
+          </p>
+        </div>
       </div>
     </div>
   );
