@@ -125,6 +125,8 @@ export async function POST(
       .update({
         status: "review",
         uf_account_qbo_id: ufAccountId,
+        scan_from: result.scan_from,
+        scan_to: result.scan_to,
         uf_payments_total: result.payments_total,
         matched_count: result.matched_count,
         orphan_count: result.orphan_count,

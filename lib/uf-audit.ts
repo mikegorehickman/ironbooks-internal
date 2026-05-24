@@ -68,6 +68,8 @@ export interface UFAuditPayment {
 
 export interface UfAuditScanResult {
   uf_account_qbo_id: string;
+  scan_from: string;
+  scan_to: string;
   payments_total: number;
   matched_count: number;
   orphan_count: number;
@@ -233,6 +235,8 @@ export async function scanUfAudit(
 
   return {
     uf_account_qbo_id: ufAccountId,
+    scan_from: since,
+    scan_to: new Date().toISOString().slice(0, 10),
     payments_total: payments.length,
     matched_count: matchedCount,
     orphan_count: orphanCount,
