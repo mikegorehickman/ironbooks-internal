@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, Send, AlertCircle, Loader2 } from "lucide-react";
+import { MarkdownText } from "./markdown-text";
 
 /**
  * Portal Q&A chat. Per-session conversation only (no DB persistence in
@@ -168,7 +169,7 @@ export function AskAiClient({ starters }: { starters: string[] }) {
               <UserBubble key={i}>{m.content}</UserBubble>
             ) : (
               <AiBubble key={i} streaming={streaming && i === messages.length - 1}>
-                {m.content}
+                <MarkdownText>{m.content}</MarkdownText>
               </AiBubble>
             )
           )
@@ -232,7 +233,7 @@ function AiBubble({ children, streaming }: { children: React.ReactNode; streamin
       <div className="w-8 h-8 rounded-full bg-teal/10 flex items-center justify-center flex-shrink-0">
         <Sparkles size={14} className="text-teal-dark" />
       </div>
-      <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-navy max-w-[85%] leading-relaxed whitespace-pre-wrap">
+      <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-navy max-w-[85%] leading-relaxed">
         {children}
         {streaming && (
           <span className="inline-block w-2 h-4 bg-teal-dark animate-pulse ml-0.5 align-middle" />
