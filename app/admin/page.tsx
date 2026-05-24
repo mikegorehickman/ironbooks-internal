@@ -2,7 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock } from "lucide-react";
+import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail } from "lucide-react";
 
 export default async function AdminOverviewPage() {
   const supabase = await createServerSupabase();
@@ -31,13 +31,22 @@ export default async function AdminOverviewPage() {
         title="Admin"
         subtitle="Team management, accountability, and compliance"
         actions={
-          <Link
-            href="/admin/users"
-            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-4 py-2 rounded-lg"
-          >
-            <Users size={16} />
-            Manage Users
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/admin/invite-client"
+              className="inline-flex items-center gap-2 bg-white border-2 border-teal text-teal hover:bg-teal/5 text-sm font-semibold px-4 py-2 rounded-lg"
+            >
+              <Mail size={16} />
+              Invite client
+            </Link>
+            <Link
+              href="/admin/users"
+              className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-4 py-2 rounded-lg"
+            >
+              <Users size={16} />
+              Manage Users
+            </Link>
+          </div>
         }
       />
 
