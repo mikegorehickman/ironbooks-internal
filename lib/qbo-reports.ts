@@ -28,6 +28,119 @@ async function fetchQBOReport(
   return res.json();
 }
 
+// ─── P&L Drill-down (transactions for a single account) ────────────────
+
+export interface PLDetailTransaction {
+  txn_id: string;
+  txn_type: string;
+  date: string;
+  doc_number: string | null;
+  /** Vendor for expense accounts, customer for income accounts. */
+  name: string | null;
+  memo: string;
+  /** Signed amount as it appears on the P&L (positive = increases the line). */
+  amount: number;
+  /** QBO running balance for this account at this row, if the report returns it. */
+  running_balance: number | null;
+}
+
+/**
+ * QBO's ProfitAndLossDetail report — the canonical drill-down for a P&L
+ * line. Returns one row per posting line that hit the requested account
+ * in the date window. Unlike TransactionList (which is bank/CC-focused
+ * and can return weird sums for income/expense accounts), this report
+ * matches the P&L line totals exactly.
+ *
+ * Filter syntax: `account=<id>` accepts a single id or a comma list.
+ */
+export async function fetchProfitAndLossDetail(
+  realmId: string,
+  accessToken: string,
+  accountId: string,
+  startDate: string,
+  endDate: string
+): Promise<PLDetailTransaction[]> {
+  let data: any;
+  try {
+    data = await fetchQBOReport(realmId, accessToken, "ProfitAndLossDetail", {
+      start_date: startDate,
+      end_date: endDate,
+      accounting_method: "Accrual",
+      account: accountId,
+    });
+  } catch (err: any) {
+    console.warn(`[qbo-reports] ProfitAndLossDetail failed:`, err.message);
+    return [];
+  }
+
+  // Build a column-name → index map. QBO returns the columns in a fixed
+  // shape but order can shift, so always look them up by name.
+  const cols: any[] = data?.Columns?.Column || [];
+  const colIndex = new Map<string, number>();
+  cols.forEach((c, i) => {
+    if (c?.ColType) colIndex.set(String(c.ColType).toLowerCase(), i);
+    if (c?.ColTitle) colIndex.set(String(c.ColTitle).toLowerCase(), i);
+  });
+  const ci = (...names: string[]): number | undefined => {
+    for (const n of names) {
+      const i = colIndex.get(n.toLowerCase());
+      if (i !== undefined) return i;
+    }
+    return undefined;
+  };
+
+  const idxDate = ci("tx_date", "date");
+  const idxType = ci("txn_type", "transaction type");
+  const idxNum = ci("doc_num", "num");
+  const idxName = ci("name");
+  const idxMemo = ci("memo", "memo/description");
+  const idxAmt = ci("subt_nat_amount", "amount", "subt_nat_home_amount");
+  const idxBalance = ci("rbal_nat_amount", "balance", "rbal_nat_home_amount");
+
+  const out: PLDetailTransaction[] = [];
+
+  function parseNum(raw: any): number | null {
+    if (raw == null || raw === "") return null;
+    const cleaned = String(raw).replace(/[,$ ]/g, "");
+    // QBO sometimes wraps negatives in parens: "(1,200.00)"
+    const parenMatch = cleaned.match(/^\((.+)\)$/);
+    const final = parenMatch ? "-" + parenMatch[1] : cleaned;
+    const n = Number(final);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function walk(node: any) {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      for (const n of node) walk(n);
+      return;
+    }
+    if (node.type === "Data" && Array.isArray(node.ColData)) {
+      const cd = node.ColData;
+      const idCol = cd.find((c: any) => c?.id);
+      const get = (i: number | undefined) => (i != null ? cd[i]?.value ?? "" : "");
+      const amount = parseNum(get(idxAmt));
+      if (amount == null) return; // skip section subtotal rows
+
+      out.push({
+        txn_id: idCol?.id ? String(idCol.id) : "",
+        txn_type: String(get(idxType) || ""),
+        date: String(get(idxDate) || ""),
+        doc_number: get(idxNum) ? String(get(idxNum)) : null,
+        name: get(idxName) ? String(get(idxName)) : null,
+        memo: String(get(idxMemo) || ""),
+        amount,
+        running_balance: parseNum(get(idxBalance)),
+      });
+    }
+    if (node.Row) walk(node.Row);
+    if (node.Rows) walk(node.Rows);
+  }
+  walk(data?.Rows);
+
+  return out;
+}
+
 // ─── Report row types ───────────────────────────────────────────────────────
 
 interface ReportRow {

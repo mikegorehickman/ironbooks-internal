@@ -300,11 +300,11 @@ interface Transaction {
   txn_type: string;
   date: string;
   doc_number: string | null;
-  customer_or_vendor: string | null;
+  /** Vendor for expense accounts, customer for income accounts. */
+  name: string | null;
   memo: string;
   amount: number;
-  delta: number;
-  cleared: boolean;
+  running_balance: number | null;
 }
 
 /**
@@ -328,6 +328,7 @@ function DrillDownDrawer({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
+  const [totalAmount, setTotalAmount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -345,6 +346,7 @@ function DrillDownDrawer({
         setTransactions(body.transactions || []);
         setTruncated(!!body.truncated);
         setTotalCount(body.total_count || 0);
+        setTotalAmount(body.total_amount || 0);
       } catch (e: any) {
         if (cancelled) return;
         setError(e?.message || "Couldn't load transactions");
@@ -376,11 +378,20 @@ function DrillDownDrawer({
             </div>
             <h3 className="font-bold text-navy text-lg">{line.label}</h3>
             <div className="text-xs text-ink-slate mt-0.5">
-              {range.label} · Total: <strong className="text-navy">{fmtMoney(line.amount)}</strong>
+              {range.label} · P&L total: <strong className="text-navy">{fmtMoney(line.amount)}</strong>
               {totalCount > 0 && (
                 <span className="text-ink-light"> · {totalCount} transaction{totalCount === 1 ? "" : "s"}</span>
               )}
             </div>
+            {/* Reconciliation warning if drilled-in total doesn't match the
+                P&L line total. Tolerance of $1 covers rounding. */}
+            {!loading && totalCount > 0 && Math.abs(totalAmount - line.amount) > 1 && !truncated && (
+              <div className="text-[11px] text-amber-700 mt-1 flex items-center gap-1">
+                <AlertTriangle size={11} />
+                Transactions sum to {fmtMoney(totalAmount)} — differs from P&L total by{" "}
+                {fmtMoney(line.amount - totalAmount)}. Ask your bookkeeper if this looks wrong.
+              </div>
+            )}
           </div>
           <button onClick={onClose} className="text-ink-slate hover:text-navy flex-shrink-0">
             <X size={20} />
@@ -425,7 +436,7 @@ function DrillDownDrawer({
                       )}
                     </td>
                     <td className="px-4 py-2 text-xs">
-                      <div className="text-navy">{t.customer_or_vendor || <span className="text-ink-light italic">—</span>}</div>
+                      <div className="text-navy">{t.name || <span className="text-ink-light italic">—</span>}</div>
                       {t.memo && (
                         <div className="text-ink-light text-[11px] truncate max-w-xs" title={t.memo}>
                           {t.memo}

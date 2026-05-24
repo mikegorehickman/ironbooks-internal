@@ -1,21 +1,21 @@
 import { NextResponse } from "next/server";
 import { resolvePortalContext, PortalAccessError } from "@/lib/portal-context";
-import { fetchAccountTransactions } from "@/lib/qbo-balance-sheet";
+import { fetchProfitAndLossDetail } from "@/lib/qbo-reports";
 
 /**
  * GET /api/portal/account-transactions?account_id=X&start=YYYY-MM-DD&end=YYYY-MM-DD
  *
- * Returns the QBO transactions that hit a given account in a date range —
- * powers the P&L drill-down ("what's in 'Subcontractors: $22,400'?").
+ * Returns the QBO transactions that hit a given P&L account in a date
+ * range. Uses the ProfitAndLossDetail report (not TransactionList) so
+ * amounts and totals match exactly what's on the P&L summary line.
  *
  * Auth: only this client's portal user can hit this; the QBO token + realm
  * come from resolvePortalContext, NOT from any request parameter. So even
  * if a client manipulates the URL to a different account_id, they only
  * ever see THEIR books' transactions for that account.
  *
- * Includes a soft sanity check: limit results to 500 to keep the modal
- * snappy. If a line genuinely has more, the UI shows a "+ N more — ask
- * your bookkeeper for a full export" footer.
+ * Caps at 500 to keep the modal snappy; UI shows "+ N more" footer when
+ * truncated.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const all = await fetchAccountTransactions(
+    const all = await fetchProfitAndLossDetail(
       ctx.qboRealmId,
       ctx.accessToken,
       accountId,
@@ -60,7 +60,7 @@ export async function GET(request: Request) {
 
     const truncated = all.length > MAX_TRANSACTIONS;
     const transactions = truncated ? all.slice(0, MAX_TRANSACTIONS) : all;
-    const total = transactions.reduce((s, t) => s + (t.delta || t.amount || 0), 0);
+    const total = transactions.reduce((s, t) => s + (t.amount || 0), 0);
 
     return NextResponse.json({
       ok: true,
