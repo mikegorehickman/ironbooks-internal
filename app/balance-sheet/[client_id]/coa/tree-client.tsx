@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ArrowRight, AlertTriangle,
   Wallet, CreditCard, FileSpreadsheet, Briefcase, Layers, BookOpen, Landmark,
-  Edit2, Check, X, Plus, Pause, PlayCircle, MoveRight, List, Send, Sparkles,
+  Edit2, Check, X, Plus, Pause, PlayCircle, MoveRight, List, Send, Sparkles, Search,
 } from "lucide-react";
 
 interface BsCoaAccount {
@@ -180,8 +180,16 @@ export function BsCoaTreeClient({
           Show inactive
         </label>
         <Link
+          href={`/balance-sheet/${clientLinkId}/uf-audit`}
+          className="ml-auto inline-flex items-center gap-1.5 bg-white border-2 border-amber-500 text-amber-800 hover:bg-amber-50 text-xs font-bold px-3 py-1.5 rounded-lg"
+          title="Find Receive-Payment entries in Undeposited Funds that never deposited to the bank — deterministic, group by customer, bulk JE"
+        >
+          <Search size={12} />
+          UF Audit
+        </Link>
+        <Link
           href={`/balance-sheet/${clientLinkId}/coa/ai-fix`}
-          className="ml-auto inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+          className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-xs font-bold px-3 py-1.5 rounded-lg"
           title="Have Claude analyze the BS and propose fixes — review, accept/modify/reject, then push to QBO in one click"
         >
           <Sparkles size={12} />
