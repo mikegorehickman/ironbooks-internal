@@ -83,5 +83,14 @@ export async function PATCH(
     .eq("id", clientLinkId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  await service.from("audit_log").insert({
+    user_id: user.id,
+    event_type: "comms_tracker_toggle",
+    request_payload: {
+      client_link_id: clientLinkId,
+      changes: update,
+    } as any,
+  });
+
   return NextResponse.json({ ok: true, updated: update });
 }

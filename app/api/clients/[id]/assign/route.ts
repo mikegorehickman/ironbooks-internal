@@ -34,10 +34,29 @@ export async function POST(
   const body = await request.json().catch(() => ({}));
   const { bookkeeper_id } = body;
 
+  // Capture prior assignment so the audit log records the before→after
+  // (otherwise it just looks like "Lisa touched it" with no context).
+  const { data: prior } = await service
+    .from("client_links")
+    .select("assigned_bookkeeper_id, client_name")
+    .eq("id", clientId)
+    .single();
+
   await service
     .from("client_links")
     .update({ assigned_bookkeeper_id: bookkeeper_id ?? null } as any)
     .eq("id", clientId);
+
+  await service.from("audit_log").insert({
+    user_id: user.id,
+    event_type: "client_assign",
+    request_payload: {
+      client_link_id: clientId,
+      client_name: (prior as any)?.client_name ?? null,
+      from_bookkeeper_id: (prior as any)?.assigned_bookkeeper_id ?? null,
+      to_bookkeeper_id: bookkeeper_id ?? null,
+    } as any,
+  });
 
   return NextResponse.json({ ok: true });
 }

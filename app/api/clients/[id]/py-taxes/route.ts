@@ -104,5 +104,16 @@ export async function PATCH(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  await service.from("audit_log").insert({
+    user_id: user.id,
+    event_type: "py_taxes_update",
+    request_payload: {
+      client_link_id: id,
+      py_taxes_filed: update.py_taxes_filed,
+      py_taxes_filed_through_year: update.py_taxes_filed_through_year,
+    } as any,
+  });
+
   return NextResponse.json({ ok: true, updated: update });
 }

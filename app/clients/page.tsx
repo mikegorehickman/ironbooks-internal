@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
-import { createServerSupabase } from "@/lib/supabase";
+import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { sweepStaleJobs } from "@/lib/stale-jobs";
 import { Plus } from "lucide-react";
 import { ClientsList } from "./clients-list";
@@ -18,6 +18,10 @@ export default async function ClientsPage() {
   );
 
   const supabase = await createServerSupabase();
+  // Service client used for any query that needs to see across all users —
+  // the `users` table is RLS-locked to self-reads, which silently truncated
+  // the bookkeeper dropdown to just the logged-in user.
+  const service = createServiceSupabase();
 
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = user
@@ -41,7 +45,10 @@ export default async function ClientsPage() {
       .select(
         "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required"
       ),
-    supabase
+    // Bookkeepers dropdown — must use service client (RLS on `users` limits
+    // self-reads, which would otherwise return only the current user and
+    // leave the assign dropdown almost empty for everyone).
+    service
       .from("users")
       .select("id, full_name, avatar_url")
       .eq("is_active", true)

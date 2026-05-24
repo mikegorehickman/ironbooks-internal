@@ -34,10 +34,27 @@ export async function POST(
   const body = await request.json().catch(() => ({}));
   const on_hold: boolean = body.on_hold ?? true;
 
+  const { data: prior } = await service
+    .from("client_links")
+    .select("kanban_on_hold, client_name")
+    .eq("id", clientId)
+    .single();
+
   await service
     .from("client_links")
     .update({ kanban_on_hold: on_hold } as any)
     .eq("id", clientId);
+
+  await service.from("audit_log").insert({
+    user_id: user.id,
+    event_type: on_hold ? "client_hold" : "client_unhold",
+    request_payload: {
+      client_link_id: clientId,
+      client_name: (prior as any)?.client_name ?? null,
+      prior_on_hold: (prior as any)?.kanban_on_hold ?? false,
+      on_hold,
+    } as any,
+  });
 
   return NextResponse.json({ ok: true, on_hold });
 }
