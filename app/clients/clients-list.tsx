@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, Component, type ReactNode } from "react";
+import { useState, useMemo, Component, useEffect, useRef, type ReactNode } from "react";
 import { CommsTracker } from "./comms-tracker";
 import { PyTaxesWidget } from "./py-taxes-widget";
 import { useRouter } from "next/navigation";
@@ -27,6 +27,9 @@ import {
   Play,
   Receipt,
   Wallet,
+  MoreHorizontal,
+  Sparkle,
+  FileSpreadsheet,
 } from "lucide-react";
 import { CleanupReportModal } from "@/components/CleanupReportModal";
 
@@ -800,28 +803,11 @@ function ClientRow({
                   Continue
                 </Link>
               )}
-            <Link
-              href={`/jobs/new?client=${client.id}`}
-              className="px-2 py-1 rounded text-[10px] font-semibold bg-teal-light text-teal hover:bg-teal/20"
-              title="New cleanup"
-            >
-              Clean
-            </Link>
-            <Link
-              href={`/rules/new?client=${client.id}`}
-              className="px-2 py-1 rounded text-[10px] font-semibold bg-teal-light text-teal hover:bg-teal/20"
-              title="New rule discovery"
-            >
-              Rules
-            </Link>
-            <button
-              onClick={() => setReportOpen(true)}
-              className="inline-flex items-center gap-0.5 px-2 py-1 rounded text-[10px] font-semibold bg-navy/10 text-navy hover:bg-navy/15"
-              title="Generate a branded cleanup-summary PDF for this client"
-            >
-              <FileText size={10} />
-              Report
-            </button>
+            <ActionsDropdown
+              clientId={client.id}
+              jurisdiction={client.jurisdiction}
+              onReport={() => setReportOpen(true)}
+            />
           </>
         )}
       </div>
@@ -863,22 +849,6 @@ function ClientRow({
       </div>
 
       <div className="flex justify-end items-center gap-1">
-        <Link
-          href={`/balance-sheet/${client.id}/ar-recovery`}
-          className="p-1.5 rounded hover:bg-amber-100 text-ink-light hover:text-amber-700 transition-colors"
-          title="A/R Recovery toolkit (UF Audit · UF→A/R · Uncategorized Income)"
-        >
-          <Wallet size={13} />
-        </Link>
-        {client.jurisdiction === "CA" && (
-          <Link
-            href={`/tax-audit/${client.id}`}
-            className="p-1.5 rounded hover:bg-teal-light text-ink-light hover:text-teal transition-colors"
-            title="GST/HST Audit"
-          >
-            <Receipt size={13} />
-          </Link>
-        )}
         <a
           href={`https://app.qbo.intuit.com/app/account?cid=${client.qbo_realm_id}`}
           target="_blank"
@@ -948,22 +918,11 @@ function ClientCard({
             <StatusIcon size={9} />
             {statusCfg.label}
           </span>
-          <Link
-            href={`/balance-sheet/${client.id}/ar-recovery`}
-            className="p-1 rounded hover:bg-amber-100 text-ink-light hover:text-amber-700 transition-colors"
-            title="A/R Recovery toolkit"
-          >
-            <Wallet size={13} />
-          </Link>
-          {client.jurisdiction === "CA" && (
-            <Link
-              href={`/tax-audit/${client.id}`}
-              className="p-1 rounded hover:bg-teal-light text-ink-light hover:text-teal transition-colors"
-              title="GST/HST Audit"
-            >
-              <Receipt size={13} />
-            </Link>
-          )}
+          <ActionsDropdown
+            clientId={client.id}
+            jurisdiction={client.jurisdiction}
+            compact
+          />
           {onDelete && (
             <button
               onClick={onDelete}
@@ -1089,6 +1048,164 @@ function ClientCard({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Consolidated per-client action menu. Replaces the prior cluster of inline
+ * buttons (Clean / Rules / Report / A/R Recovery / GST) so the row stays
+ * readable as more tools land. Destructive actions and direct-to-QBO links
+ * stay outside this menu (one-click value).
+ *
+ * Variants:
+ *   - default (label "Actions")  — row view
+ *   - compact                    — card view (icon-only trigger)
+ */
+function ActionsDropdown({
+  clientId,
+  jurisdiction,
+  onReport,
+  compact,
+}: {
+  clientId: string;
+  jurisdiction: string;
+  onReport?: () => void;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onClick);
+    window.addEventListener("keydown", onEsc);
+    return () => {
+      window.removeEventListener("mousedown", onClick);
+      window.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const items: Array<{
+    label: string;
+    href?: string;
+    onClick?: () => void;
+    icon: any;
+    section?: string;
+    hidden?: boolean;
+  }> = [
+    {
+      section: "Cleanup",
+      label: "New cleanup",
+      href: `/jobs/new?client=${clientId}`,
+      icon: Sparkle,
+    },
+    {
+      label: "New rule discovery",
+      href: `/rules/new?client=${clientId}`,
+      icon: Zap,
+    },
+    {
+      label: "Generate cleanup report (PDF)",
+      onClick: onReport,
+      icon: FileText,
+      hidden: !onReport,
+    },
+    {
+      section: "Balance Sheet",
+      label: "Balance Sheet (UF → A/R)",
+      href: `/balance-sheet/${clientId}`,
+      icon: FileSpreadsheet,
+    },
+    {
+      label: "BS COA viewer · AI BS cleanup",
+      href: `/balance-sheet/${clientId}/coa`,
+      icon: FileSpreadsheet,
+    },
+    {
+      label: "A/R Recovery toolkit",
+      href: `/balance-sheet/${clientId}/ar-recovery`,
+      icon: Wallet,
+    },
+    {
+      section: "Compliance",
+      label: "GST/HST Audit",
+      href: `/tax-audit/${clientId}`,
+      icon: Receipt,
+      hidden: jurisdiction !== "CA",
+    },
+  ];
+
+  const visible = items.filter((i) => !i.hidden);
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={
+          compact
+            ? "p-1 rounded hover:bg-slate-100 text-ink-light hover:text-navy transition-colors"
+            : "inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-teal-light text-teal hover:bg-teal/20"
+        }
+        title="Actions for this client"
+      >
+        {compact ? (
+          <MoreHorizontal size={13} />
+        ) : (
+          <>
+            Actions
+            <ChevronDown size={10} />
+          </>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden">
+          {visible.map((item, idx) => {
+            const Icon = item.icon;
+            const sectionLabel = item.section;
+            const inner = (
+              <>
+                <Icon size={13} className="text-ink-slate flex-shrink-0" />
+                <span className="flex-1 text-left">{item.label}</span>
+              </>
+            );
+            return (
+              <div key={idx}>
+                {sectionLabel && (
+                  <div className="px-3 pt-2 pb-1 text-[9px] font-bold text-ink-light uppercase tracking-wider border-t border-gray-100 first:border-t-0">
+                    {sectionLabel}
+                  </div>
+                )}
+                {item.href ? (
+                  <Link
+                    href={item.href}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-xs text-navy hover:bg-slate-50"
+                  >
+                    {inner}
+                  </Link>
+                ) : (
+                  <button
+                    onClick={() => {
+                      item.onClick?.();
+                      setOpen(false);
+                    }}
+                    className="flex items-center gap-2 w-full px-3 py-2 text-xs text-navy hover:bg-slate-50"
+                  >
+                    {inner}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
