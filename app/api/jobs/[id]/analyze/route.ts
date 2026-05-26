@@ -82,21 +82,42 @@ export async function POST(
       transaction_count: txCounts.get(a.Id) ?? 0,
     }));
 
-    // 4. Load master COA for the client's jurisdiction + industry
-    //    Falls back to no-industry filter if Migration 7 hasn't run yet.
-    const industry = (clientLink as any).industry || "painters";
+    // 4. Load master COA for the client's jurisdiction + industry.
+    //    Industry is REQUIRED — silent fallback to "painters" caused
+    //    chimney sweepers (and others) to get the painter COA without
+    //    anyone noticing. Reject the job clearly instead.
+    const industry = (clientLink as any).industry as string | null;
+    if (!industry) {
+      await service.from("coa_jobs").update({
+        status: "failed",
+        error_message: `Client has no industry set. Set the industry on the client record before running cleanup so the right master COA template loads.`,
+      }).eq("id", jobId);
+      return NextResponse.json(
+        { error: "Client industry not set — pick one on the client record first." },
+        { status: 400 }
+      );
+    }
+
+    const industryWarnings: string[] = [];
+
     let { data: masterRows } = await service
       .from("master_coa")
       .select("*")
       .eq("jurisdiction", clientLink.jurisdiction)
       .eq("industry", industry)
       .order("sort_order");
-    // Fallback: painters baseline if this industry isn't seeded; then no-filter.
-    // Post-Migration 13, every supported industry should have rows — log if we
-    // ever hit this so it's obvious which industry needs seeding.
-    if ((masterRows || []).length === 0 && industry !== "painters") {
+
+    // Soft fallback only when the requested industry genuinely has zero rows
+    // in this jurisdiction. Surface this as a warning in the job so the
+    // bookkeeper SEES the fallback instead of getting silent painter content.
+    if ((masterRows || []).length === 0) {
+      industryWarnings.push(
+        `No master_coa rows seeded for industry="${industry}" / jurisdiction="${clientLink.jurisdiction}". ` +
+        `Falling back to painters baseline — recommendations may reference painter-specific accounts. ` +
+        `Customize the ${industry} template in /templates to make this client-specific.`
+      );
       console.warn(
-        `[analyze] No master_coa rows for industry="${industry}" jurisdiction="${clientLink.jurisdiction}" — falling back to painters template`
+        `[analyze] industry fallback fired: ${industry}/${clientLink.jurisdiction} → painters baseline`
       );
       const fb = await service
         .from("master_coa")
@@ -107,6 +128,10 @@ export async function POST(
       masterRows = fb.data;
     }
     if ((masterRows || []).length === 0) {
+      industryWarnings.push(
+        `Painters baseline ALSO empty for jurisdiction="${clientLink.jurisdiction}". ` +
+        `Loading ANY rows for this jurisdiction — recommendations will be unreliable.`
+      );
       const fb = await service
         .from("master_coa")
         .select("*")
@@ -137,6 +162,12 @@ export async function POST(
       clientAccounts: accountsWithTxCounts,
       masterCOA,
     });
+
+    // Prepend industry-fallback warnings so they appear at the top of the
+    // warnings list in the cleanup review UI — bookkeeper sees them first.
+    if (industryWarnings.length > 0) {
+      analysis.warnings = [...industryWarnings, ...analysis.warnings];
+    }
 
     // 5.5. Detect merge candidates.
     //
@@ -319,9 +350,10 @@ export async function POST(
         client_accounts: qboAccounts.length,
         suggestions: analysis.suggestions.length,
         missing_accounts: analysis.missing_required_accounts.length,
-        warnings: analysis.warnings.length,
+        warnings: analysis.warnings.length + industryWarnings.length,
       },
       summary: analysis.summary,
+      industry_warnings: industryWarnings,
     });
   } catch (error: any) {
     // Capture full stack so bare ReferenceErrors like "accountType is not defined"

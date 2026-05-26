@@ -61,8 +61,11 @@ export async function POST(request: Request) {
 
   const body = await request.json();
 
-  // Required field validation
-  const required = ["account_name", "jurisdiction", "qbo_account_type", "qbo_account_subtype", "section"];
+  // Required field validation — industry is REQUIRED to prevent silent
+  // 'painters' default from the DB schema (caused chimney_sweepers and
+  // every other non-painter industry to lose every new addition until
+  // we caught it).
+  const required = ["account_name", "jurisdiction", "industry", "qbo_account_type", "qbo_account_subtype", "section"];
   for (const field of required) {
     if (!body[field]) {
       return NextResponse.json({ error: `Missing required field: ${field}` }, { status: 400 });

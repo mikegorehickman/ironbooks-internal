@@ -91,36 +91,57 @@ export default async function ReclassReviewPage({
     .select("industry")
     .eq("id", (job as any).client_link_id)
     .maybeSingle();
-  const industry = ((clientLink as any)?.industry as string) || "painters";
+  // Industry is REQUIRED — silent default to "painters" caused chimney
+  // sweepers (and others) to see the painter target list. If the client
+  // has no industry set, surface a clear in-page error rather than
+  // dropping the wrong dropdown options on the bookkeeper.
+  const industry = (clientLink as any)?.industry as string | null;
+  const industryWarnings: string[] = [];
 
-  let { data: masterAccounts } = await service
-    .from("master_coa")
-    .select("account_name, parent_account_name, is_parent, section, sort_order")
-    .eq("jurisdiction", jurisdiction)
-    .eq("industry", industry)
-    .eq("is_parent", false)
-    .order("sort_order");
-  // Fallbacks for missing industry rows or pre-Migration-7 state:
-  //   1. Try painters (the always-populated baseline) for this jurisdiction
-  //   2. If that's empty too, fetch with no industry filter at all
-  if ((masterAccounts || []).length === 0 && industry !== "painters") {
-    const painters = await service
+  let masterAccounts: any[] = [];
+  if (industry) {
+    const res = await service
       .from("master_coa")
       .select("account_name, parent_account_name, is_parent, section, sort_order")
       .eq("jurisdiction", jurisdiction)
-      .eq("industry", "painters")
+      .eq("industry", industry)
       .eq("is_parent", false)
       .order("sort_order");
-    masterAccounts = painters.data;
-  }
-  if ((masterAccounts || []).length === 0) {
-    const noFilter = await service
-      .from("master_coa")
-      .select("account_name, parent_account_name, is_parent, section, sort_order")
-      .eq("jurisdiction", jurisdiction)
-      .eq("is_parent", false)
-      .order("sort_order");
-    masterAccounts = noFilter.data;
+    masterAccounts = res.data || [];
+
+    // Soft fallback ONLY when the requested industry has zero seeded rows.
+    // Always surface the fallback so the bookkeeper sees why painter
+    // account names are appearing for a chimney sweep client.
+    if (masterAccounts.length === 0) {
+      industryWarnings.push(
+        `No master COA seeded for industry="${industry}" / jurisdiction="${jurisdiction}". ` +
+        `Showing painters baseline — customize the ${industry} template in /templates to make targets industry-specific.`
+      );
+      const painters = await service
+        .from("master_coa")
+        .select("account_name, parent_account_name, is_parent, section, sort_order")
+        .eq("jurisdiction", jurisdiction)
+        .eq("industry", "painters")
+        .eq("is_parent", false)
+        .order("sort_order");
+      masterAccounts = painters.data || [];
+    }
+    if (masterAccounts.length === 0) {
+      industryWarnings.push(
+        `Painters baseline ALSO empty for ${jurisdiction}. Showing all master COA accounts for this jurisdiction.`
+      );
+      const noFilter = await service
+        .from("master_coa")
+        .select("account_name, parent_account_name, is_parent, section, sort_order")
+        .eq("jurisdiction", jurisdiction)
+        .eq("is_parent", false)
+        .order("sort_order");
+      masterAccounts = noFilter.data || [];
+    }
+  } else {
+    industryWarnings.push(
+      "This client has no industry set. Set the industry on the client record so target categories load correctly."
+    );
   }
 
   // Also load live QBO accounts so we can resolve target_account_id when the
@@ -140,7 +161,15 @@ export default async function ReclassReviewPage({
         }`}
       />
       <WorkflowStepper currentStep="reclass" currentState="active" completedSteps={["coa"]} />
-      <div className="px-8 py-6">
+      <div className="px-8 py-6 space-y-3">
+        {industryWarnings.length > 0 && (
+          <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <div className="font-bold mb-1">⚠ Industry / master COA mismatch</div>
+            <ul className="list-disc ml-5 space-y-1 text-xs">
+              {industryWarnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        )}
         <ReclassReview
           job={job}
           rows={reclassifications || []}

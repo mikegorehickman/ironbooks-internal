@@ -437,6 +437,7 @@ export function MasterCOAEditor({
       {addModalOpen && (
         <AddAccountModal
           jurisdiction={jurisdiction}
+          industry={currentIndustry}
           presetParent={addModalParent}
           existingAccounts={currentAccounts}
           onClose={() => {

@@ -58,12 +58,14 @@ interface MasterAccount {
 
 export function AddAccountModal({
   jurisdiction,
+  industry,
   presetParent,
   existingAccounts,
   onClose,
   onAdded,
 }: {
   jurisdiction: "US" | "CA";
+  industry: string;
   presetParent: string | null;
   existingAccounts: MasterAccount[];
   onClose: () => void;
@@ -127,6 +129,10 @@ export function AddAccountModal({
     const body = {
       account_name: accountName.trim(),
       jurisdiction,
+      // Industry MUST be sent — the API used to silently default to
+      // "painters" when this was missing, which caused chimney_sweepers
+      // (and every other non-painter industry) to lose new additions.
+      industry,
       parent_account_name: isParent ? null : parentName,
       is_parent: isParent,
       section,
