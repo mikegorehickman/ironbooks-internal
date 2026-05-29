@@ -224,12 +224,31 @@ function normalizeVendorName(raw: string): string {
 // ============== BANK RULE CRUD ==============
 
 /**
- * Create a bank rule in QBO.
- * Reference: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/bankrule
+ * ⚠ DEPRECATED — DO NOT CALL.
+ *
+ * QBO's public REST API does NOT support creating bank rules. Intuit
+ * documents /bankrule but every POST returns:
+ *   {"Fault":{"Error":[{"Message":"Unsupported Operation",
+ *    "Detail":"Operation bankrule is not supported.","code":"500"}]}}
+ *
+ * Bank rules can only be created through the QBO UI by the user.
+ *
+ * Instead, write bank_rules rows to our local table with
+ * status="active". SNAP's daily-recon engine (lib/daily-recon.ts)
+ * reads them and applies them to incoming transactions, posting the
+ * reclass to QBO via the supported Reclassify endpoint.
+ *
+ * If you find yourself wanting to call this, see:
+ *   - /api/rules/execute       (button-driven activation)
+ *   - /api/rules/from-reclass  (auto-creation from cleanup workflow)
+ * Both write to bank_rules without touching QBO.
+ *
+ * This function throws synchronously so any new call site fails loud
+ * during development instead of silently re-introducing the bug.
  */
 export async function createBankRule(
-  realmId: string,
-  accessToken: string,
+  _realmId: string,
+  _accessToken: string,
   rule: {
     name: string;
     vendorPattern: string;
@@ -239,37 +258,12 @@ export async function createBankRule(
     priority?: number;
   }
 ): Promise<QBOBankRule> {
-  const body: QBOBankRule = {
-    Name: rule.name,
-    Active: true,
-    Priority: rule.priority || 100,
-    Conditions: {
-      AccountType: "Bank",
-      Condition: [
-        {
-          Field: "Description",
-          Operator: rule.matchType,
-          Value: rule.vendorPattern,
-        },
-      ],
-    },
-    Actions: {
-      CategoryId: rule.targetAccountId,
-      ...(rule.taxCodeId && { TaxCodeId: rule.taxCodeId }),
-    },
-  };
-
-  const data = await qboRequest<{ BankRule: QBOBankRule }>(
-    realmId,
-    accessToken,
-    "/bankrule?minorversion=70",
-    {
-      method: "POST",
-      body: JSON.stringify(body),
-    }
+  throw new Error(
+    `createBankRule() is disabled: QBO's public API does not support /bankrule. ` +
+    `Tried to create "${rule.name}" → "${rule.vendorPattern}". ` +
+    `Activate the rule locally via /api/rules/execute or /api/rules/from-reclass instead — ` +
+    `SNAP's daily-recon engine applies bank rules without QBO's native feature.`
   );
-
-  return data.BankRule;
 }
 
 export async function listBankRules(realmId: string, accessToken: string): Promise<QBOBankRule[]> {
