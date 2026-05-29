@@ -141,30 +141,55 @@ export function parseCsv(input: string): Record<string, string>[] {
  */
 const COLUMN_MAPS: Record<CrmSource, Record<keyof Omit<ParsedCrmJob, "raw_row">, string[]>> = {
   drip_jobs: {
-    crm_job_id: ["Job ID", "JobID", "Estimate #", "Estimate Number", "ID"],
-    job_name: ["Job Name", "Job Title", "Title", "Description"],
+    // "Proposal Name" contains the stable proposal/deal/job ID (e.g.
+    // "Proposal #1804108", "Deal #2353039", "Job #1741744"). We extract
+    // the number via extractProposalId(). This is the SAME ID across
+    // a proposal's lifecycle (proposal → deal → job), so multiple CRM
+    // rows with the same ID are the same logical project even if their
+    // amounts differ — that's a revision/change order, not a duplicate.
+    crm_job_id: ["Proposal Name", "Job ID", "JobID", "Estimate #", "Estimate Number", "ID"],
+    job_name: ["Proposal Name", "Job Name", "Job Title", "Title", "Description"],
     customer_name: ["Customer", "Customer Name", "Client", "Client Name"],
     job_status: ["Status", "Job Status"],
     amount: ["Total", "Amount", "Job Total", "Estimate Total", "Invoice Total"],
-    job_date: ["Created", "Created At", "Date", "Estimate Date", "Job Date"],
+    job_date: ["Date", "Created", "Created At", "Estimate Date", "Job Date"],
   },
   jobber: {
-    crm_job_id: ["Job #", "Job Number", "ID"],
+    crm_job_id: ["Job #", "Job Number", "Invoice #", "ID"],
     job_name: ["Title", "Job Title", "Description"],
     customer_name: ["Client", "Client Name", "Customer"],
     job_status: ["Status", "Job Status"],
     amount: ["Total", "Job Total", "Invoiced Amount", "Amount"],
-    job_date: ["Created", "Date Created", "Start Date", "Job Date"],
+    job_date: ["Created", "Date Created", "Start Date", "Job Date", "Date"],
   },
   generic: {
-    crm_job_id: ["Job ID", "ID", "Number", "#"],
-    job_name: ["Title", "Description", "Job", "Name"],
+    crm_job_id: ["Job ID", "ID", "Number", "#", "Proposal Name", "Invoice #"],
+    job_name: ["Title", "Description", "Job", "Name", "Proposal Name"],
     customer_name: ["Customer", "Client", "Name"],
     job_status: ["Status"],
     amount: ["Amount", "Total", "Value"],
     job_date: ["Date", "Created"],
   },
 };
+
+/**
+ * Pull the stable numeric ID out of a field that may be wrapped in a
+ * lifecycle prefix like "Proposal #1804108" or "Deal #2353039" or
+ * "Job #1741744" — DripJobs uses the same number across the proposal →
+ * deal → job lifecycle, so we want the bare number for grouping.
+ *
+ * "Proposal #1804108" → "1804108"
+ * "Deal #2353039"     → "2353039"
+ * "Job #1741744"      → "1741744"
+ * "2298836"           → "2298836"
+ * "Some title"        → null (no extractable id)
+ */
+function extractProposalId(raw: string | null): string | null {
+  if (!raw) return null;
+  // Strip lifecycle prefix + optional "#"; capture the digits.
+  const m = String(raw).match(/(?:^|\s)(?:proposal|deal|job|estimate|invoice)?\s*#?\s*(\d{3,})\b/i);
+  return m ? m[1] : null;
+}
 
 function pickField(row: Record<string, string>, candidates: string[]): string | null {
   // Build a lowercased-key index once per row
@@ -213,8 +238,12 @@ export function normalizeCrmRows(rows: Record<string, string>[], crm: CrmSource)
   for (const row of rows) {
     const customer = pickField(row, map.customer_name);
     if (!customer) continue; // skip rows without a customer — can't match anything
+    const rawId = pickField(row, map.crm_job_id);
+    // Extract the numeric/stable portion (handles "Proposal #X", "Deal #X").
+    // Fall back to the raw value if nothing parses (e.g. a UUID).
+    const cleanId = extractProposalId(rawId) || rawId;
     out.push({
-      crm_job_id: pickField(row, map.crm_job_id),
+      crm_job_id: cleanId,
       job_name: pickField(row, map.job_name),
       customer_name: customer,
       job_status: pickField(row, map.job_status) || "active",
@@ -228,11 +257,16 @@ export function normalizeCrmRows(rows: Record<string, string>[], crm: CrmSource)
 
 // ─── DUPLICATE DETECTION ──────────────────────────────────────────────
 
-const AMOUNT_TOLERANCE = 5;        // dollars
-const DATE_WINDOW_DAYS = 90;       // close-enough date window (was 14; widened
-                                   // because Drip Jobs estimate-date vs QBO
-                                   // invoice-posting-date can drift by weeks
-                                   // for old phantom A/R cleanup).
+// Tighter tolerances after seeing real Drip Jobs data — clients have
+// PLENTY of legitimate same-customer-different-amount invoices (change
+// orders, progress billings, multiple proposals). Loose matching turns
+// those into false-positive duplicates.
+const AMOUNT_TOLERANCE = 0.50;     // dollars — just rounding tolerance
+const DATE_WINDOW_DAYS = 90;       // window for Path A (CRM → QBO match) —
+                                   // wide because CRM proposal date vs QBO
+                                   // posting date can drift
+const DUPLICATE_CLUSTER_WINDOW_DAYS = 30; // narrower window for Path B
+                                          // (pure-heuristic clustering)
 const NAME_MATCH_LOOSE = true;     // accept "John Smith" === "John Smith Painting"
 
 function daysBetween(a: string, b: string): number {
@@ -353,6 +387,26 @@ export function detectDuplicates(input: DetectDuplicatesInput): DetectDuplicates
     return loose ? loose.key : null;
   }
 
+  // ── Pre-pass: detect CRM revision series ──
+  // Multiple CRM rows for the same customer + same proposal_id at
+  // DIFFERENT amounts are revisions/change orders. They are NOT
+  // duplicates of each other in QBO either — each amount has its own
+  // invoice. Mark these so Path A can match each separately without
+  // false-flagging.
+  const revisionSeries = new Map<string, ParsedCrmJob[]>(); // key = customer+proposal_id
+  for (const job of input.crmJobs) {
+    if (!job.crm_job_id || !job.customer_name) continue;
+    const k = `${normalizeName(job.customer_name)}|${job.crm_job_id}`;
+    if (!revisionSeries.has(k)) revisionSeries.set(k, []);
+    revisionSeries.get(k)!.push(job);
+  }
+  const revisionKeys = new Set<string>();
+  for (const [k, jobs] of revisionSeries) {
+    if (jobs.length < 2) continue;
+    const amounts = new Set(jobs.map((j) => (j.amount != null ? j.amount.toFixed(2) : null)));
+    if (amounts.size > 1) revisionKeys.add(k);
+  }
+
   // ── Path A: cross-reference each CRM job → find matching QBO invoices ──
   const matchedQboIds = new Set<string>();
   const crmCountByCustomer = new Map<string, number>();
@@ -366,24 +420,23 @@ export function detectDuplicates(input: DetectDuplicatesInput): DetectDuplicates
     if (!customerKey) return;
     const candidates = byCustomer.get(customerKey) || [];
 
-    // Filter to amount + date window
+    // Filter to amount + date window. AMOUNT_TOLERANCE is now $0.50,
+    // so only true same-amount invoices match.
     const matched = candidates.filter((inv) => {
       if (job.amount != null && Math.abs(inv.total_amount - job.amount) > AMOUNT_TOLERANCE) return false;
       if (job.job_date && daysBetween(inv.txn_date, job.job_date) > DATE_WINDOW_DAYS) return false;
       return true;
     });
 
-    if (matched.length === 0) return; // no QBO invoices for this CRM job — bookkeeper case
+    if (matched.length === 0) return; // no QBO invoices for this CRM job
     if (matched.length === 1) {
       legitimate.add(matched[0].qbo_invoice_id);
       matchedQboIds.add(matched[0].qbo_invoice_id);
       return;
     }
 
-    // 2+ QBO invoices match this single CRM job → all but one are duplicates.
-    // Survivor pick: the one with the most-recent transaction date (likely
-    // the final revision the bookkeeper actually kept open) — falls back to
-    // the lowest QBO id as a deterministic tiebreaker.
+    // 2+ QBO invoices match this single CRM row at the SAME amount.
+    // That's a true duplicate — survivor is most-recent.
     const sorted = [...matched].sort((a, b) => {
       const c = b.txn_date.localeCompare(a.txn_date);
       if (c !== 0) return c;
@@ -392,17 +445,26 @@ export function detectDuplicates(input: DetectDuplicatesInput): DetectDuplicates
     const survivor = sorted[0];
     legitimate.add(survivor.qbo_invoice_id);
     matchedQboIds.add(survivor.qbo_invoice_id);
+    const isRevisionSeries = job.crm_job_id
+      ? revisionKeys.has(`${normalizeName(job.customer_name)}|${job.crm_job_id}`)
+      : false;
     for (let i = 1; i < sorted.length; i++) {
       const dup = sorted[i];
       duplicates.push({
         qbo_invoice: dup,
         matched_crm_job_index: jobIdx,
         surviving_qbo_invoice: survivor,
-        confidence: 0.92,
+        // Slightly lower confidence when the CRM job is part of a revision
+        // series — the dup might actually be another revision the CRM
+        // export missed.
+        confidence: isRevisionSeries ? 0.78 : 0.92,
         reasoning:
+          (isRevisionSeries
+            ? `⚠ This proposal has multiple CRM rows at different amounts (revision series). `
+            : "") +
           `CRM job ${job.crm_job_id ? `#${job.crm_job_id} ` : ""}for ${job.customer_name}` +
           (job.job_date ? ` on ${job.job_date}` : "") +
-          ` matches ${sorted.length} QBO invoices (likely CRM revision dupes). ` +
+          ` matches ${sorted.length} QBO invoices at the SAME amount ($${job.amount?.toFixed(2)}). ` +
           `Keeping ${survivor.doc_number || survivor.qbo_invoice_id}, flagging ${dup.doc_number || dup.qbo_invoice_id}.`,
       });
       matchedQboIds.add(dup.qbo_invoice_id);
@@ -410,16 +472,17 @@ export function detectDuplicates(input: DetectDuplicatesInput): DetectDuplicates
   });
 
   // ── Path B: heuristic on QBO-only clusters (no CRM match) ──
-  // For invoices we couldn't match to ANY CRM job: if there are ≥2 invoices
-  // for the same customer with the same amount and dates within window,
-  // flag the extras as likely-duplicate at lower confidence.
+  // Conservative — requires EXACT same amount (just rounding tolerance)
+  // AND tight date window (30 days). Different-amount invoices for the
+  // same customer are NOT clustered — those are change orders or
+  // progress billings, not duplicates.
   for (const [_, invoices] of byCustomer) {
     const unattributed = invoices.filter((inv) => !matchedQboIds.has(inv.qbo_invoice_id));
     if (unattributed.length < 2) {
       for (const inv of unattributed) unmatched.add(inv.qbo_invoice_id);
       continue;
     }
-    // Cluster by (amount within tolerance, date within window)
+    // Cluster by EXACT amount (within rounding) + tight date window.
     const used = new Set<string>();
     for (let i = 0; i < unattributed.length; i++) {
       if (used.has(unattributed[i].qbo_invoice_id)) continue;
@@ -427,8 +490,10 @@ export function detectDuplicates(input: DetectDuplicatesInput): DetectDuplicates
       used.add(unattributed[i].qbo_invoice_id);
       for (let j = i + 1; j < unattributed.length; j++) {
         if (used.has(unattributed[j].qbo_invoice_id)) continue;
+        // EXACT amount match (rounding tolerance only). Different amounts
+        // are different jobs — never cluster them.
         if (Math.abs(unattributed[i].total_amount - unattributed[j].total_amount) > AMOUNT_TOLERANCE) continue;
-        if (daysBetween(unattributed[i].txn_date, unattributed[j].txn_date) > DATE_WINDOW_DAYS) continue;
+        if (daysBetween(unattributed[i].txn_date, unattributed[j].txn_date) > DUPLICATE_CLUSTER_WINDOW_DAYS) continue;
         cluster.push(unattributed[j]);
         used.add(unattributed[j].qbo_invoice_id);
       }
@@ -438,16 +503,27 @@ export function detectDuplicates(input: DetectDuplicatesInput): DetectDuplicates
       }
       const sorted = [...cluster].sort((a, b) => b.txn_date.localeCompare(a.txn_date));
       const survivor = sorted[0];
+      // Confidence depends on whether the customer has ANY CRM rows. If
+      // none, the cluster could be a legitimate billing pattern we don't
+      // know about — keep confidence low.
+      const customerKey = unattributed[i].customer_id
+        ? `id:${unattributed[i].customer_id}`
+        : `name:${normalizeName(unattributed[i].customer_name)}`;
+      const crmRowsForCustomer = crmCountByCustomer.get(customerKey) || 0;
+      const confidence = crmRowsForCustomer > 0 ? 0.65 : 0.5;
       for (let k = 1; k < sorted.length; k++) {
         const dup = sorted[k];
         duplicates.push({
           qbo_invoice: dup,
           matched_crm_job_index: null,
           surviving_qbo_invoice: survivor,
-          confidence: 0.7,
+          confidence,
           reasoning:
-            `No CRM record matched, but QBO has ${cluster.length} invoices for ${dup.customer_name || "this customer"} at $${dup.total_amount.toFixed(2)} within ${DATE_WINDOW_DAYS} days. ` +
-            `Likely duplicates from a CRM revision sync — verify before write-off.`,
+            `Heuristic match — QBO has ${cluster.length} invoices for ${dup.customer_name || "this customer"} at EXACTLY $${dup.total_amount.toFixed(2)} within ${DUPLICATE_CLUSTER_WINDOW_DAYS} days. ` +
+            (crmRowsForCustomer > 0
+              ? `CRM has ${crmRowsForCustomer} job(s) for this customer but none match this amount — possible CRM-sync dupes.`
+              : `No CRM rows for this customer to confirm — could be a duplicate OR a legitimate split billing.`) +
+            ` Verify before write-off.`,
         });
       }
     }

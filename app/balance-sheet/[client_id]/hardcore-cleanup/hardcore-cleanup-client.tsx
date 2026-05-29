@@ -96,6 +96,10 @@ export function HardcoreCleanupClient({
   const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  // Default to showing only high-confidence (CRM-confirmed) duplicates.
+  // Low-confidence Path B clusters can be false positives — change orders
+  // / progress billings the CRM didn't include. Bookkeeper can toggle on.
+  const [showLowConfidence, setShowLowConfidence] = useState(false);
 
   async function loadRun(rId: string) {
     setLoading(true);
@@ -229,15 +233,28 @@ export function HardcoreCleanupClient({
     [accounts]
   );
 
+  const lowConfidenceCount = useMemo(
+    () => items.filter((i) => i.confidence < 0.75 && i.resolution === "pending").length,
+    [items]
+  );
+
   // Group items by customer for cleaner review
   const grouped = useMemo(() => {
-    const filtered = search.trim()
-      ? items.filter((i) =>
-          [i.qbo_customer_name, i.qbo_invoice_doc_number, i.reasoning]
-            .filter(Boolean)
-            .some((s) => String(s).toLowerCase().includes(search.toLowerCase()))
-        )
-      : items;
+    let filtered = items;
+    if (!showLowConfidence) {
+      // Hide low-confidence (Path B no-CRM-match) by default — they're
+      // often legitimate change orders / progress billings, not real dupes.
+      // Resolved low-confidence items (keep / dismiss / done) stay visible
+      // so the bookkeeper can audit their decisions.
+      filtered = filtered.filter((i) => i.confidence >= 0.75 || i.resolution !== "pending");
+    }
+    if (search.trim()) {
+      filtered = filtered.filter((i) =>
+        [i.qbo_customer_name, i.qbo_invoice_doc_number, i.reasoning]
+          .filter(Boolean)
+          .some((s) => String(s).toLowerCase().includes(search.toLowerCase()))
+      );
+    }
     const m = new Map<string, Item[]>();
     for (const i of filtered) {
       const key = i.qbo_customer_name || "(no customer)";
@@ -385,6 +402,17 @@ export function HardcoreCleanupClient({
                 className="w-full pl-8 pr-2 py-1.5 text-sm border border-slate-200 rounded-lg"
               />
             </div>
+            {lowConfidenceCount > 0 && (
+              <label className="inline-flex items-center gap-1.5 text-xs text-ink-slate cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showLowConfidence}
+                  onChange={(e) => setShowLowConfidence(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                Include {lowConfidenceCount} low-confidence (no-CRM-match)
+              </label>
+            )}
             {resolvedCount > 0 && run.status === "review" && (
               <button
                 onClick={finalize}
