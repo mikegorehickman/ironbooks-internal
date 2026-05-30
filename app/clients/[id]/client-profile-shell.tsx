@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Settings as SettingsIcon,
   Clock,
+  X as XIcon,
 } from "lucide-react";
 import type {
   OutstandingWork,
@@ -70,6 +71,17 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const canImpersonate = actorRole === "admin" || actorRole === "lead";
 
+  // Drill-down drawer state — shared across P&L and BS tabs. Holds the
+  // account the user clicked plus the date range to query. The drawer
+  // itself owns the fetch + render so tabs stay focused on layout.
+  const [drill, setDrill] = useState<{
+    accountId: string;
+    accountName: string;
+    kind: "pl" | "bs";
+    start: string;
+    end: string;
+  } | null>(null);
+
   return (
     <div className="px-8 py-6 max-w-7xl mx-auto space-y-6">
       {/* Top action bar — sits above the tab strip so the actions are visible
@@ -123,11 +135,54 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
       {activeTab === "overview" && (
         <OverviewTab clientLink={clientLink} overview={overview} />
       )}
-      {activeTab === "pl" && <PLTab financials={financials} clientLinkId={clientLink.id} />}
-      {activeTab === "bs" && <BSTab financials={financials} clientLinkId={clientLink.id} />}
+      {activeTab === "pl" && (
+        <PLTab
+          financials={financials}
+          clientLinkId={clientLink.id}
+          onDrill={(accountId, accountName) =>
+            setDrill({
+              accountId,
+              accountName,
+              kind: "pl",
+              start: financials.overview?.primaryMonth.start || "",
+              end: financials.overview?.primaryMonth.end || "",
+            })
+          }
+        />
+      )}
+      {activeTab === "bs" && (
+        <BSTab
+          financials={financials}
+          clientLinkId={clientLink.id}
+          onDrill={(accountId, accountName) =>
+            setDrill({
+              accountId,
+              accountName,
+              kind: "bs",
+              // BS drill defaults to last 90 days of activity hitting the
+              // account — gives the bookkeeper context without flooding
+              // them with multi-year history on the first click.
+              start: ymdDaysAgo(90),
+              end: ymdToday(),
+            })
+          }
+        />
+      )}
       {activeTab === "bank" && <BankTab financials={financials} clientLinkId={clientLink.id} />}
       {activeTab === "activity" && (
         <ActivityTab activity={overview.activity} />
+      )}
+
+      {drill && (
+        <DrillDrawer
+          clientLinkId={clientLink.id}
+          accountId={drill.accountId}
+          accountName={drill.accountName}
+          kind={drill.kind}
+          start={drill.start}
+          end={drill.end}
+          onClose={() => setDrill(null)}
+        />
       )}
     </div>
   );
@@ -369,10 +424,17 @@ function NoQboState({ clientLinkId }: { clientLinkId: string }) {
 function PLTab({
   financials,
   clientLinkId,
+  onDrill,
 }: {
   financials: FinancialsBundle;
   clientLinkId: string;
+  onDrill: (accountId: string, accountName: string) => void;
 }) {
+  // Local UI toggle — by default we hide zero-balance accounts so the page
+  // isn't a wall of "$0" rows. Bookkeepers verifying COA completeness flip
+  // the toggle on; everyone else gets a clean activity-only view.
+  const [showZeros, setShowZeros] = useState(false);
+
   if (!financials.hasQbo) return <NoQboState clientLinkId={clientLinkId} />;
   if (!financials.overview) {
     return (
@@ -389,54 +451,185 @@ function PLTab({
   const expensesDelta = pl.totalExpenses - prev.totalExpenses;
   const niDelta = pl.netIncome - prev.netIncome;
 
-  // Sort line items by absolute size so the biggest movers are at the top.
-  // Bookkeepers reviewing a P&L want to spot anomalies fast — alphabetical
-  // by account name buries the lead.
-  const sortedLines = [...pl.lineItems].sort(
-    (a, b) => Math.abs(b.amount) - Math.abs(a.amount)
-  );
+  // ─── Full-COA merge ─────────────────────────────────────────────────
+  // Build a row for every active P&L account from QBO (Revenue / Expense
+  // classifications). Then merge in the P&L report's line-item amounts so
+  // accounts with zero activity show as $0 instead of being invisible.
+  // This is the "show full COA so we can verify completeness" half of
+  // Mike's request.
+  //
+  // financials.balanceSheet.accounts returns ALL active accounts (quirk
+  // of the underlying fetchAllAccounts call), so it's the right source
+  // for both BS and P&L COA views.
+  const allAccounts = financials.balanceSheet?.accounts || [];
+  type PLRow = {
+    accountId: string | null;
+    name: string;
+    accountType: string;
+    classification: "Revenue" | "Expense";
+    amount: number;
+  };
+  const rowsByAcctId = new Map<string, PLRow>();
+  const rowsByName = new Map<string, PLRow>();
+  for (const acct of allAccounts) {
+    const cls = acct.Classification;
+    if (cls !== "Revenue" && cls !== "Expense") continue;
+    const row: PLRow = {
+      accountId: acct.Id,
+      name: acct.FullyQualifiedName || acct.Name,
+      accountType: acct.AccountType,
+      classification: cls as "Revenue" | "Expense",
+      amount: 0,
+    };
+    rowsByAcctId.set(acct.Id, row);
+    rowsByName.set(row.name.toLowerCase(), row);
+  }
+  // Merge in PL line items — match by account_id first, then label.
+  // Lines that don't match (rare: deleted accounts, JE-only lines) get
+  // added so the bookkeeper still sees them.
+  for (const line of pl.lineItems) {
+    let row: PLRow | undefined;
+    if (line.account_id) row = rowsByAcctId.get(line.account_id);
+    if (!row) row = rowsByName.get((line.label || "").toLowerCase());
+    if (row) {
+      row.amount = line.amount;
+    } else {
+      const cls: "Revenue" | "Expense" = /income|revenue/i.test(line.group)
+        ? "Revenue"
+        : "Expense";
+      rowsByName.set((line.label || "").toLowerCase() + `_${Math.random()}`, {
+        accountId: line.account_id,
+        name: line.label || "Unknown account",
+        accountType: line.group || cls,
+        classification: cls,
+        amount: line.amount,
+      });
+    }
+  }
+
+  const allRows = [...rowsByName.values()];
+  const filtered = showZeros
+    ? allRows
+    : allRows.filter((r) => Math.abs(r.amount) >= 0.005);
+
+  const incomeRows = filtered
+    .filter((r) => r.classification === "Revenue")
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  const cogsRows = filtered
+    .filter(
+      (r) => r.classification === "Expense" && /cost of goods sold/i.test(r.accountType)
+    )
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  const expenseRows = filtered
+    .filter(
+      (r) => r.classification === "Expense" && !/cost of goods sold/i.test(r.accountType)
+    )
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+
+  const totalAccounts = allRows.length;
+  const populatedAccounts = allRows.filter((r) => Math.abs(r.amount) >= 0.005).length;
 
   return (
     <div className="space-y-4">
-      <div className="text-xs text-ink-slate">
-        Range: <span className="font-semibold text-navy">{financials.primaryRangeLabel}</span>
-        {" "}vs prior period {financials.comparisonRangeLabel}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-xs text-ink-slate">
+          Range: <span className="font-semibold text-navy">{financials.primaryRangeLabel}</span>
+          {" "}vs prior period {financials.comparisonRangeLabel}
+          <span className="ml-3 text-ink-slate/70">
+            · {populatedAccounts} of {totalAccounts} P&amp;L accounts have activity
+          </span>
+        </div>
+        <label className="inline-flex items-center gap-2 text-xs text-ink-slate cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showZeros}
+            onChange={(e) => setShowZeros(e.target.checked)}
+            className="rounded border-gray-300 text-teal focus:ring-teal"
+          />
+          Show zero-balance accounts
+        </label>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <KPICard label="Total income" value={pl.totalIncome} delta={incomeDelta} />
         <KPICard label="Total expenses" value={pl.totalExpenses} delta={expensesDelta} invertDeltaColor />
         <KPICard label="Net income" value={pl.netIncome} delta={niDelta} />
       </div>
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-gray-200 bg-gray-50 text-xs font-bold uppercase text-ink-slate tracking-wide">
-          P&amp;L detail · biggest lines first
+      <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} onDrill={onDrill} />
+      {cogsRows.length > 0 && (
+        <PLSection
+          title="Cost of Goods Sold"
+          rows={cogsRows}
+          total={cogsRows.reduce((s, r) => s + r.amount, 0)}
+          onDrill={onDrill}
+        />
+      )}
+      <PLSection title="Expenses" rows={expenseRows} total={pl.totalExpenses} onDrill={onDrill} />
+    </div>
+  );
+}
+
+function PLSection({
+  title,
+  rows,
+  total,
+  onDrill,
+}: {
+  title: string;
+  rows: Array<{ accountId: string | null; name: string; accountType: string; amount: number }>;
+  total: number;
+  onDrill: (accountId: string, accountName: string) => void;
+}) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+        <div className="text-xs font-bold uppercase text-ink-slate tracking-wide">
+          {title} · {rows.length} {rows.length === 1 ? "account" : "accounts"}
         </div>
-        <div className="divide-y divide-gray-100">
-          {sortedLines.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-ink-slate text-center">
-              No P&amp;L activity in this period.
-            </div>
-          ) : (
-            sortedLines.map((line, i) => (
-              <div
-                key={`${line.label}-${i}`}
-                className="flex items-center justify-between px-4 py-2 text-sm"
+        <div className="font-mono text-sm font-bold text-navy">
+          {formatCurrency(total)}
+        </div>
+      </div>
+      <div className="divide-y divide-gray-100">
+        {rows.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-ink-slate text-center">
+            No {title.toLowerCase()} accounts to show.
+          </div>
+        ) : (
+          rows.map((r, i) => {
+            const isZero = Math.abs(r.amount) < 0.005;
+            const clickable = !!r.accountId;
+            return (
+              <button
+                key={`${r.accountId || r.name}-${i}`}
+                onClick={() => r.accountId && onDrill(r.accountId, r.name)}
+                disabled={!clickable}
+                className={`w-full flex items-center justify-between px-4 py-2 text-sm text-left ${
+                  clickable
+                    ? "hover:bg-teal-lighter/40 cursor-pointer"
+                    : "cursor-default"
+                } ${isZero ? "opacity-60" : ""}`}
+                title={clickable ? "Click to see transactions" : "No account ID — can't drill"}
               >
-                <div className="text-navy truncate pr-2">
-                  {line.label}
-                  <span className="text-[10px] text-ink-slate ml-2 font-normal">{line.group}</span>
+                <div className="text-navy truncate pr-2 flex-1 min-w-0">
+                  {r.name}
+                  <span className="text-[10px] text-ink-slate ml-2 font-normal">
+                    {r.accountType}
+                  </span>
                 </div>
                 <div
                   className={`font-mono font-semibold shrink-0 ${
-                    line.amount < 0 ? "text-red-600" : "text-navy"
+                    r.amount < 0 ? "text-red-600" : isZero ? "text-ink-slate" : "text-navy"
                   }`}
                 >
-                  {formatCurrency(line.amount)}
+                  {formatCurrency(r.amount)}
                 </div>
-              </div>
-            ))
-          )}
-        </div>
+                {clickable && (
+                  <ChevronRight size={14} className="text-ink-slate ml-1 shrink-0" />
+                )}
+              </button>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -445,9 +638,11 @@ function PLTab({
 function BSTab({
   financials,
   clientLinkId,
+  onDrill,
 }: {
   financials: FinancialsBundle;
   clientLinkId: string;
+  onDrill: (accountId: string, accountName: string) => void;
 }) {
   if (!financials.hasQbo) return <NoQboState clientLinkId={clientLinkId} />;
   if (!financials.balanceSheet) {
@@ -461,8 +656,10 @@ function BSTab({
   const bs = financials.balanceSheet;
   // Group by Classification + sort by absolute balance. Internal users
   // see ALL active accounts, not just top-5 like the portal — they need
-  // the full picture for cleanup decisions.
-  const groups: Record<"Asset" | "Liability" | "Equity", Array<{ name: string; balance: number }>> = {
+  // the full picture for cleanup decisions. We carry the accountId on
+  // each row so the drill-down can fire when clicked.
+  type BSRow = { accountId: string; name: string; balance: number };
+  const groups: Record<"Asset" | "Liability" | "Equity", BSRow[]> = {
     Asset: [],
     Liability: [],
     Equity: [],
@@ -471,7 +668,13 @@ function BSTab({
     const bal = bs.balances.get(acct.Id) ?? 0;
     if (Math.abs(bal) < 0.01) continue;
     const g = acct.Classification as keyof typeof groups;
-    if (g in groups) groups[g].push({ name: acct.Name, balance: bal });
+    if (g in groups) {
+      groups[g].push({
+        accountId: acct.Id,
+        name: acct.FullyQualifiedName || acct.Name,
+        balance: bal,
+      });
+    }
   }
   for (const k of Object.keys(groups) as Array<keyof typeof groups>) {
     groups[k].sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance));
@@ -497,7 +700,7 @@ function BSTab({
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {(["Asset", "Liability", "Equity"] as const).map((g) => (
-          <BSGroup key={g} title={g} rows={groups[g]} />
+          <BSGroup key={g} title={g} rows={groups[g]} onDrill={onDrill} />
         ))}
       </div>
     </div>
@@ -507,9 +710,11 @@ function BSTab({
 function BSGroup({
   title,
   rows,
+  onDrill,
 }: {
   title: string;
-  rows: Array<{ name: string; balance: number }>;
+  rows: Array<{ accountId: string; name: string; balance: number }>;
+  onDrill: (accountId: string, accountName: string) => void;
 }) {
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -520,12 +725,16 @@ function BSGroup({
         {rows.length === 0 ? (
           <div className="px-4 py-6 text-xs text-ink-slate text-center">No {title.toLowerCase()} balances</div>
         ) : (
-          rows.map((r, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between px-4 py-2 text-sm"
+          rows.map((r) => (
+            <button
+              key={r.accountId}
+              onClick={() => onDrill(r.accountId, r.name)}
+              className="w-full flex items-center justify-between px-4 py-2 text-sm text-left hover:bg-teal-lighter/40 transition-colors cursor-pointer"
+              title="Click to see last 90 days of transactions hitting this account"
             >
-              <div className="text-navy truncate pr-2" title={r.name}>{r.name}</div>
+              <div className="text-navy truncate pr-2 flex-1 min-w-0" title={r.name}>
+                {r.name}
+              </div>
               <div
                 className={`font-mono font-semibold shrink-0 ${
                   r.balance < 0 ? "text-red-600" : "text-navy"
@@ -533,7 +742,8 @@ function BSGroup({
               >
                 {formatCurrency(r.balance)}
               </div>
-            </div>
+              <ChevronRight size={14} className="text-ink-slate ml-1 shrink-0" />
+            </button>
           ))
         )}
       </div>
@@ -694,6 +904,205 @@ function formatCurrency(n: number): string {
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
   if (abs >= 10_000) return `${sign}$${Math.round(abs / 1_000)}k`;
   return `${sign}$${abs.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function ymdToday(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function ymdDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+// ─── DRILL-DOWN DRAWER ─────────────────────────────────────────────────
+
+interface DrillTransaction {
+  id: string;
+  type: string;
+  date: string;
+  doc_number: string | null;
+  name: string | null;
+  memo: string;
+  amount: number;
+  running_balance: number | null;
+  cleared?: boolean;
+}
+
+function DrillDrawer({
+  clientLinkId,
+  accountId,
+  accountName,
+  kind,
+  start,
+  end,
+  onClose,
+}: {
+  clientLinkId: string;
+  accountId: string;
+  accountName: string;
+  kind: "pl" | "bs";
+  start: string;
+  end: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<{
+    transactions: DrillTransaction[];
+    total: number;
+    truncated: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    const url = `/api/clients/${clientLinkId}/account-transactions?account_id=${encodeURIComponent(
+      accountId
+    )}&start=${start}&end=${end}&kind=${kind}`;
+    fetch(url)
+      .then(async (r) => {
+        if (!r.ok) throw new Error((await r.json()).error || `Fetch failed (${r.status})`);
+        return r.json();
+      })
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e?.message || "Failed to load transactions");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientLinkId, accountId, start, end, kind]);
+
+  // Sum + check vs the parent row's expected amount so the bookkeeper can
+  // spot QBO report-vs-detail reconciliation discrepancies at a glance.
+  const sumOfShown = (data?.transactions || []).reduce((s, t) => s + t.amount, 0);
+
+  return (
+    <>
+      {/* Backdrop — click anywhere outside the drawer to close. Tab still
+          available for screen readers via the close button below. */}
+      <div
+        className="fixed inset-0 bg-black/30 z-40"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      {/* Drawer — slides from the right. Wide enough to read full memos
+          without scrolling, fixed-position so it overlays the tab content
+          without disturbing scroll on the page behind. */}
+      <div className="fixed right-0 top-0 h-full w-full md:w-[700px] bg-white shadow-2xl z-50 flex flex-col">
+        <div className="flex items-start justify-between px-5 py-4 border-b border-gray-200">
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-wide text-ink-slate font-bold">
+              {kind === "pl" ? "P&L transactions" : "Account activity"}
+            </div>
+            <div className="text-sm font-bold text-navy truncate" title={accountName}>
+              {accountName}
+            </div>
+            <div className="text-xs text-ink-slate mt-0.5">
+              {start} → {end}
+              {data && (
+                <span className="ml-2">
+                  · {data.total} transaction{data.total === 1 ? "" : "s"}
+                  {data.truncated && " (showing first 500)"}
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="shrink-0 -mt-1 -mr-1 p-2 text-ink-slate hover:text-navy hover:bg-gray-100 rounded-lg"
+            aria-label="Close"
+          >
+            <XIcon size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          {loading ? (
+            <div className="px-5 py-12 text-center text-sm text-ink-slate">
+              <Loader2 className="animate-spin inline mr-2" size={14} />
+              Loading transactions…
+            </div>
+          ) : error ? (
+            <div className="m-5 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+              {error}
+            </div>
+          ) : !data || data.transactions.length === 0 ? (
+            <div className="px-5 py-12 text-center text-sm text-ink-slate">
+              No transactions in this range.
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {data.transactions.map((t, i) => (
+                <div key={`${t.id}-${i}`} className="px-5 py-2.5 text-xs hover:bg-gray-50">
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-ink-slate shrink-0">{t.date}</span>
+                      <span className="text-[10px] font-bold uppercase text-teal bg-teal-lighter/60 px-1.5 py-0.5 rounded shrink-0">
+                        {t.type}
+                      </span>
+                      {t.doc_number && (
+                        <span className="text-ink-slate shrink-0">#{t.doc_number}</span>
+                      )}
+                      {t.cleared && (
+                        <span className="text-[10px] text-emerald-700 shrink-0">✓ cleared</span>
+                      )}
+                    </div>
+                    <div
+                      className={`font-mono font-bold shrink-0 ${
+                        t.amount < 0 ? "text-red-600" : "text-navy"
+                      }`}
+                    >
+                      {formatCurrencyExact(t.amount)}
+                    </div>
+                  </div>
+                  <div className="text-navy">
+                    {t.name && <span className="font-semibold">{t.name}</span>}
+                    {t.name && t.memo && <span className="text-ink-slate"> · </span>}
+                    {t.memo && <span className="text-ink-slate">{t.memo}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {data && data.transactions.length > 0 && (
+          <div className="border-t border-gray-200 px-5 py-3 text-xs flex items-center justify-between bg-gray-50">
+            <div className="text-ink-slate">
+              Sum of shown:{" "}
+              <span className="font-mono font-bold text-navy">
+                {formatCurrencyExact(sumOfShown)}
+              </span>
+            </div>
+            {data.truncated && (
+              <div className="text-amber-700">
+                Capped at 500 — sum may not equal the report total
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function formatCurrencyExact(n: number): string {
+  // Cent-precision for the drill-down — drill view is where bookkeepers
+  // verify amounts down to the penny, so the dashboard rounding doesn't
+  // apply.
+  return `${n < 0 ? "-" : ""}$${Math.abs(n).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function ViewAsClientButton({ clientLinkId }: { clientLinkId: string }) {
