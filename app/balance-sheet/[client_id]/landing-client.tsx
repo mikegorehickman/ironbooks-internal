@@ -7,6 +7,7 @@ import {
   CheckCircle2, Save, FileText, Landmark, CreditCard, FileSpreadsheet,
   HomeIcon, Search, Send, X, ExternalLink,
 } from "lucide-react";
+import { ExternalInvoiceUpload } from "./external-invoice-upload";
 
 interface BSAccount {
   qbo_account_id: string;
@@ -374,6 +375,12 @@ export function BalanceSheetLanding({
 
   return (
     <div className="space-y-6">
+      {/* Job-app CSV import card — sits above UF→A/R so the bookkeeper
+          uploads source-of-truth invoices first; the duplicate detector
+          downstream consumes the lineage_key to label estimate revisions
+          vs real duplicates correctly. */}
+      <ExternalInvoiceUpload clientLinkId={clientLinkId} />
+
       {/* UF → A/R top action */}
       <div className="rounded-2xl bg-gradient-to-br from-teal-lighter to-white border border-teal/30 p-5">
         <div className="flex items-start gap-3">
