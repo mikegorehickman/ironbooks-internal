@@ -219,8 +219,56 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
     (workflow !== "full_categorization" || threshold > 0) &&
     !submitting;
 
+  // Pre-flight warning state. When the QBO TX-count probe says the client
+  // has 0 reclass-eligible transactions in the date range, we show a yellow
+  // panel explaining the For Review queue + Ask My Accountant pattern.
+  // Bookkeeper clicks "Run anyway" to bypass; that flips `preflightDismissed`
+  // so the next submit skips the check.
+  const [preflightChecking, setPreflightChecking] = useState(false);
+  const [preflightWarning, setPreflightWarning] = useState<{
+    supported: number;
+    unsupported: number;
+    topUnsupported: Array<{ type: string; count: number }>;
+  } | null>(null);
+  const [preflightDismissed, setPreflightDismissed] = useState(false);
+
   async function handleSubmit() {
     if (!canSubmit || !selectedClient) return;
+
+    // Pre-flight: only on full_categorization (the workflow that scans
+    // all expense types). For consolidation/scrub the bookkeeper already
+    // picked a specific source account, so we trust their intent.
+    // Skip if already dismissed (user clicked "Run anyway") to avoid a loop.
+    if (workflow === "full_categorization" && !preflightDismissed && !preflightWarning) {
+      setPreflightChecking(true);
+      setSubmitError("");
+      try {
+        const url = `/api/clients/${clientLinkId}/qbo-tx-counts?start=${dateRangeStart}&end=${dateRangeEnd}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          const supported = data?.summary?.currently_supported_total ?? 0;
+          const unsupported = data?.summary?.currently_unsupported_total ?? 0;
+          if (supported === 0) {
+            // Surface the warning panel; user can dismiss + retry.
+            const topUnsupported = (data?.counts || [])
+              .filter((c: any) => !c.supported_by_reclass && (c.count || 0) > 0)
+              .sort((a: any, b: any) => (b.count || 0) - (a.count || 0))
+              .slice(0, 4)
+              .map((c: any) => ({ type: c.type, count: c.count }));
+            setPreflightWarning({ supported, unsupported, topUnsupported });
+            setPreflightChecking(false);
+            return;
+          }
+        }
+        // Pre-flight failed or returned non-empty → fall through and submit.
+      } catch {
+        // Probe failures shouldn't block discovery — fail open and submit.
+      } finally {
+        setPreflightChecking(false);
+      }
+    }
+
     setSubmitting(true);
     setSubmitError("");
 
@@ -695,15 +743,85 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
           </div>
         )}
 
+        {/* Pre-flight warning: QBO has no reclass-eligible transactions in
+            the date range. Almost always means the items are stuck in
+            Banking → For Review and need to be Added to a holding account
+            in QBO first. Bookkeeper can bypass with "Run anyway" if they
+            know what they're doing. */}
+        {preflightWarning && (
+          <div className="p-4 bg-amber-50 border border-amber-300 rounded-lg space-y-2">
+            <div className="flex items-start gap-2">
+              <AlertCircle size={18} className="flex-shrink-0 mt-0.5 text-amber-700" />
+              <div className="flex-1">
+                <div className="font-bold text-amber-900 text-sm">
+                  No reclass-eligible transactions found in QBO
+                </div>
+                <p className="text-xs text-amber-800 mt-1">
+                  QBO returned <strong>0 Bills / Purchases / Expenses</strong> for{" "}
+                  <strong>{selectedClient?.client_name}</strong> in this date range.
+                  {preflightWarning.unsupported > 0 && (
+                    <>
+                      {" "}It does have{" "}
+                      <strong>{preflightWarning.unsupported}</strong> transactions in
+                      types reclass doesn't currently scan
+                      {preflightWarning.topUnsupported.length > 0 && (
+                        <> ({preflightWarning.topUnsupported.map((t) => `${t.count} ${t.type}`).join(", ")})</>
+                      )}.
+                    </>
+                  )}
+                </p>
+                <div className="mt-3 text-xs text-amber-900 bg-white/60 rounded p-2 border border-amber-200">
+                  <div className="font-semibold mb-1">Most likely cause:</div>
+                  <p className="leading-snug">
+                    Bank-fed transactions are sitting in QBO&apos;s{" "}
+                    <strong>Banking → For Review</strong> tab and haven&apos;t been Added
+                    yet. The QBO API can&apos;t see those — SNAP only works on
+                    transactions that are already posted in QBO.
+                  </p>
+                  <div className="font-semibold mt-2 mb-1">Fix:</div>
+                  <ol className="list-decimal ml-4 space-y-0.5">
+                    <li>In QBO: <strong>Banking → For Review</strong></li>
+                    <li>Select all → bulk-categorize to <strong>&quot;Ask My Accountant&quot;</strong></li>
+                    <li>Come back to SNAP and re-run reclass</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={() => {
+                  setPreflightDismissed(true);
+                  setPreflightWarning(null);
+                  // Re-trigger submit now that the bypass flag is set
+                  handleSubmit();
+                }}
+                className="text-xs font-semibold bg-amber-700 hover:bg-amber-800 text-white px-3 py-1.5 rounded-md"
+              >
+                Run anyway
+              </button>
+              <button
+                onClick={() => setPreflightWarning(null)}
+                className="text-xs font-semibold text-amber-900 hover:text-amber-950 px-3 py-1.5"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {clientLinkId && (
           <>
             <button
               onClick={handleSubmit}
-              disabled={!canSubmit}
+              disabled={!canSubmit || preflightChecking || !!preflightWarning}
               className="w-full bg-teal hover:bg-teal-dark text-white font-semibold px-6 py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {submitting && <Loader2 className="animate-spin" size={18} />}
-              {submitting ? "Starting discovery..." : "Start Discovery"}
+              {(submitting || preflightChecking) && <Loader2 className="animate-spin" size={18} />}
+              {preflightChecking
+                ? "Checking QBO transaction counts…"
+                : submitting
+                ? "Starting discovery..."
+                : "Start Discovery"}
             </button>
             <p className="text-xs text-ink-slate text-center">
               Discovery will pull transactions, run AI classification, and prepare a review queue.

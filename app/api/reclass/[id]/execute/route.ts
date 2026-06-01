@@ -159,6 +159,23 @@ async function executeReclass(jobId: string) {
     .neq("status", "executed");
 
   if (!rows || rows.length === 0) {
+    // Distinguish "discovery found nothing" from "everything is rejected/needs-review".
+    // The former is almost always a "For Review" queue issue (bank-fed items haven't
+    // been Added in QBO yet); the latter is a bookkeeper-driven outcome they understand.
+    const txPulled = (job as any).transactions_pulled ?? 0;
+    let message: string;
+    if (txPulled === 0) {
+      message =
+        `QBO returned 0 reclass-eligible transactions for this date range. ` +
+        `This usually means bank-fed items are sitting in QBO's "Banking → For Review" tab ` +
+        `and haven't been Added yet — the QBO API can't see those. ` +
+        `Fix: in QBO, go to Banking → For Review, select all, and bulk-categorize to ` +
+        `"Ask My Accountant". Then come back and re-run reclass.`;
+    } else {
+      message =
+        `${txPulled} transaction${txPulled === 1 ? "" : "s"} were pulled, but none are ` +
+        `approved for execution. Either approve more on the review page or skip this step.`;
+    }
     await service
       .from("reclass_jobs")
       .update({
@@ -166,7 +183,7 @@ async function executeReclass(jobId: string) {
         execution_completed_at: new Date().toISOString(),
         execution_duration_seconds: 0,
         transactions_moved: 0,
-        error_message: "No approved transactions to execute",
+        error_message: message,
       } as any)
       .eq("id", jobId);
     return;
