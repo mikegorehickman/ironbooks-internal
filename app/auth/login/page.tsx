@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/lib/database.types";
@@ -16,7 +16,19 @@ const ERROR_COPY: Record<string, string> = {
   oauth_failed: "Sign-in failed. Try requesting a new magic link.",
 };
 
+// Next.js 15 requires useSearchParams() to be inside a <Suspense> boundary
+// during prerender, otherwise the page fails to build with a CSR-bailout
+// error. Wrap the form in a Suspense + extract the searchParams-reading
+// part into an inner component.
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginShell />}>
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+function LoginInner() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -125,6 +137,29 @@ export default function LoginPage() {
         <p className="text-xs text-center text-ink-slate mt-6">
           Internal tool for Ironbooks SNAP team members only.
         </p>
+      </div>
+    </main>
+  );
+}
+
+/** Suspense fallback while useSearchParams() resolves. Renders a minimal
+ *  visual placeholder so the page doesn't flash blank during prerender. */
+function LoginShell() {
+  return (
+    <main className="min-h-screen flex items-center justify-center px-4">
+      <div className="w-full max-w-md">
+        <div className="flex items-center gap-3 mb-10 justify-center">
+          <img
+            src="/logo.png"
+            alt="Ironbooks SNAP"
+            className="w-12 h-12 object-contain"
+          />
+          <div className="font-bold text-2xl tracking-tight text-navy">Ironbooks SNAP</div>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-200 p-8 shadow-sm">
+          <h1 className="text-2xl font-bold text-navy mb-2 tracking-tight">Sign in</h1>
+          <p className="text-sm text-ink-slate">Loading…</p>
+        </div>
       </div>
     </main>
   );
