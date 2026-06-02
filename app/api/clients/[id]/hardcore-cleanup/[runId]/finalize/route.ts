@@ -1,6 +1,16 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
-import { createJournalEntry, fetchAllAccounts, getValidToken, qboRateLimiter } from "@/lib/qbo";
+import {
+  createJournalEntry,
+  fetchAllAccounts,
+  getValidToken,
+  qboRateLimiter,
+  createInvoice,
+  applyPaymentToInvoices,
+  findCustomerByName,
+  findByPrivateNoteToken,
+  fetchOpenInvoicesForCustomer,
+} from "@/lib/qbo";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
@@ -288,32 +298,162 @@ export async function POST(
         continue;
       }
 
-      // push_invoice + apply_payment — V1 ships these as manual handoff.
-      // Mark item as 'executed' so the bookkeeper sees it processed, but
-      // record the proposed QBO payload in resolution_notes so they can
-      // do the work manually in QBO. V2 (#73) will replace this branch
-      // with real createInvoice / applyPayment calls.
-      if (item.resolution === "push_invoice" || item.resolution === "apply_payment") {
-        const handoffNote =
-          item.resolution === "push_invoice"
-            ? `MANUAL HANDOFF (V1): create invoice in QBO for ${item.qbo_customer_name || "(no customer)"} — $${Number(item.uf_payment_amount || 0).toFixed(2)}. ${item.reasoning || ""}`
-            : `MANUAL HANDOFF (V1): apply UF payment ${item.uf_payment_id || ""} ($${Number(item.uf_payment_amount || 0).toFixed(2)}) from ${item.uf_customer_name || "(no customer)"} on ${item.uf_payment_date || ""} to ${Array.isArray(item.crm_job_ids) ? item.crm_job_ids.length : 1} CRM job(s). ${item.reasoning || ""}`;
+      // push_invoice — V2: create a new QBO invoice for a completed CRM
+      // job that has no matching invoice. Idempotency via PrivateNote token:
+      // re-running finalize after a partial failure won't double-create.
+      if (item.resolution === "push_invoice") {
+        const customerName = item.qbo_customer_name || "";
+        const amount = Number(item.uf_payment_amount || 0);
+        if (!customerName) {
+          throw new Error("push_invoice item has no customer name — cannot create invoice");
+        }
+        if (amount <= 0) {
+          throw new Error(`push_invoice amount must be positive (got ${amount})`);
+        }
+        // Build idempotency token. Same item → same token → QBO check
+        // returns the existing invoice on retry.
+        const realmId = (client as any).qbo_realm_id as string;
+        const idempotencyToken = `SNAP-CLEANUP-${runId}-${item.id}-INV`;
+        const existingId = await findByPrivateNoteToken(
+          realmId,
+          accessToken,
+          "Invoice",
+          idempotencyToken
+        );
+        let invoiceId: string;
+        let docNumber: string | null = null;
+        if (existingId) {
+          // Already created on a prior partial run — reuse.
+          invoiceId = existingId;
+        } else {
+          // Resolve customer ID. findCustomerByName returns null if no
+          // exact match — bookkeeper needs to either fix the customer
+          // name in CRM or pre-create the customer in QBO before retry.
+          const customer = await findCustomerByName(realmId, accessToken, customerName);
+          if (!customer) {
+            throw new Error(
+              `Customer "${customerName}" not found in QBO. Create the customer first OR rename it in CRM to match QBO's spelling.`
+            );
+          }
+          const created = await createInvoice(realmId, accessToken, {
+            customerId: customer.id,
+            customerName: customer.displayName,
+            amount,
+            description:
+              item.reasoning ||
+              `Invoice pushed from CRM by Ironbooks Hardcore Cleanup`,
+            txnDate: today,
+            docNumber: `SNAP-${runId.slice(0, 6)}-${item.id.slice(0, 4)}`,
+            privateNote: `Ironbooks Hardcore Cleanup (${bookkeeperName}) — ${idempotencyToken}`,
+          });
+          invoiceId = created.Id;
+          docNumber = created.DocNumber || null;
+        }
         await service
           .from("hardcore_cleanup_items" as any)
           .update({
             resolution: "executed",
             resolved_at: new Date().toISOString(),
-            resolution_notes: handoffNote,
+            resolution_notes: `Pushed as QBO invoice ${invoiceId}${docNumber ? ` (#${docNumber})` : ""}`,
           } as any)
           .eq("id", item.id);
         executed++;
         results.push({
           id: item.id,
-          type: item.resolution,
-          status: "manual_handoff_v1",
-          note: handoffNote,
-          customer: item.qbo_customer_name || item.uf_customer_name,
-          amount: item.uf_payment_amount,
+          type: "push_invoice",
+          status: "ok",
+          invoice_id: invoiceId,
+          doc_number: docNumber,
+          customer: customerName,
+          amount,
+          reused_existing: !!existingId,
+        });
+        continue;
+      }
+
+      // apply_payment — V2: sparse-update the UF Payment to link it to
+      // open invoice(s) for the same customer. For 1:1 we find the single
+      // matching invoice; for 1:N (bulk deposit), we find multiple
+      // invoices summing to the payment amount using FIFO (oldest first).
+      if (item.resolution === "apply_payment") {
+        const ufPaymentId = item.uf_payment_id;
+        const customerName = item.uf_customer_name || "";
+        const amount = Number(item.uf_payment_amount || 0);
+        if (!ufPaymentId) {
+          throw new Error("apply_payment item has no uf_payment_id");
+        }
+        if (!customerName) {
+          throw new Error("apply_payment item has no customer name");
+        }
+        const realmId = (client as any).qbo_realm_id as string;
+
+        // Resolve customer + look up their open invoices
+        const customer = await findCustomerByName(realmId, accessToken, customerName);
+        if (!customer) {
+          throw new Error(
+            `Customer "${customerName}" not found in QBO — can't apply payment.`
+          );
+        }
+        const openInvoices = await fetchOpenInvoicesForCustomer(
+          realmId,
+          accessToken,
+          customer.id
+        );
+        if (openInvoices.length === 0) {
+          throw new Error(
+            `No open invoices for "${customerName}" — cannot apply payment. ` +
+            `Either the invoices are already paid, or push_invoice items haven't been finalized yet.`
+          );
+        }
+
+        // FIFO application: oldest-first, allocate until we cover the
+        // payment amount. Allows partial allocation on the LAST invoice
+        // so a $500 payment splits across a $300 + $200 invoice cleanly.
+        const links: Array<{ invoiceId: string; amountApplied: number }> = [];
+        let remaining = amount;
+        for (const inv of openInvoices) {
+          if (remaining <= 0.01) break;
+          const applied = Math.min(remaining, inv.balance);
+          if (applied > 0) {
+            links.push({ invoiceId: inv.id, amountApplied: applied });
+            remaining -= applied;
+          }
+        }
+        if (links.length === 0 || remaining > 0.01) {
+          throw new Error(
+            `Couldn't fully allocate $${amount.toFixed(2)} payment — ` +
+            `customer's open invoices sum to less than the payment amount ` +
+            `(allocated $${(amount - remaining).toFixed(2)}, short by $${remaining.toFixed(2)}). ` +
+            `Likely fix: push the missing_invoice items first, then re-run finalize.`
+          );
+        }
+
+        const idempotencyToken = `SNAP-CLEANUP-${runId}-${item.id}-PMT`;
+        const applied = await applyPaymentToInvoices(realmId, accessToken, {
+          paymentId: ufPaymentId,
+          invoiceLinks: links,
+          privateNote: `Ironbooks Hardcore Cleanup (${bookkeeperName}) — ${idempotencyToken}`,
+        });
+
+        await service
+          .from("hardcore_cleanup_items" as any)
+          .update({
+            resolution: "executed",
+            resolved_at: new Date().toISOString(),
+            resolution_notes: `Applied $${amount.toFixed(2)} payment to ${links.length} invoice(s): ${links.map((l) => `${l.invoiceId}($${l.amountApplied.toFixed(2)})`).join(", ")}`,
+          } as any)
+          .eq("id", item.id);
+        executed++;
+        results.push({
+          id: item.id,
+          type: "apply_payment",
+          status: "ok",
+          payment_id: ufPaymentId,
+          new_sync_token: applied.SyncToken,
+          invoices_applied: links.length,
+          links,
+          customer: customerName,
+          amount,
         });
         continue;
       }

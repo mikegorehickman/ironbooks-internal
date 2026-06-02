@@ -186,49 +186,70 @@ export async function POST(
       }
 
       case "push_invoice": {
-        // V1: manual handoff. V2 will replace the body with a real
-        // QBO createInvoice payload.
+        // V2: real createInvoice. Surfaces a soft warning if customer
+        // name lookup might fail — finalize will hard-fail with a clear
+        // message in that case.
         summary.push_invoice_count++;
         const amount = Number(item.uf_payment_amount ?? 0);
+        if (!item.qbo_customer_name) {
+          warnings.push("No customer name on this item — finalize will fail");
+        }
+        if (amount <= 0) {
+          warnings.push("Amount must be positive — finalize will fail");
+        }
         ops.push({
           item_id: item.id,
           kind: "push_invoice",
-          summary: `[MANUAL HANDOFF — V1] Push invoice for ${item.qbo_customer_name || "(no customer)"} — $${amount.toFixed(2)}. CSV will be exported.`,
+          summary: `Create QBO invoice for ${item.qbo_customer_name || "(no customer)"} — $${amount.toFixed(2)}`,
           body: {
-            v2_payload_preview: {
-              CustomerRef: { value: "(lookup by name)", name: item.qbo_customer_name },
-              Line: [
-                {
-                  Amount: amount,
-                  DetailType: "SalesItemLineDetail",
-                  Description: item.reasoning || "Pushed from CRM",
-                },
-              ],
-            },
-            note: "V1 ships this as a CSV export. V2 (#73) sends to QBO via /invoice.",
+            CustomerRef: { lookup_by_name: item.qbo_customer_name },
+            TxnDate: new Date().toISOString().slice(0, 10),
+            DocNumber: `SNAP-${runId.slice(0, 6)}-${item.id.slice(0, 4)}`,
+            PrivateNote: `Ironbooks Hardcore Cleanup — SNAP-CLEANUP-${runId}-${item.id}-INV`,
+            Line: [
+              {
+                Amount: amount,
+                DetailType: "SalesItemLineDetail",
+                Description: item.reasoning || "Pushed from CRM",
+              },
+            ],
           },
-          warnings: ["V1: manual handoff — Lisa creates this invoice in QBO from the CSV"],
+          warnings,
         });
         break;
       }
 
       case "apply_payment": {
-        // V1: manual handoff. V2 will replace with a real applyPayment.
+        // V2: real applyPayment via sparse update on the existing UF
+        // Payment object. We don't know the exact invoice IDs at preview
+        // time (resolved at finalize via fetchOpenInvoicesForCustomer)
+        // so the body shows the lookup placeholder.
         summary.apply_payment_count++;
         const amount = Number(item.uf_payment_amount ?? 0);
+        if (!item.uf_payment_id) {
+          warnings.push("No UF payment ID — finalize will fail");
+        }
+        if (!item.uf_customer_name) {
+          warnings.push("No customer name on UF payment — finalize will fail");
+        }
         const jobCount = Array.isArray(item.crm_job_ids) ? item.crm_job_ids.length : 1;
         ops.push({
           item_id: item.id,
           kind: "apply_payment",
-          summary: `[MANUAL HANDOFF — V1] Apply UF payment $${amount.toFixed(2)} from ${item.uf_customer_name || "(no customer)"} to ${jobCount} CRM job${jobCount === 1 ? "" : "s"}. CSV will be exported.`,
+          summary: `Apply UF payment $${amount.toFixed(2)} from ${item.uf_customer_name || "(no customer)"} to ${jobCount === 1 ? "an open invoice" : `${jobCount} open invoices (FIFO)`}`,
           body: {
-            v2_payload_preview: {
-              PaymentId: item.uf_payment_id,
-              LinkedTxn: { count: jobCount, note: "Invoice IDs resolved at finalize" },
-            },
-            note: "V1 ships this as a CSV export. V2 (#73) sends sparse update to /payment/<id>.",
+            Id: item.uf_payment_id,
+            sparse: true,
+            note: "Invoice IDs resolved at finalize time via fetchOpenInvoicesForCustomer (oldest-first)",
+            Line: [
+              {
+                Amount: amount,
+                LinkedTxn: [{ lookup: "open invoices for this customer", count: jobCount }],
+              },
+            ],
+            PrivateNote: `Ironbooks Hardcore Cleanup — SNAP-CLEANUP-${runId}-${item.id}-PMT`,
           },
-          warnings: ["V1: manual handoff — Lisa applies this payment in QBO from the CSV"],
+          warnings,
         });
         break;
       }

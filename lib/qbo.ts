@@ -503,6 +503,270 @@ export async function createJournalEntry(
   return data.JournalEntry;
 }
 
+// ============== V2 HARDCORE CLEANUP — Invoice + Payment writes ==============
+
+/**
+ * Look up a QBO Customer by name. Used by createInvoice when the caller
+ * only has the customer's display name (typical for CRM-driven flows).
+ *
+ * Returns the Customer's QBO Id + DisplayName + AR account context. Null
+ * if no exact match. Caller decides whether to fall back to fuzzy match
+ * or fail loud.
+ */
+export async function findCustomerByName(
+  realmId: string,
+  accessToken: string,
+  name: string
+): Promise<{ id: string; displayName: string; arAccountId?: string } | null> {
+  const escaped = name.replace(/'/g, "\\'");
+  const query = encodeURIComponent(
+    `SELECT Id, DisplayName, ARAccountRef FROM Customer WHERE DisplayName = '${escaped}' MAXRESULTS 1`
+  );
+  try {
+    const data: any = await qboRequest(
+      realmId,
+      accessToken,
+      `/query?query=${query}`,
+      { method: "GET" }
+    );
+    const c = data?.QueryResponse?.Customer?.[0];
+    if (!c) return null;
+    return {
+      id: String(c.Id),
+      displayName: String(c.DisplayName || name),
+      arAccountId: c.ARAccountRef?.value ? String(c.ARAccountRef.value) : undefined,
+    };
+  } catch (err: any) {
+    console.warn(`[findCustomerByName] failed for "${name}":`, err?.message);
+    return null;
+  }
+}
+
+/**
+ * Find an existing QBO object by a PrivateNote token. Idempotency primitive:
+ * before each V2 write we write a deterministic token like
+ * SNAP-CLEANUP-<run_id>-<item_id> in PrivateNote. On retry, we look that
+ * token up first — if found, return the existing object instead of creating
+ * a duplicate.
+ *
+ * Supports Invoice + Payment + JournalEntry (the V2 write surface).
+ * Returns the bare Id of the existing object, or null if nothing matches.
+ */
+export async function findByPrivateNoteToken(
+  realmId: string,
+  accessToken: string,
+  entity: "Invoice" | "Payment" | "JournalEntry",
+  token: string
+): Promise<string | null> {
+  // QBO's query syntax doesn't have a clean PrivateNote LIKE for these
+  // entities — PrivateNote isn't indexed. We do a narrow scan over the
+  // last 90 days of objects and check in-memory. Cheap enough since this
+  // only fires on retry/repeat paths.
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const query = encodeURIComponent(
+    `SELECT Id, PrivateNote FROM ${entity} WHERE TxnDate >= '${cutoff}' MAXRESULTS 1000`
+  );
+  try {
+    const data: any = await qboRequest(
+      realmId,
+      accessToken,
+      `/query?query=${query}`,
+      { method: "GET" }
+    );
+    const rows: any[] = data?.QueryResponse?.[entity] || [];
+    const match = rows.find((r) => typeof r.PrivateNote === "string" && r.PrivateNote.includes(token));
+    return match ? String(match.Id) : null;
+  } catch (err: any) {
+    console.warn(`[findByPrivateNoteToken] ${entity} scan failed:`, err?.message);
+    return null;
+  }
+}
+
+export interface CreateInvoiceParams {
+  customerId: string;
+  customerName: string;
+  /** Single-line invoice for now. Multi-line jobs map to a single line
+   *  with a combined description — QBO requires either an ItemRef or a
+   *  full SalesItemLineDetail; the simplest path is one line per job. */
+  amount: number;
+  description: string;
+  txnDate: string;     // YYYY-MM-DD
+  docNumber?: string;
+  privateNote: string; // MUST include the idempotency token
+}
+
+export interface CreatedInvoice {
+  Id: string;
+  DocNumber?: string;
+  SyncToken: string;
+  TotalAmt?: number;
+}
+
+/**
+ * Create a new Invoice in QBO. Used by V2 push_invoice resolution — when
+ * a CRM job is complete but no QBO invoice exists. Caller is responsible
+ * for resolving the customer ID + including an idempotency token in
+ * privateNote.
+ *
+ * Single-line invoice; line uses SalesItemLineDetail with no ItemRef
+ * (QBO accepts this for one-off services). For multi-item job exports
+ * we'd need a different path.
+ */
+export async function createInvoice(
+  realmId: string,
+  accessToken: string,
+  params: CreateInvoiceParams
+): Promise<CreatedInvoice> {
+  if (params.amount <= 0) {
+    throw new Error(`Invoice amount must be positive (got ${params.amount})`);
+  }
+  const body: any = {
+    CustomerRef: { value: params.customerId, name: params.customerName },
+    TxnDate: params.txnDate,
+    DocNumber: params.docNumber || undefined,
+    PrivateNote: params.privateNote,
+    Line: [
+      {
+        Amount: Number(params.amount.toFixed(2)),
+        DetailType: "SalesItemLineDetail",
+        Description: params.description,
+        SalesItemLineDetail: {
+          // No ItemRef — QBO accepts blank for ad-hoc services. If the
+          // client's QBO requires items configured we'd need a different
+          // strategy (lookup default service item, or fail with a helpful
+          // error pointing to QBO's "Products and Services" setup).
+        },
+      },
+    ],
+  };
+
+  const data = await qboRequest<{ Invoice: CreatedInvoice }>(
+    realmId,
+    accessToken,
+    "/invoice?minorversion=70",
+    { method: "POST", body: JSON.stringify(body) }
+  );
+  return data.Invoice;
+}
+
+export interface ApplyPaymentParams {
+  /** The Payment object's QBO Id. Must already exist in UF. */
+  paymentId: string;
+  /** Invoice IDs to link this payment to. For 1:1 = single entry; for
+   *  1:N bulk deposit = multiple entries summing to the payment amount. */
+  invoiceLinks: Array<{ invoiceId: string; amountApplied: number }>;
+  privateNote?: string;
+}
+
+export interface AppliedPayment {
+  Id: string;
+  SyncToken: string;
+  TotalAmt?: number;
+}
+
+/**
+ * Sparse-update an existing Payment to link it to one or more invoices.
+ *
+ * QBO's Payment object has a Line[] field with LinkedTxn[] entries — each
+ * LinkedTxn points at an Invoice with TxnType="Invoice". Sparse update
+ * replaces the Line array entirely.
+ *
+ * Caveat: we do NOT change DepositToAccountRef. The payment stays in
+ * Undeposited Funds for the bookkeeper to deposit later — that's the
+ * Lisa workflow (apply payment → later move from UF to a real bank).
+ * If/when V3 needs to clear UF too, we'd unset DepositToAccountRef here.
+ *
+ * Need to fetch the current SyncToken first since QBO sparse-update is
+ * optimistic-concurrency.
+ */
+export async function applyPaymentToInvoices(
+  realmId: string,
+  accessToken: string,
+  params: ApplyPaymentParams
+): Promise<AppliedPayment> {
+  if (params.invoiceLinks.length === 0) {
+    throw new Error("applyPaymentToInvoices: invoiceLinks is empty");
+  }
+  // 1. Fetch current Payment for SyncToken + amount validation
+  const query = encodeURIComponent(`SELECT * FROM Payment WHERE Id = '${params.paymentId}' MAXRESULTS 1`);
+  const fetchData: any = await qboRequest(
+    realmId,
+    accessToken,
+    `/query?query=${query}`,
+    { method: "GET" }
+  );
+  const existing = fetchData?.QueryResponse?.Payment?.[0];
+  if (!existing) {
+    throw new Error(`Payment ${params.paymentId} not found in QBO`);
+  }
+
+  const totalLinked = params.invoiceLinks.reduce((s, l) => s + l.amountApplied, 0);
+  const paymentAmt = Number(existing.TotalAmt || 0);
+  // Allow 1¢ rounding drift; bigger means the bookkeeper's link-sum
+  // doesn't match the payment — QBO would reject the write anyway,
+  // failing here gives a clearer error.
+  if (Math.abs(totalLinked - paymentAmt) > 0.01) {
+    throw new Error(
+      `Payment ${params.paymentId} total ($${paymentAmt.toFixed(2)}) doesn't match sum of links ($${totalLinked.toFixed(2)})`
+    );
+  }
+
+  // 2. Build sparse update body — replace Line[] entirely with LinkedTxn entries.
+  // QBO requires each Line to declare DetailType=PaymentLineDetail when
+  // it's a LinkedTxn allocation.
+  const body: any = {
+    Id: params.paymentId,
+    SyncToken: existing.SyncToken,
+    sparse: true,
+    Line: params.invoiceLinks.map((l) => ({
+      Amount: Number(l.amountApplied.toFixed(2)),
+      LinkedTxn: [{ TxnId: l.invoiceId, TxnType: "Invoice" }],
+    })),
+  };
+  if (params.privateNote) {
+    body.PrivateNote = params.privateNote;
+  }
+
+  const data = await qboRequest<{ Payment: AppliedPayment }>(
+    realmId,
+    accessToken,
+    "/payment?minorversion=70",
+    { method: "POST", body: JSON.stringify(body) }
+  );
+  return data.Payment;
+}
+
+/**
+ * Look up open invoices for a given customer — used during applyPayment
+ * to find which invoices a UF deposit can apply to.
+ *
+ * Returns invoices with non-zero balance, sorted oldest-first (FIFO is the
+ * conventional accounting application order — oldest A/R clears first).
+ */
+export async function fetchOpenInvoicesForCustomer(
+  realmId: string,
+  accessToken: string,
+  customerId: string
+): Promise<Array<{ id: string; docNumber: string | null; txnDate: string; totalAmt: number; balance: number }>> {
+  const query = encodeURIComponent(
+    `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance FROM Invoice WHERE CustomerRef = '${customerId}' AND Balance > '0' ORDERBY TxnDate ASC MAXRESULTS 100`
+  );
+  const data: any = await qboRequest(
+    realmId,
+    accessToken,
+    `/query?query=${query}`,
+    { method: "GET" }
+  );
+  const rows: any[] = data?.QueryResponse?.Invoice || [];
+  return rows.map((r) => ({
+    id: String(r.Id),
+    docNumber: r.DocNumber ? String(r.DocNumber) : null,
+    txnDate: String(r.TxnDate || ""),
+    totalAmt: Number(r.TotalAmt || 0),
+    balance: Number(r.Balance || 0),
+  }));
+}
+
 // ============== TRANSACTIONS ==============
 
 /**

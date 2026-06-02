@@ -900,8 +900,12 @@ function PreviewModal({
 
   const hasBlockers = data.blockers.length > 0;
   const totalExecutable = data.ops.length;
+  // V2: push_invoice + apply_payment are real QBO writes too, not manual.
   const totalWritesToQbo =
-    data.summary.je_count + data.summary.void_count;
+    data.summary.je_count +
+    data.summary.void_count +
+    data.summary.push_invoice_count +
+    data.summary.apply_payment_count;
 
   function toggleKind(k: string) {
     setExpandedKinds((prev) => {
@@ -952,17 +956,9 @@ function PreviewModal({
               </span>
             </>
           )}
-          {(data.summary.push_invoice_count + data.summary.apply_payment_count) > 0 && (
-            <>
-              <span className="text-ink-slate">·</span>
-              <span>
-                <span className="font-bold text-blue-700">
-                  {data.summary.push_invoice_count + data.summary.apply_payment_count}
-                </span>{" "}
-                manual handoff (V1)
-              </span>
-            </>
-          )}
+          {/* push_invoice + apply_payment now ship as real QBO writes
+              (V2), so they roll into totalWritesToQbo above. Kept this
+              block empty to make the diff smaller. */}
           {hasBlockers && (
             <>
               <span className="text-ink-slate">·</span>
@@ -1057,8 +1053,8 @@ function opKindLabel(kind: string): string {
   switch (kind) {
     case "je_writeoff": return "JE write-offs";
     case "direct_void": return "Invoice voids";
-    case "push_invoice": return "Push invoices (manual handoff V1)";
-    case "apply_payment": return "Apply payments (manual handoff V1)";
+    case "push_invoice": return "Create invoices";
+    case "apply_payment": return "Apply UF payments";
     case "ask_client": return "Ask-client emails";
     case "keep": return "Marked keep";
     case "manual": return "Marked manual";
@@ -1070,8 +1066,8 @@ function opKindBadge(kind: string) {
   const map: Record<string, { label: string; color: string }> = {
     je_writeoff: { label: "QBO WRITE", color: "bg-emerald-100 text-emerald-800" },
     direct_void: { label: "QBO WRITE", color: "bg-emerald-100 text-emerald-800" },
-    push_invoice: { label: "MANUAL (V1)", color: "bg-blue-100 text-blue-800" },
-    apply_payment: { label: "MANUAL (V1)", color: "bg-blue-100 text-blue-800" },
+    push_invoice: { label: "QBO WRITE", color: "bg-emerald-100 text-emerald-800" },
+    apply_payment: { label: "QBO WRITE", color: "bg-emerald-100 text-emerald-800" },
     ask_client: { label: "EMAIL", color: "bg-purple-100 text-purple-800" },
     keep: { label: "NO-OP", color: "bg-gray-100 text-ink-slate" },
     manual: { label: "NO-OP", color: "bg-gray-100 text-ink-slate" },
