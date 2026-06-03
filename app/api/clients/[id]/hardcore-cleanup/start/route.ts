@@ -174,6 +174,7 @@ export async function POST(
     const crmJobInsertRows = crmJobs.map((j) => ({
       run_id: runId,
       crm_job_id: j.crm_job_id,
+      external_invoice_id: j.external_invoice_id,
       job_name: j.job_name,
       customer_name: j.customer_name,
       job_status: j.job_status,

@@ -39,6 +39,20 @@ export interface ParsedCrmJob {
   amount: number | null;
   /** Job creation or completion date — used for matching against QBO TxnDate. */
   job_date: string | null; // YYYY-MM-DD
+  /**
+   * The CRM's INVOICE ID (distinct from crm_job_id). For DripJobs the
+   * Proposal Name is the lineage key across change orders, but the
+   * "Invoice ID" column is what gets pushed to QBO as the invoice's
+   * DocNumber on sync. Brady Brown / Clean Cut Painters caught this:
+   * two of his four proposals synced to QBO (DripJobs Invoice IDs
+   * 273312 / 360547 → QBO DocNumber #273312 / #360547), but the matcher
+   * couldn't see the link because it only compared customer+amount, not
+   * Invoice ID. Treating these as "missing in QBO" was a false positive.
+   *
+   * Null when the CRM export doesn't include a stable invoice id
+   * (Jobber falls back to crm_job_id for this purpose).
+   */
+  external_invoice_id: string | null;
   /** Original CSV row so we can audit/debug. */
   raw_row: Record<string, string>;
 }
@@ -153,6 +167,12 @@ const COLUMN_MAPS: Record<CrmSource, Record<keyof Omit<ParsedCrmJob, "raw_row">,
     job_status: ["Status", "Job Status"],
     amount: ["Total", "Amount", "Job Total", "Estimate Total", "Invoice Total"],
     job_date: ["Date", "Created", "Created At", "Estimate Date", "Job Date"],
+    // DripJobs's "Invoice ID" column is the value that lands in QBO as
+    // the invoice DocNumber when the CRM syncs. Brady Brown's data
+    // confirms this: DripJobs Invoice IDs 273312 / 360547 appear as QBO
+    // DocNumbers #273312 / #360547. Used by reconcileCrmAgainstQbo to
+    // do a direct-lookup match before falling back to fuzzy matching.
+    external_invoice_id: ["Invoice ID", "Invoice #", "Invoice Number"],
   },
   jobber: {
     crm_job_id: ["Job #", "Job Number", "Invoice #", "ID"],
@@ -161,6 +181,10 @@ const COLUMN_MAPS: Record<CrmSource, Record<keyof Omit<ParsedCrmJob, "raw_row">,
     job_status: ["Status", "Job Status"],
     amount: ["Total", "Job Total", "Invoiced Amount", "Amount"],
     job_date: ["Created", "Date Created", "Start Date", "Job Date", "Date"],
+    // For Jobber the same number serves as both lineage key and QBO
+    // DocNumber — set the same candidates so the engine can do a
+    // DocNumber lookup off external_invoice_id without special-casing.
+    external_invoice_id: ["Invoice #", "Job #", "Job Number"],
   },
   generic: {
     // QBO A/R Aging Detail uses "Num" / "Doc Num". QBO Open Invoices uses
@@ -186,6 +210,7 @@ const COLUMN_MAPS: Record<CrmSource, Record<keyof Omit<ParsedCrmJob, "raw_row">,
     job_status: ["Status", "Type", "Transaction Type"],
     amount: ["Amount", "Total", "Open Balance", "Balance", "Value"],
     job_date: ["Date", "Created", "Transaction Date", "Txn Date", "Due Date"],
+    external_invoice_id: ["Invoice #", "Invoice Number", "Document Number", "Doc Num", "Num"],
   },
 };
 
@@ -259,6 +284,14 @@ export function normalizeCrmRows(rows: Record<string, string>[], crm: CrmSource)
     // Extract the numeric/stable portion (handles "Proposal #X", "Deal #X").
     // Fall back to the raw value if nothing parses (e.g. a UUID).
     const cleanId = extractProposalId(rawId) || rawId;
+    // Capture the CRM's invoice id (distinct from crm_job_id for DripJobs;
+    // identical for Jobber). Used by reconcileCrmAgainstQbo to do a
+    // DocNumber lookup against QBO before falling back to fuzzy matching.
+    const rawInvoiceId = pickField(row, map.external_invoice_id);
+    const cleanInvoiceId =
+      rawInvoiceId == null
+        ? null
+        : extractProposalId(rawInvoiceId) || rawInvoiceId.trim() || null;
     out.push({
       crm_job_id: cleanId,
       job_name: pickField(row, map.job_name),
@@ -266,6 +299,7 @@ export function normalizeCrmRows(rows: Record<string, string>[], crm: CrmSource)
       job_status: pickField(row, map.job_status) || "active",
       amount: parseAmount(pickField(row, map.amount)),
       job_date: parseDate(pickField(row, map.job_date)),
+      external_invoice_id: cleanInvoiceId,
       raw_row: row,
     });
   }
@@ -709,15 +743,52 @@ export function reconcileCrmAgainstQbo(input: ReconcileInput): ReconcileResult {
   // matches a known-duplicate cluster IS represented (just messily).
   const missingInvoices: MissingInvoice[] = [];
   const representedCrmJobIds = new Set<string>();
+  /**
+   * CRM job key → matching QBO invoice (by DocNumber match against the
+   * CRM's external_invoice_id). When present, the UI displays the link
+   * and downstream classification (UF matching, unmatched_job) skips
+   * the row — it's already represented in QBO regardless of UF state.
+   *
+   * Brady Brown / Clean Cut Painters: DripJobs Invoice IDs 273312 and
+   * 360547 sync to QBO as DocNumbers #273312 / #360547 — without this
+   * pass, both proposals showed up as "unmatched deposit" false
+   * positives because Brady has no UF deposits, hiding the one truly
+   * missing proposal (DripJobs Invoice ID 346549).
+   */
+  const docNumberMatches = new Map<string, OpenInvoice>();
 
   // Build a customer-bucketed index of QBO invoices for fast lookup.
   const invByCustomerNorm = new Map<string, OpenInvoice[]>();
+  // Also index by DocNumber for the direct-lookup pass below.
+  const invByDocNumber = new Map<string, OpenInvoice>();
   for (const inv of qboInvoices) {
     const key = normalizeName(inv.customer_name);
-    if (!key) continue;
-    const bucket = invByCustomerNorm.get(key) || [];
-    bucket.push(inv);
-    invByCustomerNorm.set(key, bucket);
+    if (key) {
+      const bucket = invByCustomerNorm.get(key) || [];
+      bucket.push(inv);
+      invByCustomerNorm.set(key, bucket);
+    }
+    if (inv.doc_number) {
+      // DocNumbers are short numeric strings; case doesn't matter but
+      // we normalize whitespace + casing for safety.
+      invByDocNumber.set(String(inv.doc_number).trim().toUpperCase(), inv);
+    }
+  }
+
+  // ─── 2a. DocNumber direct match (NEW — runs before everything else) ─────
+  // For each CRM job with an external_invoice_id, look up the QBO invoice
+  // by DocNumber. If found, the job is represented in QBO at the highest
+  // possible confidence — we can short-circuit all the fuzzy fallbacks.
+  for (const job of crmJobs) {
+    if (!job.external_invoice_id) continue;
+    const docKey = String(job.external_invoice_id).trim().toUpperCase();
+    if (!docKey) continue;
+    const hit = invByDocNumber.get(docKey);
+    if (hit) {
+      const jobKey = job.crm_job_id || `name:${job.customer_name}`;
+      docNumberMatches.set(jobKey, hit);
+      representedCrmJobIds.add(jobKey);
+    }
   }
 
   for (const job of crmJobs) {
@@ -726,6 +797,11 @@ export function reconcileCrmAgainstQbo(input: ReconcileInput): ReconcileResult {
       /complet|paid|closed|done|finished|invoiced/i.test(job.job_status);
     if (!isCompletedish) continue;
     if (!job.customer_name || job.amount == null) continue;
+
+    const jobKey = job.crm_job_id || `name:${job.customer_name}`;
+
+    // Already DocNumber-matched in pass 2a → represented, skip fallback.
+    if (representedCrmJobIds.has(jobKey)) continue;
 
     // Try exact match first
     const norm = normalizeName(job.customer_name);
@@ -742,15 +818,15 @@ export function reconcileCrmAgainstQbo(input: ReconcileInput): ReconcileResult {
 
     if (bucket.length === 0) {
       missingInvoices.push({
-        crm_job_id: job.crm_job_id || `name:${job.customer_name}`,
+        crm_job_id: jobKey,
         customer_name: job.customer_name,
         amount: job.amount,
         job_date: job.job_date,
         job_name: job.job_name,
-        reasoning: `No QBO invoice for "${job.customer_name}" anywhere in the open A/R. Either: job got cancelled before invoicing, invoice was already paid + closed (only OpenInvoices fetched), or it never got pushed from the CRM.`,
+        reasoning: `No QBO invoice for "${job.customer_name}" anywhere in the open A/R, and the CRM's Invoice ID ${job.external_invoice_id || "(missing)"} doesn't match any QBO DocNumber. Either the invoice was never pushed from the CRM, or it was already paid + closed (only OpenInvoices fetched).`,
       });
     } else {
-      representedCrmJobIds.add(job.crm_job_id || `name:${job.customer_name}`);
+      representedCrmJobIds.add(jobKey);
     }
   }
 
@@ -776,6 +852,13 @@ export function reconcileCrmAgainstQbo(input: ReconcileInput): ReconcileResult {
       !job.job_status ||
       /complet|paid|closed|done|finished|invoiced/i.test(job.job_status);
     if (!isCompletedish) continue;
+    // Skip jobs already DocNumber-matched to a QBO invoice — they're
+    // represented in QBO independently of UF state. Including them in
+    // the UF match pool produces the false-positive unmatched_job rows
+    // we saw on Brady Brown (his synced invoices were flagged as
+    // "no deposit found" when in reality QBO had them already).
+    const jobKey = job.crm_job_id || `name:${job.customer_name}`;
+    if (docNumberMatches.has(jobKey)) continue;
     const key = normalizeName(job.customer_name);
     const bucket = jobsByCustomerNorm.get(key) || [];
     bucket.push(job);
