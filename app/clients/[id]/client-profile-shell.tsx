@@ -15,6 +15,10 @@ import {
   Settings as SettingsIcon,
   Clock,
   X as XIcon,
+  CheckCircle2,
+  XCircle,
+  Plug,
+  ArrowRight,
 } from "lucide-react";
 import type {
   OutstandingWork,
@@ -63,6 +67,15 @@ interface FinancialsBundle {
   /** False when the client hasn't connected QBO yet — financial tabs
    *  render an empty-state instead of pretending zeros. */
   hasQbo: boolean;
+  /**
+   * Three-state QBO health signal:
+   *   "connected"      — qbo_realm_id set AND token refresh succeeded
+   *   "token_expired"  — qbo_realm_id set BUT refresh threw (revoked /
+   *                      100-day idle / client disconnected SNAP)
+   *   "never_connected" — qbo_realm_id is null
+   * Drives the QboConnectionBanner at the top of the Overview tab.
+   */
+  qboStatus: "connected" | "token_expired" | "never_connected";
 }
 
 /** Preset options for the range picker. Keys match the server's
@@ -159,7 +172,11 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
       </div>
 
       {activeTab === "overview" && (
-        <OverviewTab clientLink={clientLink} overview={overview} />
+        <OverviewTab
+          clientLink={clientLink}
+          overview={overview}
+          qboStatus={financials.qboStatus}
+        />
       )}
       {activeTab === "pl" && (
         <PLTab
@@ -340,14 +357,28 @@ function ProgressStageCard({
 function OverviewTab({
   clientLink,
   overview,
+  qboStatus,
 }: {
   clientLink: ClientLink;
   overview: OverviewBundle;
+  qboStatus: "connected" | "token_expired" | "never_connected";
 }) {
   const { outstanding, summary, activity, progress } = overview;
 
   return (
     <div className="space-y-6">
+      {/* QBO connection status — always visible, above everything else.
+          Green when healthy; amber + big Reconnect button + instructions
+          when the token expired or was never set up. Without this the
+          bookkeeper has to figure out why financial tabs are empty from
+          the "couldn't fetch P&L" amber banner elsewhere. */}
+      <QboConnectionBanner
+        clientLinkId={clientLink.id}
+        clientName={clientLink.client_name}
+        qboRealmId={clientLink.qbo_realm_id}
+        status={qboStatus}
+      />
+
       {/* Progress flow chart — bird's-eye view of where this client is in
           their SNAP lifecycle. Renders above Outstanding Work so the
           bookkeeper sees the "where are we" answer before the "what's
@@ -549,6 +580,157 @@ function ActivityTab({ activity }: { activity: ActivityEvent[] }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ─── QBO CONNECTION BANNER ─────────────────────────────────────────────
+
+/**
+ * Big status card at the top of the Overview tab. Three states:
+ *
+ *   • connected      → green, ✓, shows realm id + "View in QuickBooks" link
+ *   • token_expired  → red, ⚠, big "Reconnect QuickBooks" CTA + instructions
+ *                       (most common cause of "P&L looks empty" support
+ *                        tickets — refresh tokens die after 100 days of
+ *                        disuse or when the client revokes from QBO admin)
+ *   • never_connected → amber, ⚡, big "Connect QuickBooks" CTA + instructions
+ *
+ * The CTA always points at /api/qbo/connect?client_link_id=<id> — the
+ * existing OAuth-initiate route. It launches the Intuit consent screen
+ * and round-trips the bookkeeper back here on success.
+ */
+function QboConnectionBanner({
+  clientLinkId,
+  clientName,
+  qboRealmId,
+  status,
+}: {
+  clientLinkId: string;
+  clientName: string;
+  qboRealmId: string | null;
+  status: "connected" | "token_expired" | "never_connected";
+}) {
+  if (status === "connected") {
+    return (
+      <div className="rounded-2xl border-2 border-green-200 bg-green-50/60 p-5 flex items-center gap-4">
+        <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+          <CheckCircle2 size={26} className="text-green-700" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-base font-bold text-navy">
+            QuickBooks connected
+          </div>
+          <div className="text-xs text-ink-slate mt-0.5">
+            All financial data on this page is fetched live from QBO each load.
+            {qboRealmId && (
+              <span className="ml-1 font-mono text-ink-light">· realm {qboRealmId}</span>
+            )}
+          </div>
+        </div>
+        {qboRealmId && (
+          <a
+            href={`https://app.qbo.intuit.com/app/homepage?cid=${qboRealmId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-700 hover:text-green-900 border border-green-300 hover:border-green-500 bg-white rounded-lg px-3 py-2 flex-shrink-0"
+          >
+            <ExternalLink size={12} /> Open in QuickBooks
+          </a>
+        )}
+      </div>
+    );
+  }
+
+  const isExpired = status === "token_expired";
+  const palette = isExpired
+    ? {
+        border: "border-red-300",
+        bg: "bg-red-50",
+        iconBg: "bg-red-100",
+        iconColor: "text-red-700",
+        titleColor: "text-red-900",
+        body: "text-red-900",
+        buttonBg: "bg-red-600 hover:bg-red-700",
+        buttonText: "Reconnect QuickBooks",
+      }
+    : {
+        border: "border-amber-300",
+        bg: "bg-amber-50",
+        iconBg: "bg-amber-100",
+        iconColor: "text-amber-700",
+        titleColor: "text-amber-900",
+        body: "text-amber-900",
+        buttonBg: "bg-teal hover:bg-teal-dark",
+        buttonText: "Connect QuickBooks",
+      };
+  const Icon = isExpired ? XCircle : Plug;
+
+  return (
+    <div className={`rounded-2xl border-2 ${palette.border} ${palette.bg} p-5`}>
+      <div className="flex items-start gap-4">
+        <div className={`w-12 h-12 rounded-full ${palette.iconBg} flex items-center justify-center flex-shrink-0`}>
+          <Icon size={26} className={palette.iconColor} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className={`text-base font-bold ${palette.titleColor}`}>
+            {isExpired
+              ? `QuickBooks connection expired for ${clientName}`
+              : `QuickBooks not connected for ${clientName}`}
+          </div>
+          <div className={`text-xs ${palette.body} mt-1 leading-relaxed`}>
+            {isExpired ? (
+              <>
+                SNAP can&apos;t refresh the QBO access token — this usually means the
+                refresh token aged out (Intuit kills them after ~100 days of
+                disuse) or the client revoked SNAP&apos;s app from inside QBO. P&amp;L,
+                Balance Sheet, and Bank Balances will be empty until you
+                re-authorize.
+              </>
+            ) : (
+              <>
+                Financial tabs (P&amp;L, Balance Sheet, Banks) and any
+                cleanup workflow that touches QBO need an active connection.
+                Click below to sign in to Intuit and grant SNAP read/write
+                access to this client&apos;s books.
+              </>
+            )}
+          </div>
+
+          {/* How-to instructions */}
+          <ol className={`text-[11px] ${palette.body} mt-3 ml-4 list-decimal space-y-0.5 leading-snug`}>
+            <li>Click <strong>{palette.buttonText}</strong> below.</li>
+            <li>
+              On Intuit&apos;s sign-in page, sign in with the bookkeeper&apos;s QBO
+              account that has access to <strong>{clientName}</strong>.
+            </li>
+            <li>
+              On the &quot;Choose a company&quot; screen, pick the right QuickBooks
+              company file for this client.
+            </li>
+            <li>Click <strong>Connect</strong> on the permissions screen.</li>
+            <li>
+              You&apos;ll land back on this page — refresh once if the banner
+              doesn&apos;t flip to green within a few seconds.
+            </li>
+          </ol>
+
+          <div className="mt-4 flex items-center gap-3 flex-wrap">
+            <a
+              href={`/api/qbo/connect?client_link_id=${clientLinkId}`}
+              className={`inline-flex items-center gap-2 ${palette.buttonBg} text-white text-sm font-bold rounded-lg px-5 py-2.5 shadow-sm transition-colors`}
+            >
+              {palette.buttonText} <ArrowRight size={15} />
+            </a>
+            <Link
+              href={`/clients/${clientLinkId}/match-double`}
+              className={`text-xs font-semibold ${palette.body} hover:underline`}
+            >
+              Open client settings
+            </Link>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

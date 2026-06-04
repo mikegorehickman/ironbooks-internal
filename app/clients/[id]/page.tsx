@@ -294,6 +294,17 @@ export default async function ClientProfilePage({
           comparisonRangeLabel: `${comparisonRange.start} → ${comparisonRange.end}`,
           activeRangeKey: ranges.activeKey,
           hasQbo,
+          // Three-state QBO health for the connection banner:
+          //   - never_connected: client has no qbo_realm_id at all
+          //   - token_expired:    has realm but getValidToken returned null
+          //                        (refresh failed — most often 100-day
+          //                        idle expiry or client revoked SNAP in QBO)
+          //   - connected:        has realm AND token refresh succeeded
+          qboStatus: !hasQbo
+            ? ("never_connected" as const)
+            : accessToken
+            ? ("connected" as const)
+            : ("token_expired" as const),
         }}
       />
     </AppShell>
