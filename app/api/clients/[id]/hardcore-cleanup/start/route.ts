@@ -18,6 +18,7 @@ import {
   findUncategorizedIncomeAccount,
   scanUncatIncome,
 } from "@/lib/uncat-income-recovery";
+import { parseStripePayoutsCsv } from "@/lib/stripe-payouts-csv";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -124,7 +125,19 @@ export async function POST(
   // Validate + normalize each CSV when we're in csv mode. Reject early
   // with a clear per-file message rather than letting the parser blow
   // up downstream.
-  const csvs: Array<{ crm_source: CrmSource; csv_text: string; crm_filename: string | null }> = [];
+  //
+  // Sources:
+  //   drip_jobs | jobber | generic — go through normalizeCrmRows for
+  //     CRM↔QBO duplicate / missing-invoice detection.
+  //   stripe — bypasses normalizeCrmRows entirely. Parsed via
+  //     parseStripePayoutsCsv into stripe_payout items so the
+  //     bookkeeper can reconcile bank deposits + fee expense.
+  type AnyCsvSource = CrmSource | "stripe";
+  const csvs: Array<{
+    crm_source: AnyCsvSource;
+    csv_text: string;
+    crm_filename: string | null;
+  }> = [];
   if (scanMode === "csv") {
     if (rawCsvs.length === 0) {
       return NextResponse.json(
@@ -134,10 +147,10 @@ export async function POST(
     }
     for (let i = 0; i < rawCsvs.length; i++) {
       const c = rawCsvs[i];
-      const src = (c.crm_source as CrmSource | undefined) || "generic";
-      if (!["drip_jobs", "jobber", "generic"].includes(src)) {
+      const src = (c.crm_source as AnyCsvSource | undefined) || "generic";
+      if (!["drip_jobs", "jobber", "generic", "stripe"].includes(src)) {
         return NextResponse.json(
-          { error: `csvs[${i}].crm_source invalid: ${src}. Expected drip_jobs | jobber | generic.` },
+          { error: `csvs[${i}].crm_source invalid: ${src}. Expected drip_jobs | jobber | generic | stripe.` },
           { status: 400 }
         );
       }
@@ -185,11 +198,11 @@ export async function POST(
   // multiple CSVs are uploaded, crm_source becomes "multi" and the
   // joined filenames go into crm_filename so the run header reads
   // sensibly without a schema change.
-  const crmSource: CrmSource | "multi" =
+  const crmSource: CrmSource | "multi" | "stripe" =
     csvs.length > 1
       ? ("multi" as any)
       : csvs.length === 1
-      ? csvs[0].crm_source
+      ? (csvs[0].crm_source as any)
       : "generic";
   const crmFilename: string | null =
     csvs.length === 0
@@ -539,15 +552,45 @@ export async function POST(
     //    through DocNumber matching together.
     type ParsedSlice = { source: CrmSource; jobs: ReturnType<typeof normalizeCrmRows> };
     const slices: ParsedSlice[] = [];
+    // Stripe payouts get pulled aside from CRM jobs — they go through a
+    // completely different parser + persist as item_type=stripe_payout
+    // (not a CRM job at all). Collected here so they can be inserted
+    // after the CRM detection finishes.
+    type StripeSlice = {
+      payouts: ReturnType<typeof parseStripePayoutsCsv>["payouts"];
+      filename: string | null;
+      warnings: string[];
+    };
+    const stripeSlices: StripeSlice[] = [];
     for (let i = 0; i < csvs.length; i++) {
       const c = csvs[i];
+      if (c.crm_source === "stripe") {
+        const result = parseStripePayoutsCsv(c.csv_text);
+        if (result.payouts.length === 0) {
+          throw new Error(
+            `csvs[${i}] (${c.crm_filename || "stripe"}): no Stripe payouts parsed. ` +
+              (result.warnings[0] || "Check the export — looks like a Payouts or Balance Transactions CSV is expected.")
+          );
+        }
+        stripeSlices.push({
+          payouts: result.payouts,
+          filename: c.crm_filename,
+          warnings: result.warnings,
+        });
+        if (result.warnings.length > 0) {
+          console.warn(
+            `[hardcore-start ${runId}] stripe parse warnings: ${result.warnings.join(" | ")}`
+          );
+        }
+        continue;
+      }
       const rawRows = parseCsv(c.csv_text);
       if (rawRows.length === 0) {
         throw new Error(
           `csvs[${i}] (${c.crm_filename || c.crm_source}): had no data rows. Check the file.`
         );
       }
-      const jobs = normalizeCrmRows(rawRows, c.crm_source);
+      const jobs = normalizeCrmRows(rawRows, c.crm_source as CrmSource);
       if (jobs.length === 0) {
         const detectedHeaders = Object.keys(rawRows[0] || {});
         const sample = rawRows.slice(0, 3).map((r) => {
@@ -562,18 +605,87 @@ export async function POST(
           `If your customer column has a different header, send Mike the header name to add it to the alias list.`
         );
       }
-      slices.push({ source: c.crm_source, jobs });
+      slices.push({ source: c.crm_source as CrmSource, jobs });
     }
     // Flatten — engine doesn't currently care which source each job
     // came from. (If we ever want per-source telemetry we'd carry that
     // through on the persisted rows; not needed for matching today.)
     const crmJobs = slices.flatMap((s) => s.jobs);
-    if (crmJobs.length === 0) {
-      throw new Error("No CRM jobs parsed across all files. Nothing to match.");
+    const totalStripePayouts = stripeSlices.reduce((s, x) => s + x.payouts.length, 0);
+    if (crmJobs.length === 0 && totalStripePayouts === 0) {
+      throw new Error("No CRM jobs or Stripe payouts parsed across all files. Nothing to match.");
     }
     console.log(
-      `[hardcore-start ${runId}] Parsed ${crmJobs.length} CRM jobs across ${slices.length} file(s): ${slices.map((s) => `${s.source}=${s.jobs.length}`).join(", ")}`
+      `[hardcore-start ${runId}] Parsed ${crmJobs.length} CRM jobs + ${totalStripePayouts} Stripe payouts across ${csvs.length} file(s): ` +
+      `${slices.map((s) => `${s.source}=${s.jobs.length}`).join(", ")}` +
+      (stripeSlices.length > 0 ? `, stripe=${totalStripePayouts}` : "")
     );
+
+    // Persist Stripe payouts as hardcore_cleanup_items immediately. They
+    // don't go through the CRM matcher — they're informational/manual
+    // reconciliation today. v2 will add automatic matching against the
+    // UF + bank-deposit pool.
+    if (totalStripePayouts > 0) {
+      const stripeRows: any[] = [];
+      for (const slice of stripeSlices) {
+        for (const p of slice.payouts) {
+          stripeRows.push({
+            run_id: runId,
+            client_link_id: clientLinkId,
+            item_type: "stripe_payout",
+            // Re-use qbo_invoice_* columns to surface payout data in the
+            // existing review UI without a schema change.
+            qbo_invoice_id: p.stripe_payout_id || `stripe:${p.arrival_date}:${p.amount}`,
+            qbo_invoice_doc_number: p.stripe_payout_id || null,
+            qbo_invoice_date: p.arrival_date,
+            qbo_invoice_amount: p.amount,
+            qbo_invoice_balance: p.net,
+            qbo_invoice_memo: p.description || null,
+            confidence: 1.0,
+            reasoning:
+              `Stripe payout ${p.stripe_payout_id || "(no id)"} ` +
+              `$${p.amount.toFixed(2)} gross` +
+              (p.fee != null ? ` − $${p.fee.toFixed(2)} fee` : "") +
+              ` = $${p.net.toFixed(2)} net, arrived ${p.arrival_date || "(no date)"}. ` +
+              `Match this to a QBO bank deposit + confirm the Stripe fee is booked as an expense. ` +
+              `From: ${slice.filename || "stripe.csv"}.`,
+            resolution: "pending" as const,
+          });
+        }
+      }
+      const BATCH = 200;
+      for (let i = 0; i < stripeRows.length; i += BATCH) {
+        const { error: se } = await service
+          .from("hardcore_cleanup_items" as any)
+          .insert(stripeRows.slice(i, i + BATCH) as any);
+        if (se) throw new Error(`Stripe payout items insert failed: ${se.message}`);
+      }
+    }
+
+    if (crmJobs.length === 0) {
+      // Stripe-only upload — short-circuit and finalize the run here.
+      await service
+        .from("hardcore_cleanup_runs" as any)
+        .update({
+          status: "review",
+          duplicates_detected: totalStripePayouts,
+          finalize_results: {
+            scan_mode: "csv",
+            stripe_payouts: totalStripePayouts,
+            crm_jobs: 0,
+            duration_ms: Date.now() - t0,
+          },
+        } as any)
+        .eq("id", runId);
+      return NextResponse.json({
+        ok: true,
+        run_id: runId,
+        scan_mode: "csv",
+        stripe_payouts: totalStripePayouts,
+        crm_jobs: 0,
+        review_url: `/balance-sheet/${clientLinkId}/hardcore-cleanup?run_id=${runId}`,
+      });
+    }
 
     // Persist CRM jobs AND capture their IDs in input order. Using
     // `.insert(arr).select("id")` returns rows in the same order they

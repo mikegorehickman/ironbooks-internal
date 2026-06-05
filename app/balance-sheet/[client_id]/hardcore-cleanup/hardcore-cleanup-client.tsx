@@ -187,7 +187,7 @@ export function HardcoreCleanupClient({
    * DripJobs together when a client uses both.
    */
   async function uploadCsvs(
-    files: Array<{ file: File; crm: "drip_jobs" | "jobber" | "generic" }>
+    files: Array<{ file: File; crm: "drip_jobs" | "jobber" | "generic" | "stripe" }>
   ) {
     setUploading(true);
     setError("");
@@ -661,14 +661,16 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "re
 type UploadRow = {
   id: string;
   file: File | null;
-  crm: "drip_jobs" | "jobber" | "generic";
+  crm: "drip_jobs" | "jobber" | "generic" | "stripe";
 };
 
 function UploadCard({
   onUpload,
   uploading,
 }: {
-  onUpload: (files: Array<{ file: File; crm: "drip_jobs" | "jobber" | "generic" }>) => void;
+  onUpload: (
+    files: Array<{ file: File; crm: "drip_jobs" | "jobber" | "generic" | "stripe" }>
+  ) => void;
   uploading: boolean;
 }) {
   // Default to one DripJobs row — preserves the prior "single Drip Jobs"
@@ -734,6 +736,7 @@ function UploadCard({
                   { v: "drip_jobs", label: "Drip Jobs" },
                   { v: "jobber", label: "Jobber" },
                   { v: "generic", label: "Generic CSV" },
+                  { v: "stripe", label: "Stripe Payouts" },
                 ].map((opt) => (
                   <button
                     key={opt.v}
