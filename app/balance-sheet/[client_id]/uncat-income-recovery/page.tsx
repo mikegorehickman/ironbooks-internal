@@ -60,6 +60,25 @@ export default async function UncatIncomeRecoveryPage({
           <ArrowLeft size={14} />
           Back to A/R Recovery
         </Link>
+        {/* Deprecation notice — folded into Hardcore BS Cleanup. */}
+        <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+          <div className="text-sm font-bold text-amber-900 mb-1">
+            This tool is moving into Hardcore BS Cleanup
+          </div>
+          <p className="text-xs text-amber-900 leading-relaxed">
+            Uncategorized Income detection + open-A/R matching now runs as
+            part of the unified scan there — alongside UF→A/R and Stripe
+            payout reconciliation, with one Finalize button that pushes
+            apply_payment to QBO. Finish any in-flight scan here, then
+            start new work from the consolidated tool.
+          </p>
+          <Link
+            href={`/balance-sheet/${client_id}/hardcore-cleanup`}
+            className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 hover:text-amber-700 underline"
+          >
+            Open Hardcore BS Cleanup →
+          </Link>
+        </div>
         <UncatIncomeRecoveryClient
           clientLinkId={client_id}
           clientName={(client as any).client_name}

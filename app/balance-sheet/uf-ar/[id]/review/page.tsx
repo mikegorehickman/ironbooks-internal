@@ -96,7 +96,30 @@ export default async function UFARReviewPage({
         title={`UF → A/R match — ${clientLink?.client_name}`}
         subtitle={`Scanned ${(job as any).uf_transactions_scanned} UF payments against ${(job as any).open_invoices_scanned} open invoices`}
       />
-      <div className="px-8 py-6 max-w-5xl">
+      <div className="px-8 py-6 max-w-5xl space-y-4">
+        {/* Deprecation notice — apply-to-QBO still works here for any
+            in-flight job; new scans should run through hardcore-cleanup
+            which now does UF↔A/R + Uncategorized Income + Stripe payouts
+            under one Finalize. */}
+        <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+          <div className="text-sm font-bold text-amber-900 mb-1">
+            This UF → A/R surface is moving into Hardcore BS Cleanup
+          </div>
+          <p className="text-xs text-amber-900 leading-relaxed">
+            Apply-to-QBO still works here — finish this scan if you&apos;re
+            mid-flow. New scans should start from the consolidated tool,
+            which now scans UF↔A/R, Uncategorized Income, and Stripe
+            payouts together and finalizes them in one click.
+          </p>
+          {clientLink?.id && (
+            <a
+              href={`/balance-sheet/${clientLink.id}/hardcore-cleanup`}
+              className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 hover:text-amber-700 underline"
+            >
+              Open Hardcore BS Cleanup →
+            </a>
+          )}
+        </div>
         <UFARReview
           job={job as any}
           matches={(matches as any) || []}
