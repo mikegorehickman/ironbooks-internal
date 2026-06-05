@@ -119,6 +119,15 @@ export function BalanceSheetLanding({
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<{ recons: number; cats: number } | null>(null);
   const [runningUFAR, setRunningUFAR] = useState(false);
+  // Payroll double-entry scan state. Posts to the scanner endpoint, which
+  // creates a new hardcore_cleanup_run + items. On success we route the
+  // bookkeeper straight to the review UI for that run.
+  const [runningPayrollScan, setRunningPayrollScan] = useState(false);
+  const [payrollScanError, setPayrollScanError] = useState<string>("");
+  const [payrollScanResult, setPayrollScanResult] = useState<
+    | { pairs_detected: number; total_double_booked_dollars: number; review_url: string }
+    | null
+  >(null);
 
   // Per-row "Investigate Gap" drawer state
   const [gapOpenFor, setGapOpenFor] = useState<string | null>(null);
@@ -332,6 +341,29 @@ export function BalanceSheetLanding({
     }
   }
 
+  async function runPayrollScan() {
+    setRunningPayrollScan(true);
+    setPayrollScanError("");
+    setPayrollScanResult(null);
+    try {
+      const res = await fetch(
+        `/api/clients/${clientLinkId}/payroll-double-entry-scan`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setPayrollScanResult({
+        pairs_detected: json.pairs_detected,
+        total_double_booked_dollars: json.total_double_booked_dollars,
+        review_url: json.review_url,
+      });
+    } catch (e: any) {
+      setPayrollScanError(e?.message || "Payroll scan failed");
+    } finally {
+      setRunningPayrollScan(false);
+    }
+  }
+
   async function runUFAR() {
     setRunningUFAR(true);
     setError("");
@@ -408,6 +440,68 @@ export function BalanceSheetLanding({
               <Sparkles size={14} />
             )}
             {runningUFAR ? "Starting…" : "Scan UF → A/R"}
+            <ArrowRight size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* Payroll double-entry detector — finds QBO Payroll DDs that are
+          mirrored by a Transfer/JE categorized against the same wages
+          account (the canonical "P&L wages are 2× actual" bug). Lisa
+          confirmed Clean Cut / BMD / Make it Happen all have this.
+          Runs against last 24 months of payroll-account txns by default. */}
+      <div className="rounded-2xl bg-gradient-to-br from-red-50 to-white border border-red-200 p-5">
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 rounded-xl bg-red-100 flex-shrink-0">
+            <AlertCircle size={18} className="text-red-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-bold text-navy">
+              Scan for QBO Payroll double-entries
+            </h2>
+            <p className="text-xs text-ink-slate mt-1 leading-relaxed">
+              QBO Payroll&apos;s locked Paycheck/DD transactions sometimes get
+              mirrored by a bookkeeper-recorded Transfer or JE that hits the
+              same wages account — booking the expense twice. Finds matching
+              pairs across the last 24 months so you can recategorize the
+              duplicate side to a Payroll Clearing / transfer account.
+            </p>
+            {payrollScanError && (
+              <p className="mt-2 text-xs text-red-700 font-semibold">
+                {payrollScanError}
+              </p>
+            )}
+            {payrollScanResult && (
+              <div className="mt-2 text-xs">
+                {payrollScanResult.pairs_detected === 0 ? (
+                  <span className="text-green-700 font-semibold">
+                    ✓ No double-entry pairs detected — payroll posting looks clean.
+                  </span>
+                ) : (
+                  <a
+                    href={payrollScanResult.review_url}
+                    className="inline-flex items-center gap-1.5 text-red-700 font-bold hover:text-red-900 underline"
+                  >
+                    Found {payrollScanResult.pairs_detected} pair
+                    {payrollScanResult.pairs_detected === 1 ? "" : "s"} totaling{" "}
+                    ${payrollScanResult.total_double_booked_dollars.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {" "}of overstated wage expense — review →
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={runPayrollScan}
+            disabled={runningPayrollScan}
+            className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs font-semibold px-4 py-2 rounded-lg flex-shrink-0"
+          >
+            {runningPayrollScan ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <AlertCircle size={14} />
+            )}
+            {runningPayrollScan ? "Scanning…" : "Scan payroll"}
             <ArrowRight size={12} />
           </button>
         </div>
