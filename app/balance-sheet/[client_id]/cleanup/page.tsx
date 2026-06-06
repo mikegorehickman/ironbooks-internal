@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
-import { WorkflowStepper } from "@/components/WorkflowStepper";
+import { CleanupPilotBanner } from "@/components/CleanupPilotBanner";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect, notFound } from "next/navigation";
 import { CleanupStartClient } from "./cleanup-start-client";
@@ -46,14 +46,9 @@ export default async function CleanupEntryPage({
     <AppShell>
       <TopBar
         title={`BS Cleanup — ${(client as any).client_name}`}
-        subtitle="Step 5 · Guided balance sheet reconciliation"
+        subtitle="Pilot · guided balance sheet reconciliation"
       />
-      <WorkflowStepper
-        currentStep="bs"
-        currentState="active"
-        completedSteps={["coa", "reclass", "rules", "stripe"]}
-        clientLinkId={(client as any).id}
-      />
+      <CleanupPilotBanner />
       <div className="px-8 py-6 max-w-3xl">
         <CleanupStartClient
           clientLinkId={(client as any).id}

@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
-import { WorkflowStepper } from "@/components/WorkflowStepper";
+import { CleanupPilotBanner } from "@/components/CleanupPilotBanner";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect, notFound } from "next/navigation";
 import { CleanupWizardClient } from "./cleanup-wizard-client";
@@ -37,14 +37,9 @@ export default async function CleanupWizardPage({
     <AppShell>
       <TopBar
         title={`BS Cleanup — ${(client as any).client_name}`}
-        subtitle={`Run ${runId.slice(0, 8)}… · ${(run as any).workflow_mode === "monthly_close" ? "Monthly close" : "Onboarding"}`}
+        subtitle={`Pilot · ${(run as any).workflow_mode === "monthly_close" ? "Monthly close" : "Onboarding"} · run ${runId.slice(0, 8)}…`}
       />
-      <WorkflowStepper
-        currentStep="bs"
-        currentState="active"
-        completedSteps={["coa", "reclass", "rules", "stripe"]}
-        clientLinkId={client_id}
-      />
+      <CleanupPilotBanner />
       <div className="px-8 py-6 max-w-6xl">
         <CleanupWizardClient clientLinkId={client_id} runId={runId} />
       </div>

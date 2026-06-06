@@ -6,6 +6,7 @@ import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
   FileSpreadsheet, Wallet, Volume2, VolumeX, HeartPulse, Gauge, CalendarCheck,
+  ClipboardCheck,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -27,6 +28,7 @@ const standardItems = [
 const seniorItems = [
   { href: "/fleet", label: "Fleet Health", icon: Gauge },
   { href: "/month-end", label: "Month-End", icon: CalendarCheck },
+  { href: "/balance-sheet/cleanup", label: "BS Cleanup", icon: ClipboardCheck },
   { href: "/flagged", label: "Flagged Queue", icon: Flag },
 ];
 
