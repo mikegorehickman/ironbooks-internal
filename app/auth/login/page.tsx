@@ -57,10 +57,18 @@ function LoginInner() {
     setLoading(true);
     setError(null);
 
+    // Preserve a `next=` redirect through the magic-link flow so deep
+    // links (e.g. /connect-quickbooks?client_link_id=...) land users back
+    // on the page they came from after auth. /auth/callback honors this.
+    const nextParam = searchParams?.get("next");
+    const redirectTo = nextParam
+      ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextParam)}`
+      : `${window.location.origin}/auth/callback`;
+
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: redirectTo,
       },
     });
 
