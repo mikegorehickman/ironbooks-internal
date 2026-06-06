@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { SignOutButton } from "./sign-out-button";
 import { ImpersonationBanner } from "./impersonation-banner";
+import { SupportWidget } from "./support-widget";
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 
@@ -102,6 +103,13 @@ export default async function PortalLayout({ children }: { children: React.React
 
         <main className="flex-1 max-w-5xl mx-auto px-8 py-8">{children}</main>
       </div>
+      {/* Floating support chat — client-facing only. Mounted at layout
+          level so it persists across every portal page navigation. */}
+      <SupportWidget
+        clientName={clientName}
+        userEmail={ctx.userEmail}
+        userFullName={ctx.userFullName}
+      />
     </div>
   );
 }
