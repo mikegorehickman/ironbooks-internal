@@ -178,11 +178,24 @@ function flattenRows(
       }
     }
 
-    const sectionGroup =
-      row.Header?.ColData?.[0]?.value?.trim() || group;
+    // Determine the group to propagate into child rows. Priority:
+    //   1. row.group     — QBO's authoritative section type ("Income",
+    //                       "COGS", "Expenses", "OtherIncome", ...)
+    //   2. currentGroup  — the inherited section type from an ancestor
+    //   3. headerLabel   — only as a top-level bootstrap, when neither exists
+    //
+    // CRITICAL: nested sub-account sections (e.g. "4000 Residential" under
+    // Income, "5200 Materials" under COGS) carry NO group attribute — their
+    // header is just the parent account name. We must NOT let that name
+    // override the inherited section type, or every revenue/COGS line nested
+    // beneath a sub-account gets misclassified. (Zuno's entire revenue was
+    // landing in the expense bucket because both income lines live under a
+    // "4000 Residential" parent whose header overwrote "Income".)
+    const headerLabel = row.Header?.ColData?.[0]?.value?.trim() || "";
+    const nextGroup = row.group || currentGroup || headerLabel;
 
     if (row.Rows?.Row) {
-      flattenRows(row.Rows.Row, flat, items, sectionGroup);
+      flattenRows(row.Rows.Row, flat, items, nextGroup);
     }
 
     if (row.type === "Section" && row.Summary?.ColData) {
