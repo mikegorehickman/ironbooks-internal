@@ -5,6 +5,7 @@ import {
   AlertCircle, Clock, Mail, Phone, Sparkles, X, Copy, Loader2,
   TrendingUp, AlertTriangle,
 } from "lucide-react";
+import { AskAboutButton } from "../ask-about";
 
 interface AgingSummary {
   totalAmount: number;
@@ -57,11 +58,24 @@ export function WhosPayingClient({
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="text-xs text-ink-slate uppercase tracking-wider font-semibold">Outstanding invoices</div>
-        <h1 className="text-3xl font-bold text-navy mt-1">Who owes you money</h1>
-        <div className="text-sm text-ink-slate mt-1">
-          {fmtMoney(aging.totalAmount)} across {customers.length} customer{customers.length === 1 ? "" : "s"}
+      {/* ── Gradient hero ───────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
+        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
+        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Outstanding invoices</div>
+            <h1 className="text-3xl font-bold mt-1">Who owes you money</h1>
+            <div className="text-sm text-white/70 mt-1">
+              Across {customers.length} customer{customers.length === 1 ? "" : "s"}
+            </div>
+          </div>
+          <div className="flex-shrink-0 bg-white/10 backdrop-blur rounded-xl px-5 py-3 border border-white/15">
+            <div className="text-[10px] uppercase tracking-wider font-semibold text-white/60">Total owed to you</div>
+            <div className="text-3xl font-bold mt-0.5 text-white">{fmtMoney(aging.totalAmount)}</div>
+            {overdueTotal > 0 && (
+              <div className="text-xs text-amber-200 mt-0.5">{fmtMoney(overdueTotal)} past due</div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -326,6 +340,29 @@ function CustomerCardView({ c, onDraftFollowup }: { c: CustomerCard; onDraftFoll
             Email directly
           </a>
         )}
+        <AskAboutButton
+          kind="ar_customer"
+          label={c.name}
+          amount={c.total}
+          period={`${c.invoices.length} open invoice${c.invoices.length === 1 ? "" : "s"} · oldest ${c.oldest_days}d`}
+          context={{
+            customer_id: c.customer_id,
+            total_owed: c.total,
+            current_total: c.current_total,
+            overdue_total: c.overdue_total,
+            oldest_days_overdue: c.oldest_days,
+            invoice_count: c.invoices.length,
+            invoices: c.invoices.slice(0, 10).map((i) => ({
+              num: i.num,
+              amount: i.amount,
+              date: i.date,
+              due_date: i.due_date,
+              days_overdue: i.days_overdue,
+            })),
+          }}
+          subtitle="We'll double-check this customer's invoices and reply by email."
+          variant="chip"
+        />
       </div>
     </div>
   );

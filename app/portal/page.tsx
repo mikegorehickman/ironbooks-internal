@@ -1,27 +1,29 @@
 import Link from "next/link";
 import {
   TrendingUp, TrendingDown, AlertCircle, MessageSquare, ArrowRight,
-  DollarSign, Receipt, Wallet, Sparkles, CheckCircle2,
+  DollarSign, Wallet, Sparkles, CheckCircle2, Scissors,
+  BarChart3, Scale, Users, FileWarning, ChevronRight,
 } from "lucide-react";
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import { fetchOverview, resolveClosedPeriod } from "@/lib/portal-data";
 import { createServiceSupabase } from "@/lib/supabase";
 import { fetchPublishedPackage } from "@/lib/month-end/portal-package";
+import { classifyProfitLoss, marginVerdict, type PortalPl } from "@/lib/portal-pl";
 import { PortalErrorState } from "./error-state";
 import { MonthEndBanner } from "./month-end-banner";
-import type { PlSnapshot } from "@/lib/month-end/types";
+import { AskAboutButton } from "./ask-about";
 
 /**
- * Portal Overview — live data version.
+ * Portal Overview — the facelifted "command center".
  *
- * Renders the client's financial health summary by pulling live QBO data:
- *   - This month + last month P&L (for the delta callouts)
- *   - All bank/CC balances for cash-on-hand
- *   - Open A/R + overdue summary
- *   - Open A/P (for the future "what you owe" link)
+ * Pulls live QBO data (closed-month + prior-month P&L, cash, A/R, A/P) and
+ * runs it through the shared `classifyProfitLoss` engine so the headline
+ * numbers a contractor lives by — Income → Gross Profit → Net Profit —
+ * are surfaced front and center, consistent with the P&L page.
  *
- * The narrative line at the top is heuristic for now ("up vs last month")
- * — Day 6 wires Claude to generate a real plain-English summary.
+ * Visual system mirrors the P&L: gradient hero, teal AI-insight card, a
+ * "where each $1 goes" proportion bar, and an "Ask Ironbooks about this"
+ * affordance on the month summary.
  */
 export const dynamic = "force-dynamic";
 
@@ -46,106 +48,162 @@ export default async function PortalOverview() {
     closed.priorMonth
   );
 
-  const pkgPl = publishedPkg?.plSnapshot as PlSnapshot | undefined;
-  const incomeDelta = pkgPl
-    ? pkgPl.totalIncome - pkgPl.comparisonIncome
-    : data.primaryPL.totalIncome - data.comparisonPL.totalIncome;
-  const expensesDelta = pkgPl
-    ? pkgPl.totalExpenses - pkgPl.comparisonExpenses
-    : data.primaryPL.totalExpenses - data.comparisonPL.totalExpenses;
-  const profitDelta = pkgPl
-    ? pkgPl.netIncome - pkgPl.comparisonNetIncome
-    : data.primaryPL.netIncome - data.comparisonPL.netIncome;
+  // Run both periods through the shared classifier so every number on this
+  // page (income, gross profit, net) is internally consistent with the P&L.
+  const c = classifyProfitLoss(data.primaryPL);
+  const cPrior = classifyProfitLoss(data.comparisonPL);
 
+  const incomeDelta = c.totalIncome - cPrior.totalIncome;
+  const gpDelta = c.grossProfit - cPrior.grossProfit;
+  const netDelta = c.netProfit - cPrior.netProfit;
+
+  const monthLabel = publishedPkg?.label || closed.closedMonthLabel;
+  const monthShort = data.primaryMonth.label?.split(" ")[0] || "the month";
+  const prevShort = data.comparisonMonth.label?.split(" ")[0] || "prior month";
+
+  // Narrative: prefer the team's published AI summary; otherwise build a
+  // plain-English one from the classifier.
   const narrative = publishedPkg?.aiSummary
     ? {
         headline: `${publishedPkg.label} is closed and ready`,
         body: publishedPkg.aiSummary,
       }
-    : buildHeuristicNarrative(data, profitDelta, closed.closedMonthLabel);
+    : buildHeuristicNarrative(c, netDelta, monthLabel, prevShort);
 
-  const monthLabel = publishedPkg?.label || closed.closedMonthLabel;
+  const periodLabel = `${monthLabel}`;
+  const firstName = (ctx.userFullName || "").trim().split(/\s+/)[0] || "";
 
   return (
     <div className="space-y-6">
       <MonthEndBanner />
-      <div>
-        <div className="text-xs text-ink-slate uppercase tracking-wider font-semibold">Good day</div>
-        <h1 className="text-3xl font-bold text-navy mt-1">Here's how your business is doing</h1>
-        <div className="text-sm text-ink-slate mt-1 flex items-center gap-2 flex-wrap">
-          <CheckCircle2 size={13} className="text-emerald-600" />
-          <span>
-            Most recent closed month: <strong className="text-navy">{monthLabel}</strong>
-          </span>
-          <span className="text-ink-light">·</span>
-          <span className="text-ink-light">
-            {publishedPkg
-              ? "Delivered by your Ironbooks team"
-              : closed.source === "reclass_job_closed"
-              ? "Reconciled and closed by your bookkeeper"
-              : closed.source === "cleanup_completed"
-              ? "Most recent reconciled period"
-              : "Defaulting to last calendar month"}
-          </span>
+
+      {/* ── Gradient hero ───────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-7 text-white">
+        <div className="absolute -right-12 -top-12 w-56 h-56 rounded-full bg-teal/20 blur-3xl" />
+        <div className="absolute -left-8 -bottom-16 w-48 h-48 rounded-full bg-emerald-400/10 blur-3xl" />
+        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-5">
+          <div className="min-w-0">
+            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">
+              {firstName ? `Welcome back, ${firstName}` : "Welcome back"}
+            </div>
+            <h1 className="text-3xl font-bold mt-1 leading-tight">
+              Here's how your business is doing
+            </h1>
+            <div className="text-sm text-white/70 mt-2 flex items-center gap-2 flex-wrap">
+              <CheckCircle2 size={13} className="text-emerald-300" />
+              <span>
+                Most recent closed month: <strong className="text-white">{monthLabel}</strong>
+              </span>
+              <span className="text-white/40">·</span>
+              <span className="text-white/55">
+                {publishedPkg
+                  ? "Delivered by your Ironbooks team"
+                  : closed.source === "reclass_job_closed"
+                  ? "Reconciled and closed by your bookkeeper"
+                  : closed.source === "cleanup_completed"
+                  ? "Most recent reconciled period"
+                  : "Defaulting to last calendar month"}
+              </span>
+            </div>
+          </div>
+
+          {/* Net profit headline */}
+          <div className="flex-shrink-0 bg-white/10 backdrop-blur rounded-xl px-5 py-3 border border-white/15">
+            <div className="text-[10px] uppercase tracking-wider font-semibold text-white/60">
+              {monthShort} net profit
+            </div>
+            <div className={`text-3xl font-bold mt-0.5 ${c.netProfit >= 0 ? "text-white" : "text-red-300"}`}>
+              {c.netProfit < 0 ? `(${fmtMoney(Math.abs(c.netProfit))})` : fmtMoney(c.netProfit)}
+            </div>
+            <div className="text-xs text-white/70 mt-0.5">
+              {Math.round(c.netMarginPct)}% net margin
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Big health summary */}
-      <div className="bg-gradient-to-br from-teal/10 to-teal/5 border-2 border-teal/30 rounded-2xl p-6">
-        <div className="flex items-start gap-3 mb-3">
-          <Sparkles size={20} className="text-teal-dark mt-0.5" />
-          <div className="flex-1">
-            <div className="text-xs font-bold text-teal-dark uppercase tracking-wider">This month at a glance</div>
+      {/* ── AI insight card ─────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl border-2 border-teal/30 bg-gradient-to-br from-teal/10 via-white to-white p-5">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-full bg-teal/15 flex items-center justify-center flex-shrink-0">
+            <Sparkles size={18} className="text-teal-dark" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-bold text-teal-dark uppercase tracking-wider">
+              This month in plain English
+            </div>
             <h2 className="text-lg font-bold text-navy mt-1">{narrative.headline}</h2>
+            <p className="text-sm text-navy/80 leading-relaxed mt-1 whitespace-pre-line">{narrative.body}</p>
+            <div className="mt-3 flex items-center gap-3 flex-wrap">
+              <Link
+                href="/portal/ask-ai"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-dark hover:underline"
+              >
+                <MessageSquare size={12} /> Ask the AI to explain more
+              </Link>
+              <AskAboutButton
+                kind="pl_summary"
+                label={`${monthLabel} — month summary`}
+                period={periodLabel}
+                context={{
+                  income: c.totalIncome,
+                  variable_costs: c.totalVariable,
+                  gross_profit: c.grossProfit,
+                  gross_margin_pct: Math.round(c.grossMarginPct),
+                  fixed_expenses: c.totalFixed,
+                  net_profit: c.netProfit,
+                  net_margin_pct: Math.round(c.netMarginPct),
+                  cost_split_estimated: c.costSplitEstimated,
+                }}
+                subtitle="We'll review your month and reply by email."
+                variant="chip"
+              />
+            </div>
           </div>
-        </div>
-        <p className="text-sm text-navy/80 leading-relaxed">{narrative.body}</p>
-        <div className="mt-4">
-          <Link
-            href="/portal/ask-ai"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-dark hover:underline"
-          >
-            <MessageSquare size={12} />
-            Ask the AI to explain more
-          </Link>
         </div>
       </div>
 
-      {/* KPI tiles — labeled by the closed month, not "this month" */}
-      {(() => {
-        const monthShort = data.primaryMonth.label?.split(" ")[0] || "the month";
-        const prevShort = data.comparisonMonth.label?.split(" ")[0] || "prior month";
-        return (
-          <div className="grid grid-cols-3 gap-4">
-            <KpiCard
-              icon={DollarSign}
-              label={`Money in (${monthShort})`}
-              value={fmtMoney(data.primaryPL.totalIncome)}
-              delta={incomeDelta >= 0 ? `+${fmtMoney(Math.abs(incomeDelta))} vs ${prevShort}` : `${fmtMoney(incomeDelta)} vs ${prevShort}`}
-              deltaPositive={incomeDelta >= 0}
-              tooltip="Total invoices and sales for work completed in this month."
-            />
-            <KpiCard
-              icon={Receipt}
-              label={`Costs (${monthShort})`}
-              value={fmtMoney(data.primaryPL.totalExpenses)}
-              delta={expensesDelta >= 0 ? `+${fmtMoney(Math.abs(expensesDelta))} vs ${prevShort}` : `${fmtMoney(expensesDelta)} vs ${prevShort}`}
-              deltaPositive={expensesDelta < 0 /* lower costs = positive */}
-              tooltip="Everything you spent — materials, subs, payroll, overhead. Higher costs aren't always bad when revenue grows faster."
-            />
-            <KpiCard
-              icon={Wallet}
-              label={`What's left (profit)`}
-              value={fmtMoney(data.primaryPL.netIncome)}
-              delta={profitDelta >= 0 ? `+${fmtMoney(Math.abs(profitDelta))} vs ${prevShort}` : `${fmtMoney(profitDelta)} vs ${prevShort}`}
-              deltaPositive={profitDelta >= 0}
-              tooltip="Money in minus costs. This is what's truly yours."
-            />
-          </div>
-        );
-      })()}
+      {/* ── KPI tiles: Income → Gross Profit → Net Profit ───────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard
+          icon={DollarSign}
+          accent="teal"
+          label={`Money in (${monthShort})`}
+          value={fmtMoney(c.totalIncome)}
+          delta={signedMoney(incomeDelta, prevShort)}
+          deltaPositive={incomeDelta >= 0}
+          tooltip="Total invoices and sales for work completed this month."
+        />
+        <KpiCard
+          icon={Scissors}
+          accent="emerald"
+          label={`Gross profit (${monthShort})`}
+          value={fmtMoney(c.grossProfit)}
+          sub={`${Math.round(c.grossMarginPct)}% gross margin`}
+          delta={signedMoney(gpDelta, prevShort)}
+          deltaPositive={gpDelta >= 0}
+          tooltip={
+            c.costSplitEstimated
+              ? "Income minus estimated direct job costs (materials, subs, crew). Set up Cost of Goods Sold for an exact figure."
+              : "Income minus the direct cost of doing the work — materials, subs, crew."
+          }
+        />
+        <KpiCard
+          icon={Wallet}
+          accent={c.netProfit >= 0 ? "emerald" : "red"}
+          label={`What's left (profit)`}
+          value={fmtMoney(c.netProfit)}
+          sub={`${Math.round(c.netMarginPct)}% net margin`}
+          delta={signedMoney(netDelta, prevShort)}
+          deltaPositive={netDelta >= 0}
+          tooltip="Money in minus every cost and overhead expense. This is what's truly yours."
+        />
+      </div>
 
-      {/* Attention items */}
+      {/* ── Where each $1 of income goes ────────────────────────────── */}
+      {c.totalIncome > 0 && <ProportionBar c={c} />}
+
+      {/* ── What needs your attention ───────────────────────────────── */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-navy">What needs your attention</h3>
@@ -173,7 +231,7 @@ export default async function PortalOverview() {
           {data.openAPTotal > 0 && (
             <AttentionItem
               color="amber"
-              icon={Receipt}
+              icon={FileWarning}
               title={`${fmtMoney(data.openAPTotal)} in unpaid bills`}
               body={`${data.openAPCount} bill${data.openAPCount === 1 ? "" : "s"} outstanding to vendors. Check what's due soon.`}
               cta="See what you owe"
@@ -188,7 +246,7 @@ export default async function PortalOverview() {
         </div>
       </div>
 
-      {/* Cash on hand */}
+      {/* ── Cash on hand ────────────────────────────────────────────── */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <h3 className="font-bold text-navy mb-3">Cash on hand</h3>
         {data.banks.accounts.length === 0 ? (
@@ -208,7 +266,7 @@ export default async function PortalOverview() {
                 />
               ))}
             </div>
-            <div className="mt-3 text-xs text-ink-slate">
+            <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-ink-slate">
               Total cash available:{" "}
               <strong className="text-navy">{fmtMoney(data.banks.totalCashOnHand)}</strong>
               {data.banks.totalCreditCardDebt > 0 && (
@@ -220,6 +278,37 @@ export default async function PortalOverview() {
             </div>
           </>
         )}
+      </div>
+
+      {/* ── Explore your books ──────────────────────────────────────── */}
+      <div>
+        <h3 className="font-bold text-navy mb-3">Explore your books</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <NavCard
+            href="/portal/profit-loss"
+            icon={BarChart3}
+            title="Profit & Loss"
+            body="Income, variable costs, gross profit and overhead — broken down line by line."
+          />
+          <NavCard
+            href="/portal/balance-sheet"
+            icon={Scale}
+            title="Balance Sheet"
+            body="What you own, what you owe, and what's left over — your net worth at a glance."
+          />
+          <NavCard
+            href="/portal/whos-paying"
+            icon={Users}
+            title="Who owes you"
+            body="Open invoices and how late they are, customer by customer."
+          />
+          <NavCard
+            href="/portal/whats-due"
+            icon={FileWarning}
+            title="What you owe"
+            body="Unpaid bills to vendors and when they're due."
+          />
+        </div>
       </div>
     </div>
   );
@@ -237,72 +326,139 @@ function fmtMoney(n: number): string {
   });
 }
 
-function formatDate(yyyyMMdd: string): string {
-  const [y, m, d] = yyyyMMdd.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+function signedMoney(delta: number, prevShort: string): string {
+  return delta >= 0
+    ? `+${fmtMoney(Math.abs(delta))} vs ${prevShort}`
+    : `${fmtMoney(delta)} vs ${prevShort}`;
 }
 
 function buildHeuristicNarrative(
-  data: Awaited<ReturnType<typeof fetchOverview>>,
-  profitDelta: number,
-  monthLabel: string
+  c: PortalPl,
+  netDelta: number,
+  monthLabel: string,
+  prevShort: string
 ): { headline: string; body: string } {
-  const profit = data.primaryPL.netIncome;
-  const income = data.primaryPL.totalIncome;
-  const expenses = data.primaryPL.totalExpenses;
-  const margin = income > 0 ? Math.round((profit / income) * 100) : 0;
   const monthShort = monthLabel.split(" ")[0];
-  const prevShort = data.comparisonMonth.label?.split(" ")[0] || "the prior month";
 
-  if (income === 0 && expenses === 0) {
+  if (c.isEmpty) {
     return {
       headline: `${monthLabel} had no recorded activity.`,
       body: `No transactions hit your books for ${monthLabel}. If you were working then, your bookkeeper may still be catching up — reach out if it seems wrong.`,
     };
   }
 
+  const nm = marginVerdict(c.netMarginPct);
+  const gm = marginVerdict(c.grossMarginPct);
+
   let headline: string;
-  if (profitDelta > 0 && profit > 0) {
-    headline = `${monthShort}'s profit was up ${fmtMoney(Math.abs(profitDelta))} vs ${prevShort}.`;
-  } else if (profitDelta < 0 && profit > 0) {
-    headline = `${monthShort}'s profit was down ${fmtMoney(Math.abs(profitDelta))} vs ${prevShort}, but still positive.`;
-  } else if (profit < 0) {
-    headline = `${monthShort} ran a ${fmtMoney(Math.abs(profit))} loss.`;
+  if (netDelta > 0 && c.netProfit > 0) {
+    headline = `${monthShort}'s profit was up ${fmtMoney(Math.abs(netDelta))} vs ${prevShort}.`;
+  } else if (netDelta < 0 && c.netProfit > 0) {
+    headline = `${monthShort}'s profit was down ${fmtMoney(Math.abs(netDelta))} vs ${prevShort}, but still positive.`;
+  } else if (c.netProfit < 0) {
+    headline = `${monthShort} ran a ${fmtMoney(Math.abs(c.netProfit))} loss.`;
   } else {
     headline = `${monthShort}'s profit was roughly flat vs ${prevShort}.`;
   }
 
-  const body = `In ${monthLabel} you brought in ${fmtMoney(income)} and spent ${fmtMoney(expenses)} on costs and overhead, leaving ${fmtMoney(profit)} in profit. That's a ${margin}% margin — ${marginCommentary(margin)}.`;
+  const body =
+    `You brought in ${fmtMoney(c.totalIncome)}. After ${fmtMoney(c.totalVariable)} in ` +
+    `${c.costSplitEstimated ? "estimated " : ""}direct job costs, your gross profit was ` +
+    `${fmtMoney(c.grossProfit)} — a ${Math.round(c.grossMarginPct)}% gross margin (${gm.label}). ` +
+    `Take out ${fmtMoney(c.totalFixed)} of overhead and you're left with ${fmtMoney(c.netProfit)} ` +
+    `in profit — a ${Math.round(c.netMarginPct)}% net margin, ${nm.label} for a contracting business.`;
 
   return { headline, body };
-}
-
-function marginCommentary(pct: number): string {
-  if (pct >= 25) return "healthy for most service businesses";
-  if (pct >= 15) return "solid, with room to optimize";
-  if (pct >= 5) return "thin — worth digging into where costs are going";
-  if (pct >= 0) return "very thin — let's look at pricing or cost control";
-  return "negative this month — your bookkeeper can help diagnose where";
 }
 
 // ─── SUB-COMPONENTS ─────────────────────────────────────────────────────
 
 function KpiCard({
-  icon: Icon, label, value, delta, deltaPositive, tooltip,
-}: { icon: any; label: string; value: string; delta: string; deltaPositive: boolean; tooltip: string }) {
+  icon: Icon, accent, label, value, sub, delta, deltaPositive, tooltip,
+}: {
+  icon: any;
+  accent: "teal" | "emerald" | "red";
+  label: string;
+  value: string;
+  sub?: string;
+  delta: string;
+  deltaPositive: boolean;
+  tooltip: string;
+}) {
+  const accentBar = {
+    teal: "bg-teal",
+    emerald: "bg-emerald-500",
+    red: "bg-red-500",
+  }[accent];
+  const iconColor = {
+    teal: "text-teal-dark bg-teal/10",
+    emerald: "text-emerald-700 bg-emerald-50",
+    red: "text-red-700 bg-red-50",
+  }[accent];
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+    <div className="relative bg-white border border-slate-200 rounded-2xl p-5 overflow-hidden">
+      <span className={`absolute left-0 top-0 h-full w-1 ${accentBar}`} />
       <div className="flex items-center gap-2 mb-1">
-        <Icon size={14} className="text-ink-slate" />
+        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${iconColor}`}>
+          <Icon size={14} />
+        </span>
         <span className="text-xs font-semibold text-ink-slate uppercase tracking-wider">{label}</span>
       </div>
       <div className="text-2xl font-bold text-navy mt-2">{value}</div>
+      {sub && <div className="text-xs text-ink-slate mt-0.5">{sub}</div>}
       <div className={`text-xs mt-1 ${deltaPositive ? "text-emerald-700" : "text-amber-700"}`}>
         {deltaPositive ? <TrendingUp size={11} className="inline mr-0.5" /> : <TrendingDown size={11} className="inline mr-0.5" />}
         {delta}
       </div>
       <div className="mt-3 text-[11px] text-ink-light italic leading-relaxed">{tooltip}</div>
+    </div>
+  );
+}
+
+function ProportionBar({ c }: { c: PortalPl }) {
+  const varPct = Math.max(0, Math.min(100, (c.totalVariable / c.totalIncome) * 100));
+  const fixedPct = Math.max(0, Math.min(100, (c.totalFixed / c.totalIncome) * 100));
+  const netPct = Math.max(0, 100 - varPct - fixedPct);
+  const loss = c.netProfit < 0;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-bold text-navy">Where each $1 of income goes</h3>
+        <Link href="/portal/profit-loss" className="text-xs font-semibold text-teal-dark hover:underline inline-flex items-center gap-1">
+          Full P&amp;L <ChevronRight size={12} />
+        </Link>
+      </div>
+      <div className="flex h-6 rounded-full overflow-hidden bg-slate-100">
+        {varPct > 0 && <div className="bg-amber-400 h-full" style={{ width: `${varPct}%` }} title={`Variable costs ${Math.round(varPct)}¢`} />}
+        {fixedPct > 0 && <div className="bg-orange-500 h-full" style={{ width: `${fixedPct}%` }} title={`Fixed expenses ${Math.round(fixedPct)}¢`} />}
+        {!loss && netPct > 0 && <div className="bg-emerald-500 h-full" style={{ width: `${netPct}%` }} title={`Net profit ${Math.round(netPct)}¢`} />}
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs">
+        <Legend color="bg-amber-400" label={c.costSplitEstimated ? "Variable costs*" : "Variable costs"} value={`${Math.round(varPct)}¢`} />
+        <Legend color="bg-orange-500" label="Fixed expenses" value={`${Math.round(fixedPct)}¢`} />
+        <Legend
+          color={loss ? "bg-red-500" : "bg-emerald-500"}
+          label={loss ? "Loss" : "Net profit"}
+          value={loss ? `(${Math.round(Math.abs(c.netMarginPct))}¢)` : `${Math.round(netPct)}¢`}
+        />
+      </div>
+      {c.costSplitEstimated && (
+        <div className="text-[11px] text-ink-light mt-2">
+          *Variable vs. fixed split is estimated from account names. Your bookkeeper can set up
+          Cost of Goods Sold for an exact gross margin.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Legend({ color, label, value }: { color: string; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`w-2.5 h-2.5 rounded-sm ${color}`} />
+      <span className="text-ink-slate">{label}</span>
+      <span className="font-semibold text-navy">{value}</span>
     </div>
   );
 }
@@ -322,7 +478,7 @@ function AttentionItem({
         <div className="font-semibold text-sm">{title}</div>
         <div className="text-xs mt-0.5 opacity-80">{body}</div>
       </div>
-      <Link href={href} className="text-xs font-semibold flex items-center gap-1 hover:underline">
+      <Link href={href} className="text-xs font-semibold flex items-center gap-1 hover:underline whitespace-nowrap">
         {cta} <ArrowRight size={11} />
       </Link>
     </div>
@@ -336,5 +492,27 @@ function CashTile({ label, amount, sub, negative }: { label: string; amount: str
       <div className={`text-xl font-bold ${negative ? "text-red-700" : "text-navy"}`}>{amount}</div>
       <div className="text-[11px] text-ink-light">{sub}</div>
     </div>
+  );
+}
+
+function NavCard({
+  href, icon: Icon, title, body,
+}: { href: string; icon: any; title: string; body: string }) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-start gap-3 bg-white border border-slate-200 rounded-2xl p-4 hover:border-teal/40 hover:shadow-sm transition-all"
+    >
+      <span className="w-9 h-9 rounded-lg bg-teal/10 text-teal-dark flex items-center justify-center flex-shrink-0 group-hover:bg-teal/15">
+        <Icon size={16} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="font-bold text-navy flex items-center gap-1">
+          {title}
+          <ChevronRight size={14} className="text-ink-light group-hover:text-teal-dark group-hover:translate-x-0.5 transition-transform" />
+        </div>
+        <div className="text-xs text-ink-slate mt-0.5 leading-relaxed">{body}</div>
+      </div>
+    </Link>
   );
 }

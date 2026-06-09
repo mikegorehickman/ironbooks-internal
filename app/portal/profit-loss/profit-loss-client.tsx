@@ -1,41 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, AlertTriangle, X, Loader2, ChevronRight, Flag, CheckCircle2 } from "lucide-react";
+import {
+  ChevronDown, AlertTriangle, X, Loader2, ChevronRight, Flag, CheckCircle2,
+  Sparkles, Info, ArrowDown, TrendingUp, TrendingDown,
+} from "lucide-react";
 import type { ProfitLossData } from "@/lib/qbo-reports";
+import { classifyProfitLoss, marginVerdict, type PortalPl, type PlBucket } from "@/lib/portal-pl";
+import { AskAboutButton } from "../ask-about";
 
 type RangeKey = "lastMonth" | "thisMonth" | "quarter" | "ytd" | "lastYear";
 
 /**
- * Accounting-standard section ordering. QBO's P&L report comes in this
- * order in the rows tree, but flattenRows loses that — so we re-impose it
- * here. Within each section, lines are sorted by descending absolute
- * amount so the most significant items appear first (vs alphabetical,
- * which buries the important stuff).
+ * Portal P&L — restructured into the four numbers a contractor lives by:
+ *   Income → (−) Variable costs → (=) Gross Profit → (−) Fixed expenses
+ *   → (=) Net Profit.
+ *
+ * Classification is done by lib/portal-pl.ts. When the QBO file lacks a
+ * Cost of Goods Sold section we estimate the variable/fixed split and say so.
+ *
+ * Every line keeps its drill-down (click → transactions) and gains an
+ * "Ask Ironbooks" affordance. The period summary has its own ask + a link
+ * to the AI.
  */
-const SECTION_ORDER = [
-  "Income", "Revenue", "Sales",
-  "Cost of Goods Sold", "COGS",
-  "Gross Profit",
-  "Operating Expenses", "Expenses", "Expense",
-  "Operating Income", "Net Operating Income",
-  "Other Income", "Other Expense", "Other Expenses",
-  "Net Income", "Net Loss",
-];
-
-const SECTION_RANK = new Map(SECTION_ORDER.map((s, i) => [s.toLowerCase(), i]));
-
-function sectionRank(name: string): number {
-  const lower = name.toLowerCase();
-  const exact = SECTION_RANK.get(lower);
-  if (exact != null) return exact;
-  // Substring match for variations like "Total Operating Expenses"
-  for (const [key, rank] of SECTION_RANK) {
-    if (lower.includes(key)) return rank;
-  }
-  return 999;
-}
-
 export function ProfitLossClient({
   ranges,
   data,
@@ -51,38 +38,41 @@ export function ProfitLossClient({
     account_id: string;
     amount: number;
   } | null>(null);
+
   const pl = data[activeRange];
   const range = ranges[activeRange];
-
-  const grouped = pl ? groupLines(pl.lineItems) : new Map();
   const isThisMonth = activeRange === "thisMonth";
+  const c: PortalPl | null = pl ? classifyProfitLoss(pl) : null;
+  const periodLabel = `${range.label} · ${formatDate(range.start)} → ${formatDate(range.end)}`;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-        <div>
-          <div className="text-xs text-ink-slate uppercase tracking-wider font-semibold">Profit & Loss</div>
-          <h1 className="text-3xl font-bold text-navy mt-1">How you made money</h1>
-          <div className="text-sm text-ink-slate mt-1">
-            {range.label} · {formatDate(range.start)} → {formatDate(range.end)}
+      {/* ── Gradient hero ───────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
+        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
+        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Profit & Loss</div>
+            <h1 className="text-3xl font-bold mt-1">How you made money</h1>
+            <div className="text-sm text-white/70 mt-1">{periodLabel}</div>
           </div>
-        </div>
-        <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 flex-wrap">
-          {(["lastMonth", "thisMonth", "quarter", "ytd", "lastYear"] as RangeKey[]).map((k) => (
-            <button
-              key={k}
-              onClick={() => setActiveRange(k)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded ${
-                activeRange === k ? "bg-teal text-white" : "text-ink-slate hover:bg-slate-50"
-              }`}
-            >
-              {shortLabel(k, ranges)}
-            </button>
-          ))}
+          <div className="flex bg-white/10 backdrop-blur rounded-lg p-0.5 flex-wrap self-start">
+            {(["lastMonth", "thisMonth", "quarter", "ytd", "lastYear"] as RangeKey[]).map((k) => (
+              <button
+                key={k}
+                onClick={() => setActiveRange(k)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors ${
+                  activeRange === k ? "bg-white text-navy" : "text-white/75 hover:bg-white/10"
+                }`}
+              >
+                {shortLabel(k, ranges)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* In-progress warning when viewing "this month" */}
+      {/* In-progress warning */}
       {isThisMonth && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
@@ -101,105 +91,372 @@ export function ProfitLossClient({
           We couldn't load the P&L for this range. Try a different range or refresh — if it keeps
           happening, let your bookkeeper know.
         </div>
-      ) : pl.totalIncome === 0 && pl.totalExpenses === 0 ? (
+      ) : !c || c.isEmpty ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-ink-slate">
           No financial activity for this period.
         </div>
       ) : (
         <>
-          <div className="bg-teal/5 border border-teal/30 rounded-xl p-4 text-sm text-navy/80 leading-relaxed">
-            <strong className="text-teal-dark">In plain English:</strong> You earned{" "}
-            <strong>{fmtMoney(pl.totalIncome)}</strong> from sales this period and spent{" "}
-            <strong>{fmtMoney(pl.totalExpenses)}</strong> on costs and overhead. That leaves{" "}
-            <strong>{fmtMoney(pl.netIncome)}</strong> in profit
-            {pl.totalIncome > 0 && (
-              <> — about <strong>{Math.round((pl.netIncome / pl.totalIncome) * 100)}¢</strong> of every dollar you brought in</>
-            )}.
-          </div>
+          {/* ── AI-style plain-English insight ──────────────────────── */}
+          <InsightCard c={c} range={range} periodLabel={periodLabel} />
 
-          {/* Header row with column labels */}
-          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-            <div className="px-6 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-ink-slate">
-              <span>Category / Line</span>
-              <div className="flex items-center gap-6">
-                <span className="w-20 text-right">Amount</span>
-                <span className="w-12 text-right">% inc</span>
-              </div>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {Array.from(grouped.entries())
-                .sort(([a], [b]) => sectionRank(a) - sectionRank(b))
-                .map(([group, lines]) => {
-                  const sortedLines = [...lines].sort(
-                    (a: any, b: any) => Math.abs(b.amount) - Math.abs(a.amount)
-                  );
-                  const groupTotal = sortedLines.reduce((s: number, l: any) => s + l.amount, 0);
-                  const groupPct = pl.totalIncome > 0 ? Math.round((groupTotal / pl.totalIncome) * 100) : 0;
-                  return (
-                    <Section
-                      key={group}
-                      title={group || "Other"}
-                      amount={groupTotal}
-                      pct={groupPct}
-                      showPct={pl.totalIncome > 0}
-                    >
-                      {sortedLines.map((l: any, i: number) => {
-                        const linePct = pl.totalIncome > 0 ? (l.amount / pl.totalIncome) * 100 : 0;
-                        return (
-                          <Line
-                            key={i}
-                            label={l.label}
-                            amount={l.amount}
-                            pct={linePct}
-                            showPct={pl.totalIncome > 0}
-                            onDrill={
-                              l.account_id
-                                ? () => setDrillLine({ label: l.label, account_id: l.account_id, amount: l.amount })
-                                : undefined
-                            }
-                          />
-                        );
-                      })}
-                    </Section>
-                  );
-                })}
+          {/* ── Money-flow strip ────────────────────────────────────── */}
+          <FlowStrip c={c} />
 
-              <div className="px-6 py-5 bg-teal/5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs text-ink-slate uppercase tracking-wider font-semibold">Bottom line</div>
-                    <div className="text-2xl font-bold text-navy mt-1">Profit (what's left)</div>
-                    {pl.totalIncome > 0 && (
-                      <div className="text-xs text-ink-slate mt-1">
-                        {Math.round((pl.netIncome / pl.totalIncome) * 100)}% profit margin
-                      </div>
-                    )}
-                  </div>
-                  <div className={`text-3xl font-bold ${pl.netIncome >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                    {fmtMoney(pl.netIncome)}
-                  </div>
-                </div>
-              </div>
-            </div>
+          {/* ── Where each dollar goes ──────────────────────────────── */}
+          <ProportionBar c={c} />
+
+          {/* ── Detailed breakdown ──────────────────────────────────── */}
+          <div className="space-y-4">
+            <BucketSection
+              bucket={c.income}
+              accent="teal"
+              periodLabel={range.label}
+              onDrill={setDrillLine}
+            />
+
+            <BucketSection
+              bucket={c.variableCosts}
+              accent="amber"
+              periodLabel={range.label}
+              onDrill={setDrillLine}
+              note={
+                c.costSplitEstimated
+                  ? "Estimated from account names — your books don't separate direct job costs from overhead yet. Your bookkeeper can set up Cost of Goods Sold for a precise gross margin."
+                  : undefined
+              }
+              emptyNote="No direct job costs recorded for this period."
+            />
+
+            {/* Gross Profit band */}
+            <ResultBand
+              title="Gross Profit"
+              subtitle={
+                c.costSplitEstimated
+                  ? "Income minus variable job costs (estimated)"
+                  : "Income minus the direct cost of doing the work"
+              }
+              amount={c.grossProfit}
+              marginPct={c.grossMarginPct}
+              marginNoun="gross margin"
+              tone={c.grossProfit >= 0 ? "emerald" : "red"}
+            />
+
+            <BucketSection
+              bucket={c.fixedExpenses}
+              accent="orange"
+              periodLabel={range.label}
+              onDrill={setDrillLine}
+              emptyNote="No overhead expenses recorded for this period."
+            />
+
+            {c.otherIncome && (
+              <BucketSection bucket={c.otherIncome} accent="teal" periodLabel={range.label} onDrill={setDrillLine} />
+            )}
+            {c.otherExpense && (
+              <BucketSection bucket={c.otherExpense} accent="orange" periodLabel={range.label} onDrill={setDrillLine} />
+            )}
+
+            {/* Net Profit band — the bottom line */}
+            <ResultBand
+              title="Net Profit (what's left)"
+              subtitle="After every cost and overhead expense — this is what's truly yours"
+              amount={c.netProfit}
+              marginPct={c.netMarginPct}
+              marginNoun="net margin"
+              tone={c.netProfit >= 0 ? "emerald" : "red"}
+              emphasize
+            />
           </div>
         </>
       )}
 
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-ink-slate">
         <strong className="text-navy">Tip:</strong> Click any line to see the underlying transactions —
-        vendor, date, amount, memo. Or{" "}
+        vendor, date, amount, memo. Use the{" "}
+        <span className="inline-flex items-center"><Sparkles size={11} className="text-teal-dark" /></span>{" "}
+        question icon on any line to ask your Ironbooks team about how it's categorized, or{" "}
         <a href="/portal/ask-ai" className="text-teal-dark font-semibold underline">ask the AI</a>{" "}
-        any question about these numbers. The <strong>% inc</strong> column shows each line as a
-        percent of total income — useful for spotting which costs are eating into your profit.
+        for an instant explanation.
       </div>
 
       {drillLine && (
-        <DrillDownDrawer
-          line={drillLine}
-          range={range}
-          onClose={() => setDrillLine(null)}
-        />
+        <DrillDownDrawer line={drillLine} range={range} onClose={() => setDrillLine(null)} />
       )}
+    </div>
+  );
+}
+
+// ─── INSIGHT CARD ─────────────────────────────────────────────────────────
+
+function InsightCard({ c, range, periodLabel }: { c: PortalPl; range: { label: string }; periodLabel: string }) {
+  const gm = marginVerdict(c.grossMarginPct);
+  const nm = marginVerdict(c.netMarginPct);
+  return (
+    <div className="relative overflow-hidden rounded-2xl border-2 border-teal/30 bg-gradient-to-br from-teal/10 via-white to-white p-5">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-full bg-teal/15 flex items-center justify-center flex-shrink-0">
+          <Sparkles size={18} className="text-teal-dark" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-bold text-teal-dark uppercase tracking-wider">In plain English</div>
+          <p className="text-sm text-navy/85 leading-relaxed mt-1">
+            You brought in <strong>{fmtMoney(c.totalIncome)}</strong>. After{" "}
+            <strong>{fmtMoney(c.totalVariable)}</strong> in {c.costSplitEstimated ? "estimated " : ""}
+            direct job costs, your <strong>gross profit</strong> was{" "}
+            <strong>{fmtMoney(c.grossProfit)}</strong> — a{" "}
+            <span className={`font-semibold ${marginText(gm.tone)}`}>{Math.round(c.grossMarginPct)}% gross margin</span> ({gm.label}).
+            Take out <strong>{fmtMoney(c.totalFixed)}</strong> of overhead and you're left with{" "}
+            <strong className={c.netProfit >= 0 ? "text-emerald-700" : "text-red-700"}>{fmtMoney(c.netProfit)}</strong>{" "}
+            in net profit — a{" "}
+            <span className={`font-semibold ${marginText(nm.tone)}`}>{Math.round(c.netMarginPct)}% net margin</span>.
+          </p>
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
+            <a
+              href="/portal/ask-ai"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-dark hover:underline"
+            >
+              <Sparkles size={12} /> Ask the AI to go deeper
+            </a>
+            <AskAboutButton
+              kind="pl_summary"
+              label={`${range.label} Profit & Loss`}
+              period={periodLabel}
+              context={{
+                income: c.totalIncome,
+                variable_costs: c.totalVariable,
+                gross_profit: c.grossProfit,
+                gross_margin_pct: Math.round(c.grossMarginPct),
+                fixed_expenses: c.totalFixed,
+                net_profit: c.netProfit,
+                net_margin_pct: Math.round(c.netMarginPct),
+                cost_split_estimated: c.costSplitEstimated,
+              }}
+              variant="chip"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MONEY-FLOW STRIP ───────────────────────────────────────────────────
+
+function FlowStrip({ c }: { c: PortalPl }) {
+  const steps = [
+    { label: "Income", value: c.totalIncome, op: "", tone: "teal" as const },
+    { label: c.costSplitEstimated ? "Variable costs*" : "Variable costs", value: -c.totalVariable, op: "−", tone: "amber" as const },
+    { label: "Gross Profit", value: c.grossProfit, op: "=", tone: "navy" as const, strong: true },
+    { label: "Fixed expenses", value: -c.totalFixed, op: "−", tone: "orange" as const },
+    { label: "Net Profit", value: c.netProfit, op: "=", tone: c.netProfit >= 0 ? ("emerald" as const) : ("red" as const), strong: true },
+  ];
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+      {steps.map((s, i) => (
+        <div
+          key={s.label}
+          className={`relative rounded-xl border p-3 ${flowTileClass(s.tone)} ${s.strong ? "ring-1 ring-inset ring-current/10" : ""}`}
+        >
+          {s.op && (
+            <div className="absolute -left-2 top-1/2 -translate-y-1/2 hidden md:flex w-4 h-4 items-center justify-center text-ink-light text-sm font-bold bg-[#FAFAF7] rounded-full">
+              {s.op}
+            </div>
+          )}
+          <div className="text-[10px] uppercase tracking-wider font-semibold opacity-70">{s.label}</div>
+          <div className={`text-lg font-bold mt-0.5 ${flowValueClass(s.tone)}`}>
+            {s.value < 0 ? `(${fmtMoney(Math.abs(s.value))})` : fmtMoney(s.value)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── PROPORTION BAR (where each income dollar goes) ────────────────────────
+
+function ProportionBar({ c }: { c: PortalPl }) {
+  if (c.totalIncome <= 0) return null;
+  const varPct = Math.max(0, Math.min(100, (c.totalVariable / c.totalIncome) * 100));
+  const fixedPct = Math.max(0, Math.min(100, (c.totalFixed / c.totalIncome) * 100));
+  const netPct = Math.max(0, 100 - varPct - fixedPct);
+  const loss = c.netProfit < 0;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-bold text-navy">Where each $1 of income goes</h3>
+        <span className="text-xs text-ink-light">per dollar earned</span>
+      </div>
+      <div className="flex h-6 rounded-full overflow-hidden bg-slate-100">
+        {varPct > 0 && <div className="bg-amber-400 h-full" style={{ width: `${varPct}%` }} title={`Variable costs ${Math.round(varPct)}¢`} />}
+        {fixedPct > 0 && <div className="bg-orange-500 h-full" style={{ width: `${fixedPct}%` }} title={`Fixed expenses ${Math.round(fixedPct)}¢`} />}
+        {!loss && netPct > 0 && <div className="bg-emerald-500 h-full" style={{ width: `${netPct}%` }} title={`Net profit ${Math.round(netPct)}¢`} />}
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs">
+        <Legend color="bg-amber-400" label="Variable costs" value={`${Math.round(varPct)}¢`} />
+        <Legend color="bg-orange-500" label="Fixed expenses" value={`${Math.round(fixedPct)}¢`} />
+        <Legend
+          color={loss ? "bg-red-500" : "bg-emerald-500"}
+          label={loss ? "Loss" : "Net profit"}
+          value={loss ? `(${Math.round(Math.abs(c.netMarginPct))}¢)` : `${Math.round(netPct)}¢`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function Legend({ color, label, value }: { color: string; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`w-2.5 h-2.5 rounded-sm ${color}`} />
+      <span className="text-ink-slate">{label}</span>
+      <span className="font-semibold text-navy">{value}</span>
+    </div>
+  );
+}
+
+// ─── BUCKET SECTION ─────────────────────────────────────────────────────
+
+function BucketSection({
+  bucket,
+  accent,
+  periodLabel,
+  onDrill,
+  note,
+  emptyNote,
+}: {
+  bucket: PlBucket;
+  accent: "teal" | "amber" | "orange";
+  periodLabel: string;
+  onDrill: (l: { label: string; account_id: string; amount: number }) => void;
+  note?: string;
+  emptyNote?: string;
+}) {
+  const [open, setOpen] = useState(true);
+  const accentBar = { teal: "bg-teal", amber: "bg-amber-400", orange: "bg-orange-500" }[accent];
+  const kind = bucket.key === "income" || bucket.key === "otherIncome" ? "pl_line" : "pl_line";
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50/60 transition-colors"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className={`w-1.5 h-8 rounded-full ${accentBar} flex-shrink-0`} />
+          <ChevronDown size={15} className={`text-ink-slate transition-transform ${open ? "" : "-rotate-90"}`} />
+          <div className="text-left min-w-0">
+            <div className="font-bold text-navy truncate">{bucket.label}</div>
+            <div className="text-[11px] text-ink-light">
+              {bucket.lines.length} {bucket.lines.length === 1 ? "line" : "lines"}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-5 flex-shrink-0">
+          <div className="text-lg font-bold text-navy">{fmtMoney(bucket.total)}</div>
+          <div className="text-xs font-semibold text-ink-slate w-12 text-right">
+            {bucket.pctOfIncome > 0 ? `${Math.round(bucket.pctOfIncome)}%` : "—"}
+          </div>
+        </div>
+      </button>
+
+      {open && (
+        <div className="px-5 pb-4">
+          {note && (
+            <div className="mb-3 flex items-start gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <Info size={12} className="mt-0.5 flex-shrink-0" />
+              <span>{note}</span>
+            </div>
+          )}
+          {bucket.lines.length === 0 ? (
+            <div className="text-xs text-ink-light italic py-2">{emptyNote || "No items."}</div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {bucket.lines.map((l, i) => {
+                const drillable = !!l.account_id;
+                return (
+                  <div key={i} className="flex items-center justify-between gap-2 py-1.5 group">
+                    <button
+                      type="button"
+                      onClick={drillable ? () => onDrill({ label: l.label, account_id: l.account_id!, amount: l.amount }) : undefined}
+                      disabled={!drillable}
+                      className={`flex items-center gap-1 text-sm text-left min-w-0 ${
+                        drillable ? "cursor-pointer hover:text-teal-dark" : "cursor-default"
+                      }`}
+                    >
+                      {drillable && <ChevronRight size={11} className="text-ink-light group-hover:text-teal-dark flex-shrink-0" />}
+                      <span className="text-ink-slate truncate">{l.label}</span>
+                    </button>
+                    <div className="flex items-center gap-4 flex-shrink-0">
+                      <span className="font-mono text-sm text-navy w-24 text-right">{fmtMoney(l.amount)}</span>
+                      <span className="text-xs text-ink-light w-10 text-right font-mono hidden sm:block">
+                        {l.pctOfIncome >= 0.5 ? `${l.pctOfIncome.toFixed(1)}%` : "—"}
+                      </span>
+                      <AskAboutButton
+                        kind={kind}
+                        label={l.label}
+                        amount={l.amount}
+                        period={periodLabel}
+                        context={{ section: bucket.label, account_id: l.account_id, pct_of_income: Math.round(l.pctOfIncome * 10) / 10 }}
+                        variant="icon"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── RESULT BAND (Gross Profit / Net Profit) ──────────────────────────────
+
+function ResultBand({
+  title,
+  subtitle,
+  amount,
+  marginPct,
+  marginNoun,
+  tone,
+  emphasize,
+}: {
+  title: string;
+  subtitle: string;
+  amount: number;
+  marginPct: number;
+  marginNoun: string;
+  tone: "emerald" | "red";
+  emphasize?: boolean;
+}) {
+  const grad = emphasize
+    ? tone === "emerald"
+      ? "from-emerald-600 to-teal-dark text-white"
+      : "from-red-600 to-red-700 text-white"
+    : tone === "emerald"
+    ? "from-emerald-50 to-white text-navy border border-emerald-200"
+    : "from-red-50 to-white text-navy border border-red-200";
+  const amountColor = emphasize ? "text-white" : tone === "emerald" ? "text-emerald-700" : "text-red-700";
+  const subColor = emphasize ? "text-white/80" : "text-ink-slate";
+
+  return (
+    <div className={`rounded-2xl bg-gradient-to-r ${grad} px-6 py-5`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {tone === "emerald" ? <TrendingUp size={16} className={emphasize ? "text-white" : "text-emerald-700"} /> : <TrendingDown size={16} className={emphasize ? "text-white" : "text-red-700"} />}
+            <div className={`font-bold ${emphasize ? "text-white text-lg" : "text-navy"}`}>{title}</div>
+          </div>
+          <div className={`text-xs mt-0.5 ${subColor}`}>{subtitle}</div>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <div className={`font-bold ${emphasize ? "text-3xl" : "text-2xl"} ${amountColor}`}>{fmtMoney(amount)}</div>
+          <div className={`text-xs ${subColor}`}>{Math.round(marginPct)}% {marginNoun}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -207,20 +464,8 @@ export function ProfitLossClient({
 // ─── HELPERS ────────────────────────────────────────────────────────────
 
 function shortLabel(key: RangeKey, ranges: Record<RangeKey, { label: string }>): string {
-  // Strip the "(April 2026)" suffix on lastMonth so the toggle button stays short
-  const full = ranges[key].label;
   if (key === "lastMonth") return "Last month";
-  return full;
-}
-
-function groupLines(items: ProfitLossData["lineItems"]): Map<string, ProfitLossData["lineItems"]> {
-  const m = new Map<string, ProfitLossData["lineItems"]>();
-  for (const item of items) {
-    const g = item.group || "Other";
-    if (!m.has(g)) m.set(g, []);
-    m.get(g)!.push(item);
-  }
-  return m;
+  return ranges[key].label;
 }
 
 function fmtMoney(n: number): string {
@@ -235,62 +480,35 @@ function formatDate(iso: string): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function Section({ title, amount, pct, showPct, children }: { title: string; amount: number; pct: number; showPct: boolean; children: React.ReactNode }) {
-  return (
-    <details className="px-6 py-4 group" open>
-      <summary className="flex items-center justify-between cursor-pointer list-none">
-        <div className="flex items-center gap-2">
-          <ChevronDown size={14} className="text-ink-slate group-open:rotate-0 -rotate-90 transition-transform" />
-          <div className="font-bold text-navy">{title}</div>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="text-lg font-bold text-navy w-20 text-right">{fmtMoney(amount)}</div>
-          <div className="text-xs font-semibold text-ink-slate w-12 text-right">
-            {showPct ? `${pct}%` : "—"}
-          </div>
-        </div>
-      </summary>
-      <div className="mt-3 ml-6 space-y-1.5">{children}</div>
-    </details>
-  );
+function flowTileClass(tone: "teal" | "amber" | "orange" | "navy" | "emerald" | "red"): string {
+  return {
+    teal: "border-teal/30 bg-teal/5",
+    amber: "border-amber-200 bg-amber-50",
+    orange: "border-orange-200 bg-orange-50",
+    navy: "border-slate-300 bg-slate-50",
+    emerald: "border-emerald-200 bg-emerald-50",
+    red: "border-red-200 bg-red-50",
+  }[tone];
 }
 
-function Line({
-  label, amount, pct, showPct, onDrill,
-}: {
-  label: string; amount: number; pct: number; showPct: boolean;
-  /** Optional drill-down callback. When defined the row is clickable. */
-  onDrill?: () => void;
-}) {
-  const clickable = !!onDrill;
-  return (
-    <button
-      type="button"
-      onClick={onDrill}
-      disabled={!clickable}
-      className={`flex w-full items-center justify-between text-sm py-1 px-1 -mx-1 rounded ${
-        clickable
-          ? "cursor-pointer hover:bg-teal/5 group transition-colors"
-          : "cursor-default"
-      }`}
-    >
-      <div className="flex items-center gap-1 text-ink-slate text-left">
-        {clickable && (
-          <ChevronRight
-            size={11}
-            className="text-ink-light group-hover:text-teal-dark transition-colors"
-          />
-        )}
-        <span className={clickable ? "group-hover:text-teal-dark" : ""}>{label}</span>
-      </div>
-      <div className="flex items-center gap-6">
-        <div className="font-mono text-navy w-20 text-right">{fmtMoney(amount)}</div>
-        <div className="text-xs text-ink-light w-12 text-right font-mono">
-          {showPct ? (Math.abs(pct) >= 0.5 ? `${pct.toFixed(1)}%` : "—") : "—"}
-        </div>
-      </div>
-    </button>
-  );
+function flowValueClass(tone: "teal" | "amber" | "orange" | "navy" | "emerald" | "red"): string {
+  return {
+    teal: "text-teal-dark",
+    amber: "text-amber-700",
+    orange: "text-orange-700",
+    navy: "text-navy",
+    emerald: "text-emerald-700",
+    red: "text-red-700",
+  }[tone];
+}
+
+function marginText(tone: "emerald" | "teal" | "amber" | "red"): string {
+  return {
+    emerald: "text-emerald-700",
+    teal: "text-teal-dark",
+    amber: "text-amber-700",
+    red: "text-red-700",
+  }[tone];
 }
 
 // ─── DRILL-DOWN DRAWER ──────────────────────────────────────────────────
@@ -300,21 +518,12 @@ interface Transaction {
   txn_type: string;
   date: string;
   doc_number: string | null;
-  /** Vendor for expense accounts, customer for income accounts. */
   name: string | null;
   memo: string;
   amount: number;
   running_balance: number | null;
 }
 
-/**
- * Slide-out drawer showing every transaction that hit the clicked account
- * during the active P&L period. Fetches on open; doesn't pre-load.
- *
- * Slide-from-right pattern (not a modal) so the client can keep the
- * P&L visible behind the drawer and visually connect the drill-down
- * to the line they clicked.
- */
 function DrillDownDrawer({
   line,
   range,
@@ -358,7 +567,6 @@ function DrillDownDrawer({
     return () => { cancelled = true; };
   }, [line.account_id, range.start, range.end]);
 
-  // ESC to close
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
@@ -367,12 +575,12 @@ function DrillDownDrawer({
 
   return (
     <div className="fixed inset-0 z-50 flex" onClick={onClose}>
-      <div className="flex-1 bg-black/40" />
+      <div className="flex-1 bg-navy/40 backdrop-blur-sm" />
       <div
         className="w-full max-w-2xl bg-white shadow-xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between">
+        <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between bg-gradient-to-r from-teal/5 to-white">
           <div className="min-w-0">
             <div className="text-xs text-ink-slate uppercase tracking-wider font-semibold">
               Transactions in
@@ -384,8 +592,6 @@ function DrillDownDrawer({
                 <span className="text-ink-light"> · {totalCount} transaction{totalCount === 1 ? "" : "s"}</span>
               )}
             </div>
-            {/* Reconciliation warning if drilled-in total doesn't match the
-                P&L line total. Tolerance of $1 covers rounding. */}
             {!loading && totalCount > 0 && Math.abs(totalAmount - line.amount) > 1 && !truncated && (
               <div className="text-[11px] text-amber-700 mt-1 flex items-center gap-1">
                 <AlertTriangle size={11} />
@@ -422,43 +628,49 @@ function DrillDownDrawer({
                   <th className="text-left px-4 py-2 font-semibold">Type / #</th>
                   <th className="text-left px-4 py-2 font-semibold">Payee / Customer</th>
                   <th className="text-right px-4 py-2 font-semibold">Amount</th>
-                  <th className="text-right px-4 py-2 font-semibold w-12">Flag</th>
+                  <th className="text-right px-4 py-2 font-semibold w-16">Ask / Flag</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {transactions.map((t, i) => (
                   <tr key={`${t.txn_id || i}`} className="hover:bg-slate-50">
-                    <td className="px-4 py-2 text-xs text-ink-slate whitespace-nowrap">
-                      {t.date}
-                    </td>
+                    <td className="px-4 py-2 text-xs text-ink-slate whitespace-nowrap">{t.date}</td>
                     <td className="px-4 py-2 text-xs">
                       <div className="text-navy font-medium">{t.txn_type || "—"}</div>
-                      {t.doc_number && (
-                        <div className="text-ink-light text-[11px]">#{t.doc_number}</div>
-                      )}
+                      {t.doc_number && <div className="text-ink-light text-[11px]">#{t.doc_number}</div>}
                     </td>
                     <td className="px-4 py-2 text-xs">
                       <div className="text-navy">{t.name || <span className="text-ink-light italic">—</span>}</div>
                       {t.memo && (
-                        <div className="text-ink-light text-[11px] truncate max-w-xs" title={t.memo}>
-                          {t.memo}
-                        </div>
+                        <div className="text-ink-light text-[11px] truncate max-w-xs" title={t.memo}>{t.memo}</div>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-right font-mono text-navy whitespace-nowrap">
-                      {fmtMoney(t.amount)}
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setFlagTxn(t);
-                        }}
-                        title="Flag this transaction for your bookkeeper to review"
-                        className="text-ink-light hover:text-amber-600 transition-colors p-1 rounded hover:bg-amber-50"
-                      >
-                        <Flag size={13} />
-                      </button>
+                    <td className="px-4 py-2 text-right font-mono text-navy whitespace-nowrap">{fmtMoney(t.amount)}</td>
+                    <td className="px-4 py-2">
+                      <div className="flex items-center justify-end gap-0.5">
+                        <AskAboutButton
+                          kind="transaction"
+                          label={`${t.txn_type || "Transaction"}${t.name ? ` — ${t.name}` : ""}`}
+                          amount={t.amount}
+                          period={range.label}
+                          context={{
+                            account: line.label,
+                            account_id: line.account_id,
+                            date: t.date,
+                            doc_number: t.doc_number,
+                            vendor_or_customer: t.name,
+                            memo: t.memo,
+                          }}
+                          variant="icon"
+                        />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setFlagTxn(t); }}
+                          title="Flag this transaction for your bookkeeper to review"
+                          className="text-ink-light hover:text-amber-600 transition-colors p-1 rounded hover:bg-amber-50"
+                        >
+                          <Flag size={13} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -476,11 +688,9 @@ function DrillDownDrawer({
 
         <div className="px-5 py-3 border-t border-slate-200 bg-slate-50">
           <div className="text-[11px] text-ink-light">
-            Need to ask about a specific transaction?{" "}
-            <a href="/portal/ask-ai" className="text-teal-dark font-semibold underline">
-              Ask the AI
-            </a>{" "}
-            or reach out to your Ironbooks bookkeeper directly.
+            Want this line explained?{" "}
+            <a href="/portal/ask-ai" className="text-teal-dark font-semibold underline">Ask the AI</a>{" "}
+            or use the question icon to reach your Ironbooks bookkeeper.
           </div>
         </div>
       </div>
@@ -557,19 +767,14 @@ function FlagTransactionModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-2xl max-w-lg w-full shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-[60] bg-navy/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-lg w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Flag size={16} className="text-amber-600" />
             <h3 className="font-bold text-navy">Flag this transaction</h3>
           </div>
-          <button onClick={onClose} className="text-ink-slate hover:text-navy">
-            <X size={20} />
-          </button>
+          <button onClick={onClose} className="text-ink-slate hover:text-navy"><X size={20} /></button>
         </div>
 
         <div className="px-5 py-4 space-y-4">
@@ -579,47 +784,26 @@ function FlagTransactionModal({
                 <CheckCircle2 size={18} className="text-emerald-700 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-emerald-900">
                   <strong className="block">Sent to your bookkeeper.</strong>
-                  <span className="text-xs">
-                    They'll review the transaction and reply. You'll see the status on your portal
-                    later if you check back.
-                  </span>
+                  <span className="text-xs">They'll review the transaction and reply.</span>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="w-full px-4 py-2 bg-teal text-white rounded-lg text-sm font-semibold hover:bg-teal-dark"
-              >
-                Done
-              </button>
+              <button onClick={onClose} className="w-full px-4 py-2 bg-teal text-white rounded-lg text-sm font-semibold hover:bg-teal-dark">Done</button>
             </>
           ) : (
             <>
-              {/* Snapshot of what's being flagged */}
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
-                <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate mb-1">
-                  You're flagging
-                </div>
+                <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate mb-1">You're flagging</div>
                 <div className="flex items-center justify-between">
                   <div className="min-w-0">
                     <div className="font-semibold text-navy">
                       {transaction.txn_type || "Transaction"}
-                      {transaction.doc_number && (
-                        <span className="text-ink-light"> #{transaction.doc_number}</span>
-                      )}
+                      {transaction.doc_number && <span className="text-ink-light"> #{transaction.doc_number}</span>}
                     </div>
-                    <div className="text-ink-slate truncate">
-                      {transaction.date} · {transaction.name || "—"}
-                    </div>
-                    {transaction.memo && (
-                      <div className="text-ink-light italic truncate" title={transaction.memo}>
-                        {transaction.memo}
-                      </div>
-                    )}
+                    <div className="text-ink-slate truncate">{transaction.date} · {transaction.name || "—"}</div>
+                    {transaction.memo && <div className="text-ink-light italic truncate" title={transaction.memo}>{transaction.memo}</div>}
                   </div>
                   <div className="text-right flex-shrink-0 ml-2">
-                    <div className="font-mono font-semibold text-navy">
-                      {fmtMoney(transaction.amount)}
-                    </div>
+                    <div className="font-mono font-semibold text-navy">{fmtMoney(transaction.amount)}</div>
                     <div className="text-[10px] text-ink-light">{accountLabel}</div>
                   </div>
                 </div>
@@ -631,10 +815,7 @@ function FlagTransactionModal({
                 </label>
                 <textarea
                   value={note}
-                  onChange={(e) => {
-                    setNote(e.target.value);
-                    if (error) setError(null);
-                  }}
+                  onChange={(e) => { setNote(e.target.value); if (error) setError(null); }}
                   placeholder="e.g. This was for the Hudson job, not general overhead. Or: I don't recognize this vendor — can you check?"
                   maxLength={1500}
                   rows={4}
@@ -646,20 +827,10 @@ function FlagTransactionModal({
                 </div>
               </div>
 
-              {error && (
-                <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">
-                  {error}
-                </div>
-              )}
+              {error && <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">{error}</div>}
 
               <div className="flex items-center gap-2 justify-end">
-                <button
-                  onClick={onClose}
-                  disabled={submitting}
-                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold text-ink-slate hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
+                <button onClick={onClose} disabled={submitting} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold text-ink-slate hover:bg-slate-50 disabled:opacity-50">Cancel</button>
                 <button
                   onClick={submit}
                   disabled={submitting || !note.trim()}
@@ -669,9 +840,7 @@ function FlagTransactionModal({
                   {submitting ? "Sending…" : "Send to bookkeeper"}
                 </button>
               </div>
-              <div className="text-[11px] text-ink-light">
-                Nothing changes in QuickBooks. Your bookkeeper reviews and decides what to do.
-              </div>
+              <div className="text-[11px] text-ink-light">Nothing changes in QuickBooks. Your bookkeeper reviews and decides what to do.</div>
             </>
           )}
         </div>

@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, Send, AlertCircle, Loader2 } from "lucide-react";
+import { Sparkles, Send, AlertCircle, Loader2, ArrowUpRight, Wand2 } from "lucide-react";
 import { MarkdownText } from "./markdown-text";
 
 /**
- * Portal Q&A chat. Per-session conversation only (no DB persistence in
- * MVP) — refreshing the page or signing out clears history. Each user
- * message hits /api/portal/ask-ai with the prior turns; the response
- * streams back as Server-Sent Events.
+ * Portal Q&A chat — facelifted. The streaming logic is unchanged: each user
+ * message hits /api/portal/ask-ai with prior turns and the response streams
+ * back as Server-Sent Events. Per-session only (no DB persistence in MVP).
+ *
+ * Visual system matches the rest of the portal: gradient hero, an inspiring
+ * empty state with dynamic starter cards, gradient AI avatar, and a polished
+ * composer.
  */
 
 interface Message {
@@ -123,56 +126,63 @@ export function AskAiClient({ starters }: { starters: string[] }) {
     }
   }
 
+  const empty = messages.length === 0;
+
   return (
-    <div className="space-y-6 flex flex-col h-[calc(100vh-100px)]">
-      <div className="flex-shrink-0">
-        <div className="text-xs text-ink-slate uppercase tracking-wider font-semibold">Your AI bookkeeper</div>
-        <h1 className="text-3xl font-bold text-navy mt-1">Ask anything about your finances</h1>
-        <div className="text-sm text-ink-slate mt-1">
-          Knows your live QuickBooks data · Trained to explain things in plain English
+    <div className="flex flex-col h-[calc(100vh-100px)] gap-4">
+      {/* ── Gradient hero ───────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-5 text-white flex-shrink-0">
+        <div className="absolute -right-10 -top-12 w-48 h-48 rounded-full bg-teal/25 blur-3xl" />
+        <div className="absolute -left-6 -bottom-14 w-40 h-40 rounded-full bg-emerald-400/10 blur-3xl" />
+        <div className="relative flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center flex-shrink-0">
+            <Sparkles size={22} className="text-white" />
+          </div>
+          <div>
+            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Your AI bookkeeper</div>
+            <h1 className="text-2xl font-bold leading-tight">Ask anything about your finances</h1>
+            <div className="text-xs text-white/65 mt-0.5">
+              Knows your live QuickBooks data · Explains things in plain English
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Starter pills — only when chat is empty */}
-      {messages.length === 0 && (
-        <div className="flex-shrink-0 flex flex-wrap gap-2">
-          {starters.map((s) => (
-            <button
-              key={s}
-              onClick={() => send(s)}
-              disabled={streaming}
-              className="text-xs px-3 py-1.5 bg-white border border-slate-200 rounded-full text-ink-slate hover:bg-teal/5 hover:border-teal/40 hover:text-teal-dark disabled:opacity-50"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Chat history */}
+      {/* Chat / empty state */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto space-y-4 bg-white border border-slate-200 rounded-2xl p-5"
+        className="flex-1 overflow-y-auto bg-white border border-slate-200 rounded-2xl p-5"
       >
-        {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center text-ink-slate text-sm py-12">
-            <Sparkles size={28} className="text-teal-dark mb-3" />
-            <div className="font-semibold text-navy">Ask a question about your books</div>
-            <div className="text-xs mt-1 max-w-xs">
-              Pick a starter above or type your own. The AI sees your live financials and explains
-              things in plain English.
+        {empty ? (
+          <div className="h-full flex flex-col">
+            <div className="text-center pt-6 pb-5">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-teal to-teal-dark flex items-center justify-center shadow-sm">
+                <Wand2 size={26} className="text-white" />
+              </div>
+              <div className="font-bold text-navy text-lg mt-3">What can I help you understand?</div>
+              <div className="text-sm text-ink-slate mt-1 max-w-md mx-auto">
+                Tap a question below or type your own. I read your live financials and answer
+                in plain English — no accounting jargon.
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-2xl mx-auto w-full">
+              {starters.map((s) => (
+                <StarterCard key={s} text={s} onClick={() => send(s)} disabled={streaming} />
+              ))}
             </div>
           </div>
         ) : (
-          messages.map((m, i) =>
-            m.role === "user" ? (
-              <UserBubble key={i}>{m.content}</UserBubble>
-            ) : (
-              <AiBubble key={i} streaming={streaming && i === messages.length - 1}>
-                <MarkdownText>{m.content}</MarkdownText>
-              </AiBubble>
-            )
-          )
+          <div className="space-y-4">
+            {messages.map((m, i) =>
+              m.role === "user" ? (
+                <UserBubble key={i}>{m.content}</UserBubble>
+              ) : (
+                <AiBubble key={i} streaming={streaming && i === messages.length - 1}>
+                  <MarkdownText>{m.content}</MarkdownText>
+                </AiBubble>
+              )
+            )}
+          </div>
         )}
       </div>
 
@@ -183,8 +193,8 @@ export function AskAiClient({ starters }: { starters: string[] }) {
         </div>
       )}
 
-      {/* Input box */}
-      <div className="flex-shrink-0 bg-white border-2 border-slate-200 rounded-2xl p-3 focus-within:border-teal/50">
+      {/* Composer */}
+      <div className="flex-shrink-0 bg-white border-2 border-slate-200 rounded-2xl p-3 focus-within:border-teal/50 transition-colors">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -198,7 +208,7 @@ export function AskAiClient({ starters }: { starters: string[] }) {
           className="w-full resize-none outline-none text-sm text-navy placeholder:text-ink-light min-h-[60px]"
           disabled={streaming}
         />
-        <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center justify-between mt-2 gap-3">
           <div className="text-[11px] text-ink-light">
             AI has access to your live QBO data. It won't give legal or tax advice — talk to your
             CPA for that.
@@ -206,9 +216,9 @@ export function AskAiClient({ starters }: { starters: string[] }) {
           <button
             onClick={() => send()}
             disabled={streaming || !input.trim()}
-            className="px-3 py-1.5 bg-teal text-white rounded-lg text-sm font-semibold hover:bg-teal-dark disabled:opacity-50 inline-flex items-center gap-1.5"
+            className="px-4 py-2 bg-gradient-to-r from-teal to-teal-dark text-white rounded-lg text-sm font-semibold hover:from-teal-dark hover:to-teal-dark disabled:opacity-50 inline-flex items-center gap-1.5 flex-shrink-0 transition-all"
           >
-            {streaming ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+            {streaming ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
             {streaming ? "Thinking…" : "Send"}
           </button>
         </div>
@@ -217,10 +227,26 @@ export function AskAiClient({ starters }: { starters: string[] }) {
   );
 }
 
+function StarterCard({ text, onClick, disabled }: { text: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="group flex items-start gap-2.5 text-left p-3 rounded-xl border border-slate-200 bg-white hover:border-teal/40 hover:bg-teal/5 disabled:opacity-50 transition-all"
+    >
+      <span className="w-7 h-7 rounded-lg bg-teal/10 text-teal-dark flex items-center justify-center flex-shrink-0 group-hover:bg-teal/15">
+        <Sparkles size={13} />
+      </span>
+      <span className="text-sm text-navy/85 flex-1 leading-snug">{text}</span>
+      <ArrowUpRight size={14} className="text-ink-light group-hover:text-teal-dark flex-shrink-0 mt-0.5 transition-colors" />
+    </button>
+  );
+}
+
 function UserBubble({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex justify-end">
-      <div className="bg-teal text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] text-sm whitespace-pre-wrap">
+      <div className="bg-gradient-to-br from-teal to-teal-dark text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] text-sm whitespace-pre-wrap shadow-sm">
         {children}
       </div>
     </div>
@@ -230,8 +256,8 @@ function UserBubble({ children }: { children: React.ReactNode }) {
 function AiBubble({ children, streaming }: { children: React.ReactNode; streaming?: boolean }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="w-8 h-8 rounded-full bg-teal/10 flex items-center justify-center flex-shrink-0">
-        <Sparkles size={14} className="text-teal-dark" />
+      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal to-teal-dark flex items-center justify-center flex-shrink-0 shadow-sm">
+        <Sparkles size={14} className="text-white" />
       </div>
       <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-navy max-w-[85%] leading-relaxed">
         {children}
