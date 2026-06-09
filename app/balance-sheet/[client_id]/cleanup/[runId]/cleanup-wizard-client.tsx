@@ -109,6 +109,107 @@ function formatMoney(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
+/**
+ * Attach-a-CSV control. Primary affordance is attaching a file (drop or
+ * click-to-browse); the textarea below stays as a paste fallback so power
+ * users can still drop raw rows in. Reading happens client-side via
+ * FileReader, so the downstream import flow (which posts csv_text) is
+ * unchanged — we just populate the same string state.
+ */
+function CsvAttach({
+  value,
+  onChange,
+  placeholder = "…or paste CSV text here",
+  rows = 3,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  rows?: number;
+}) {
+  const [hover, setHover] = useState(false);
+
+  function handleFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => onChange(String(reader.result || ""));
+    reader.readAsText(file);
+  }
+
+  const rowCount = useMemo(() => {
+    if (!value.trim()) return 0;
+    const lines = value.split(/\r?\n/).filter((l) => l.trim());
+    return Math.max(0, lines.length - 1); // minus header
+  }, [value]);
+
+  return (
+    <div className="space-y-2">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setHover(true); }}
+        onDragLeave={() => setHover(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setHover(false);
+          const file = e.dataTransfer.files[0];
+          if (file) handleFile(file);
+        }}
+        className={`rounded-xl border-2 border-dashed transition-colors ${
+          hover
+            ? "border-teal bg-teal/5"
+            : value
+            ? "border-emerald-200 bg-emerald-50/30"
+            : "border-gray-200 hover:border-gray-300"
+        }`}
+      >
+        <label className="cursor-pointer block px-4 py-3">
+          <div className="flex items-center gap-3">
+            {value ? (
+              <CheckCircle2 size={18} className="text-emerald-600 flex-shrink-0" />
+            ) : (
+              <Upload size={18} className="text-ink-light flex-shrink-0" />
+            )}
+            <div className="flex-1 min-w-0 text-xs font-semibold">
+              {value ? (
+                <span className="text-emerald-800">
+                  Attached · {rowCount} row{rowCount === 1 ? "" : "s"}
+                </span>
+              ) : (
+                <span className="text-navy">Attach a .csv file — drop here or click to browse</span>
+              )}
+            </div>
+            <input
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFile(file);
+              }}
+            />
+          </div>
+        </label>
+      </div>
+
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2 focus:border-teal focus:ring-1 focus:ring-teal/30 outline-none"
+      />
+
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="text-[11px] text-ink-light hover:text-red-600"
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function CleanupWizardClient({
   clientLinkId,
   clientName,
@@ -584,7 +685,7 @@ export function CleanupWizardClient({
                 <Upload size={14} /> Import CSVs (optional)
               </h3>
               <p className="text-xs text-ink-light mb-3">
-                Paste exports from Stripe, the bank, or a CRM to give the matcher more to work with. Skip this if you don't have one handy.
+                Attach exports from Stripe, the bank, or a CRM to give the matcher more to work with. Skip this if you don't have one handy.
               </p>
               <div className="flex gap-2 mb-2 flex-wrap">
                 {["stripe", "bank", "jobber", "drip_jobs", "loan_statement"].map((s) => (
@@ -601,12 +702,7 @@ export function CleanupWizardClient({
                   </button>
                 ))}
               </div>
-              <textarea
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-                placeholder="Paste CSV content here…"
-                className="w-full h-24 text-xs font-mono border border-gray-200 rounded-lg p-2 focus:border-teal focus:ring-1 focus:ring-teal/30 outline-none"
-              />
+              <CsvAttach value={csvText} onChange={setCsvText} rows={3} />
               <button
                 onClick={importCsv}
                 disabled={acting || !csvText.trim()}
@@ -773,7 +869,7 @@ export function CleanupWizardClient({
                         <Upload size={11} /> CRM export (optional)
                       </h4>
                       <p className="text-[11px] text-ink-light mb-2">
-                        Paste a Jobber, DripJobs, or generic CRM invoice export <strong>before clicking Discover</strong>.
+                        Attach a Jobber, DripJobs, or generic CRM invoice export <strong>before clicking Discover</strong>.
                         This lets the matcher cross-check duplicates against the source system, not just QuickBooks.
                       </p>
                       <div className="flex gap-2 mb-2">
@@ -789,11 +885,11 @@ export function CleanupWizardClient({
                           </button>
                         ))}
                       </div>
-                      <textarea
+                      <CsvAttach
                         value={crmCsv}
-                        onChange={(e) => setCrmCsv(e.target.value)}
-                        placeholder="Paste CRM invoice CSV here…"
-                        className="w-full h-16 text-xs font-mono border border-gray-200 rounded-lg p-2"
+                        onChange={setCrmCsv}
+                        rows={2}
+                        placeholder="…or paste CRM invoice CSV here"
                       />
                     </div>
                   )}
