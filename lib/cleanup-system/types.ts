@@ -48,16 +48,22 @@ export type ImportSource = "bank" | "stripe" | "jobber" | "drip_jobs" | "loan_st
 
 export type CpaFlagStatus = "open" | "signed_off" | "dismissed";
 
-/** Module execution order — enforced by orchestrator. */
+/**
+ * Module display + seeding order. Modules are NO LONGER gated sequentially —
+ * every module is seeded "ready" so a bookkeeper can run any of them in any
+ * order. This array just controls the order they appear in and which modules
+ * a new run seeds. (OBE & Uncategorized Cleanup was retired from the workflow;
+ * the type + discovery handler are kept for backward-compat with old runs but
+ * it is no longer seeded into new runs.)
+ */
 export const MODULE_ORDER: CleanupModule[] = [
-  "bank_recon",
-  "undeposited_funds",
   "accounts_receivable",
+  "undeposited_funds",
   "accounts_payable",
   "loans",
   "shareholder_draws",
   "tax_payroll",
-  "obe_uncategorized",
+  "bank_recon",
 ];
 
 export const MODULE_LABELS: Record<CleanupModule, string> = {

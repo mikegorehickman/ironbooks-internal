@@ -126,16 +126,18 @@ export async function startCleanupRun(
         snapshot_id: snapshot.snapshotId,
         health_score_id: healthScoreId,
         status: "reviewing",
-        current_module: "bank_recon",
+        current_module: MODULE_ORDER[0],
         updated_at: new Date().toISOString(),
       } as any)
       .eq("id", run.id);
 
-    // Initialize module rows
-    const moduleRows = MODULE_ORDER.map((module, idx) => ({
+    // Initialize module rows. Modules are ungated — every one starts "ready"
+    // so the bookkeeper can run them individually in any order, rather than
+    // unlocking one at a time.
+    const moduleRows = MODULE_ORDER.map((module) => ({
       run_id: run.id,
       module,
-      status: (idx === 0 ? "ready" : "locked") as CleanupModuleStatus,
+      status: "ready" as CleanupModuleStatus,
     }));
     await service.from("cleanup_run_modules").insert(moduleRows as any);
 

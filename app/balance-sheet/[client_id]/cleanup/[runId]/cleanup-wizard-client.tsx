@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2, RefreshCw, CheckCircle2, AlertCircle, XCircle,
   ArrowRight, Upload, Shield, FileText, Play, Lock,
   Building2, Wallet, FileSearch, Receipt, Coins,
-  Users as UsersIcon, Calculator, HelpCircle,
+  Users as UsersIcon, Calculator, HelpCircle, X,
 } from "lucide-react";
-import { MODULE_LABELS, type CleanupModule } from "@/lib/cleanup-system/types";
+import { MODULE_LABELS, MODULE_ORDER, type CleanupModule } from "@/lib/cleanup-system/types";
 import { ProposedEntryRow } from "./proposed-entry-row";
 
 type WizardStep = "diagnose" | "modules" | "review" | "qa" | "deliver";
@@ -83,7 +83,7 @@ const MODULE_META: Record<CleanupModule, { icon: any; description: string; posts
 /** Plain-English label for the raw status enums coming back from the DB */
 function moduleStatusLabel(status: string): string {
   switch (status) {
-    case "locked": return "Locked — finish earlier modules first";
+    case "locked": return "Ready to discover";
     case "ready": return "Ready to discover";
     case "discovering": return "Discovering issues…";
     case "reviewing": return "Awaiting your review";
@@ -109,12 +109,41 @@ function formatMoney(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
+/** Read one file into CSV text. Excel (.xlsx/.xls) is converted via SheetJS
+ *  (lazy-imported so it only ships to the client when actually needed). */
+async function fileToCsv(file: File): Promise<string> {
+  if (/\.(xlsx|xls)$/i.test(file.name)) {
+    const XLSX = await import("xlsx");
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const first = wb.SheetNames[0];
+    return first ? XLSX.utils.sheet_to_csv(wb.Sheets[first]) : "";
+  }
+  return file.text();
+}
+
+/** Merge several CSV blobs into one. Keeps the first file's header and drops
+ *  a duplicate header row from each subsequent file so the matcher sees one
+ *  clean table. Files with a different header are appended verbatim. */
+function mergeCsv(texts: string[]): string {
+  const blobs = texts.map((t) => t.trim()).filter(Boolean);
+  if (blobs.length <= 1) return blobs[0] || "";
+  const header = blobs[0].split(/\r?\n/)[0]?.trim();
+  const out: string[] = blobs[0].split(/\r?\n/);
+  for (let i = 1; i < blobs.length; i++) {
+    const lines = blobs[i].split(/\r?\n/);
+    const skipHeader = lines[0]?.trim() === header ? 1 : 0;
+    out.push(...lines.slice(skipHeader));
+  }
+  return out.join("\n");
+}
+
 /**
- * Attach-a-CSV control. Primary affordance is attaching a file (drop or
- * click-to-browse); the textarea below stays as a paste fallback so power
- * users can still drop raw rows in. Reading happens client-side via
- * FileReader, so the downstream import flow (which posts csv_text) is
- * unchanged — we just populate the same string state.
+ * Attach-CSV/Excel control. Primary affordance is attaching files (drop or
+ * click-to-browse) — multiple .csv/.xlsx/.xls at once. Each file is parsed
+ * client-side and merged into the single csv_text string the parent already
+ * posts, so the downstream import flow is unchanged. A paste textarea remains
+ * as a fallback when no file has been attached.
  */
 function CsvAttach({
   value,
@@ -128,11 +157,36 @@ function CsvAttach({
   rows?: number;
 }) {
   const [hover, setHover] = useState(false);
+  const [attached, setAttached] = useState<{ name: string; text: string }[]>([]);
+  const attachedRef = useRef(attached);
+  attachedRef.current = attached;
 
-  function handleFile(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => onChange(String(reader.result || ""));
-    reader.readAsText(file);
+  // If the parent clears value externally (e.g. after a successful import),
+  // drop the attached-file chips so the control resets too.
+  useEffect(() => {
+    if (!value) setAttached([]);
+  }, [value]);
+
+  async function handleFiles(list: FileList | File[] | null) {
+    const arr = Array.from(list || []);
+    if (arr.length === 0) return;
+    const parsed = await Promise.all(
+      arr.map(async (f) => ({ name: f.name, text: await fileToCsv(f) }))
+    );
+    const next = [...attachedRef.current, ...parsed].filter((p) => p.text.trim());
+    setAttached(next);
+    onChange(mergeCsv(next.map((p) => p.text)));
+  }
+
+  function removeFile(idx: number) {
+    const next = attached.filter((_, i) => i !== idx);
+    setAttached(next);
+    onChange(mergeCsv(next.map((p) => p.text)));
+  }
+
+  function clearAll() {
+    setAttached([]);
+    onChange("");
   }
 
   const rowCount = useMemo(() => {
@@ -140,6 +194,8 @@ function CsvAttach({
     const lines = value.split(/\r?\n/).filter((l) => l.trim());
     return Math.max(0, lines.length - 1); // minus header
   }, [value]);
+
+  const hasFiles = attached.length > 0;
 
   return (
     <div className="space-y-2">
@@ -149,8 +205,7 @@ function CsvAttach({
         onDrop={(e) => {
           e.preventDefault();
           setHover(false);
-          const file = e.dataTransfer.files[0];
-          if (file) handleFile(file);
+          handleFiles(e.dataTransfer.files);
         }}
         className={`rounded-xl border-2 border-dashed transition-colors ${
           hover
@@ -170,40 +225,71 @@ function CsvAttach({
             <div className="flex-1 min-w-0 text-xs font-semibold">
               {value ? (
                 <span className="text-emerald-800">
-                  Attached · {rowCount} row{rowCount === 1 ? "" : "s"}
+                  {hasFiles
+                    ? `${attached.length} file${attached.length === 1 ? "" : "s"} attached`
+                    : "Pasted"} · {rowCount} row{rowCount === 1 ? "" : "s"}
                 </span>
               ) : (
-                <span className="text-navy">Attach a .csv file — drop here or click to browse</span>
+                <span className="text-navy">
+                  Attach .csv or Excel files — drop here or click to browse (multiple OK)
+                </span>
               )}
             </div>
             <input
               type="file"
-              accept=".csv,text/csv,text/plain"
+              multiple
+              accept=".csv,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
               className="hidden"
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFile(file);
+                handleFiles(e.target.files);
+                e.target.value = ""; // allow re-selecting the same file
               }}
             />
           </div>
         </label>
       </div>
 
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        rows={rows}
-        className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2 focus:border-teal focus:ring-1 focus:ring-teal/30 outline-none"
-      />
+      {/* Attached-file chips */}
+      {hasFiles && (
+        <div className="flex flex-wrap gap-1.5">
+          {attached.map((f, i) => (
+            <span
+              key={`${f.name}-${i}`}
+              className="inline-flex items-center gap-1 text-[11px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md pl-2 pr-1 py-0.5"
+            >
+              <FileText size={11} className="flex-shrink-0" />
+              <span className="truncate max-w-[160px]">{f.name}</span>
+              <button
+                type="button"
+                onClick={() => removeFile(i)}
+                className="text-emerald-700 hover:text-red-600"
+                aria-label={`Remove ${f.name}`}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Paste fallback — only when no files are attached */}
+      {!hasFiles && (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          rows={rows}
+          className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2 focus:border-teal focus:ring-1 focus:ring-teal/30 outline-none"
+        />
+      )}
 
       {value && (
         <button
           type="button"
-          onClick={() => onChange("")}
+          onClick={clearAll}
           className="text-[11px] text-ink-light hover:text-red-600"
         >
-          Clear
+          Clear all
         </button>
       )}
     </div>
@@ -682,7 +768,7 @@ export function CleanupWizardClient({
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
               <h3 className="font-bold text-navy mb-1 flex items-center gap-2">
-                <Upload size={14} /> Import CSVs (optional)
+                <Upload size={14} /> Import CSV / Excel (optional)
               </h3>
               <p className="text-xs text-ink-light mb-3">
                 Attach exports from Stripe, the bank, or a CRM to give the matcher more to work with. Skip this if you don't have one handy.
@@ -739,11 +825,21 @@ export function CleanupWizardClient({
           </div>
 
           <div className="space-y-2 mt-4">
-            {(status?.modules || []).map((m: any) => {
+            {(status?.modules || [])
+              // Only show modules still in the workflow (drops retired ones
+              // like OBE for older runs) and order them per MODULE_ORDER.
+              .filter((m: any) => MODULE_ORDER.includes(m.module))
+              .sort(
+                (a: any, b: any) =>
+                  MODULE_ORDER.indexOf(a.module) - MODULE_ORDER.indexOf(b.module)
+              )
+              .map((m: any) => {
               const meta = MODULE_META[m.module as CleanupModule];
               const ModIcon = meta?.icon || ArrowRight;
-              const isLocked = m.status === "locked";
-              const isReady = m.status === "ready";
+              // Modules are ungated: any can be run individually, in any order.
+              // A legacy "locked" row (from a pre-ungate run) is treated as ready.
+              const isLocked = false;
+              const isReady = m.status === "ready" || m.status === "locked";
               const isReviewing = m.status === "reviewing";
               const isComplete = m.status === "complete";
               const inFlight = ["discovering", "executing"].includes(m.status);
