@@ -44,10 +44,10 @@ export function PortalErrorState({
         </pre>
       )}
       <a
-        href="mailto:hello@ironbooks.app"
+        href="mailto:admin@ironbooks.com"
         className="mt-4 inline-flex items-center gap-1.5 text-xs text-teal-dark hover:underline"
       >
-        <Mail size={12} /> Contact your bookkeeper
+        <Mail size={12} /> Email admin@ironbooks.com
       </a>
     </div>
   );
