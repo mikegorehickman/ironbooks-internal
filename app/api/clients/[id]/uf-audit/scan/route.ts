@@ -109,7 +109,19 @@ export async function POST(
         matched_deposit_amount: p.matched_deposit_amount,
         matched_deposit_bank_account: p.matched_deposit_bank_account,
         match_confidence: p.classification === "matched" ? 1.0 : null,
-        resolution: p.classification === "matched" ? "skipped" : "pending",
+        payment_ref_num: p.payment_ref_num,
+        suspected_duplicate: p.suspected_duplicate,
+        duplicate_of_payment_id: p.duplicate_of_payment_id,
+        duplicate_reason: p.duplicate_reason,
+        // Auto-recommend void_duplicate for suspected duplicates; everything
+        // else orphan → pending; matched → skipped (no action).
+        resolution:
+          p.classification === "matched"
+            ? "skipped"
+            : p.suspected_duplicate
+            ? "void_duplicate"
+            : "pending",
+        resolution_notes: p.suspected_duplicate ? p.duplicate_reason : null,
       }));
       const BATCH = 200;
       for (let i = 0; i < itemRows.length; i += BATCH) {

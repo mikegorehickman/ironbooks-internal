@@ -57,6 +57,7 @@ export interface UFAuditPayment {
   customer_qbo_id: string | null;
   customer_name: string | null;
   payment_memo: string;
+  payment_ref_num: string | null;     // check # / reference (PaymentRefNum)
   applied_invoice_ids: string[];
 
   classification: "matched" | "orphan";
@@ -64,6 +65,12 @@ export interface UFAuditPayment {
   matched_deposit_date: string | null;
   matched_deposit_amount: number | null;
   matched_deposit_bank_account: string | null;
+
+  // Duplicate-detection metadata (set by detectDuplicates). When
+  // suspected_duplicate is true, the scanner auto-recommends void_duplicate.
+  suspected_duplicate: boolean;
+  duplicate_of_payment_id: string | null;
+  duplicate_reason: string | null;
 }
 
 export interface UfAuditScanResult {
@@ -230,12 +237,16 @@ export async function scanUfAudit(
       customer_qbo_id: row.CustomerRef?.value || null,
       customer_name: row.CustomerRef?.name || null,
       payment_memo: String(row.PrivateNote || ""),
+      payment_ref_num: row.PaymentRefNum ? String(row.PaymentRefNum) : null,
       applied_invoice_ids: appliedInvoiceIds,
       classification: isMatched ? "matched" : "orphan",
       matched_deposit_id: depositLink ? String(depositLink.TxnId) : null,
       matched_deposit_date: deposit?.TxnDate || null,
       matched_deposit_amount: deposit ? Number(deposit.TotalAmt || 0) : null,
       matched_deposit_bank_account: depositBankAccount,
+      suspected_duplicate: false,
+      duplicate_of_payment_id: null,
+      duplicate_reason: null,
     };
   }
 
@@ -251,6 +262,10 @@ export async function scanUfAudit(
     totalUfBalance += p.payment_amount;
     if (p.classification === "orphan") totalOrphanAmount += p.payment_amount;
   }
+
+  // Flag suspected duplicates (mutates payments in place). Only orphans get
+  // a void recommendation — see detectDuplicates.
+  detectDuplicates(payments);
 
   const matchedCount = payments.filter((p) => p.classification === "matched").length;
   const orphanCount = payments.length - matchedCount;
@@ -344,4 +359,144 @@ export function findOwnerDrawAccount(allAccounts: QBOAccount[]): QBOAccount | nu
     if (hit) return hit;
   }
   return null;
+}
+
+// ─── Duplicate detection ────────────────────────────────────────────────
+
+function normToken(s: string | null): string {
+  return (s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const prev = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(
+        prev[j] + 1,
+        prev[j - 1] + 1,
+        diag + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+
+function daysApart(d1: string, d2: string): number {
+  const t1 = new Date(d1 + "T00:00:00Z").getTime();
+  const t2 = new Date(d2 + "T00:00:00Z").getTime();
+  if (isNaN(t1) || isNaN(t2)) return Infinity;
+  return Math.abs(t1 - t2) / 86_400_000;
+}
+
+/**
+ * Detect suspected-duplicate UF payments and mark the duplicate copies with
+ * suspected_duplicate / duplicate_of_payment_id / duplicate_reason (mutates
+ * in place). The scan route turns these into an auto-recommended
+ * void_duplicate resolution.
+ *
+ * Two signals (both require an exact dollar-amount match):
+ *   1. Same check/reference number (PaymentRefNum) — strongest. Catches the
+ *      "same check entered twice" case even when the customer name is spelled
+ *      differently (e.g. "Charlson" vs "Charson").
+ *   2. Same (fuzzy) customer + amount within 14 days — catches a payment
+ *      keyed in twice in quick succession with no check #.
+ *
+ * Within a duplicate cluster the "original" we KEEP is: a matched (already
+ * deposited) copy if one exists, otherwise the earliest-dated copy. Only
+ * ORPHAN copies get flagged — we never auto-recommend voiding a payment that
+ * was already deposited.
+ */
+export function detectDuplicates(payments: UFAuditPayment[]): void {
+  const byAmount = new Map<number, UFAuditPayment[]>();
+  for (const p of payments) {
+    const cents = Math.round(p.payment_amount * 100);
+    if (cents <= 0) continue;
+    if (!byAmount.has(cents)) byAmount.set(cents, []);
+    byAmount.get(cents)!.push(p);
+  }
+
+  for (const group of byAmount.values()) {
+    if (group.length < 2) continue;
+
+    // Union-find over the same-amount group.
+    const parent = group.map((_, i) => i);
+    const find = (x: number): number => {
+      while (parent[x] !== x) {
+        parent[x] = parent[parent[x]];
+        x = parent[x];
+      }
+      return x;
+    };
+    const union = (a: number, b: number) => {
+      parent[find(a)] = find(b);
+    };
+
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const a = group[i];
+        const b = group[j];
+        const ra = normToken(a.payment_ref_num);
+        const rb = normToken(b.payment_ref_num);
+        const refMatch = !!ra && !!rb && ra === rb;
+
+        const na = normToken(a.customer_name);
+        const nb = normToken(b.customer_name);
+        const nameMatch =
+          !!na &&
+          !!nb &&
+          (na === nb ||
+            (Math.min(na.length, nb.length) >= 4 && levenshtein(na, nb) <= 2));
+
+        if (refMatch) {
+          union(i, j); // same check # + amount: strong, ignore date/name
+        } else if (nameMatch && daysApart(a.payment_date, b.payment_date) <= 14) {
+          union(i, j);
+        }
+      }
+    }
+
+    const clusters = new Map<number, number[]>();
+    for (let i = 0; i < group.length; i++) {
+      const r = find(i);
+      if (!clusters.has(r)) clusters.set(r, []);
+      clusters.get(r)!.push(i);
+    }
+
+    for (const idxs of clusters.values()) {
+      if (idxs.length < 2) continue;
+      const members = idxs.map((i) => group[i]);
+      // Pick the copy to KEEP: a deposited one if present, else earliest date.
+      let original =
+        members.find((m) => m.classification === "matched") ||
+        members.slice().sort((a, b) => a.payment_date.localeCompare(b.payment_date))[0];
+
+      for (const m of members) {
+        if (m === original) continue;
+        if (m.classification !== "orphan") continue; // only flag orphans for voiding
+        m.suspected_duplicate = true;
+        m.duplicate_of_payment_id = original.qbo_payment_id;
+        const ra = normToken(m.payment_ref_num);
+        const rb = normToken(original.payment_ref_num);
+        const depositedNote =
+          original.classification === "matched" ? " (already deposited)" : "";
+        if (ra && rb && ra === rb) {
+          m.duplicate_reason =
+            `Same check/ref #${m.payment_ref_num} + amount $${m.payment_amount.toFixed(2)} ` +
+            `as payment ${original.qbo_payment_id}${depositedNote}`;
+        } else {
+          m.duplicate_reason =
+            `Same customer "${m.customer_name || "(none)"}" + amount $${m.payment_amount.toFixed(2)} ` +
+            `as payment ${original.qbo_payment_id}${depositedNote}`;
+        }
+      }
+    }
+  }
 }

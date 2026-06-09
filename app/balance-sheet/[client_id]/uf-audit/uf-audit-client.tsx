@@ -40,13 +40,19 @@ interface Item {
   customer_qbo_id: string | null;
   applied_invoice_ids: string[];
   payment_memo: string;
+  payment_ref_num: string | null;
   classification: "matched" | "orphan";
   matched_deposit_id: string | null;
   matched_deposit_date: string | null;
   matched_deposit_bank_account: string | null;
+  suspected_duplicate: boolean;
+  duplicate_of_payment_id: string | null;
+  duplicate_reason: string | null;
   resolution: string;
   resolution_target_account_id: string | null;
   resolution_target_account_name: string | null;
+  deposit_bank_account_id: string | null;
+  deposit_bank_account_name: string | null;
   resolution_notes: string | null;
   resolved_at: string | null;
   execution_error: string | null;
@@ -63,6 +69,8 @@ const RESOLUTION_LABELS: Record<string, { label: string; color: string; descript
   owner_draw: { label: "Owner Draw", color: "bg-purple-100 text-purple-800", description: "Cash kept by owner — JE: Dr Owner Draw, Cr UF" },
   write_off: { label: "Write-off", color: "bg-red-100 text-red-800", description: "Not a real payment — JE: Dr Bad Debt (or similar), Cr UF" },
   duplicate_recategorize: { label: "Duplicate", color: "bg-blue-100 text-blue-800", description: "Real deposit exists elsewhere — bookkeeper finds + re-categorizes in QBO" },
+  void_duplicate: { label: "Void duplicate", color: "bg-rose-100 text-rose-800", description: "Confirmed duplicate — VOIDS the duplicate Payment in QBO (removes the double-counted cash)" },
+  create_deposit: { label: "Create deposit", color: "bg-teal-100 text-teal-800", description: "Real money still in UF — posts a Bank Deposit to sweep UF → the chosen bank account" },
   ask_client: { label: "Ask Client", color: "bg-orange-100 text-orange-800", description: "Queue for confirmation email — no auto-write" },
   manual_investigation: { label: "Investigate", color: "bg-gray-100 text-gray-700", description: "Flag, do nothing automated" },
   executed: { label: "Done ✓", color: "bg-emerald-100 text-emerald-700", description: "Posted to QBO" },
@@ -161,6 +169,8 @@ export function UfAuditClient({
     resolution: string;
     target_account_id?: string;
     target_account_name?: string;
+    deposit_bank_account_id?: string;
+    deposit_bank_account_name?: string;
   }) {
     if (!scan) return;
     try {
@@ -187,6 +197,8 @@ export function UfAuditClient({
     );
     const ownerDrawCount = resolved.filter((i) => i.resolution === "owner_draw").length;
     const writeOffCount = resolved.filter((i) => i.resolution === "write_off").length;
+    const voidCount = resolved.filter((i) => i.resolution === "void_duplicate").length;
+    const depositCount = resolved.filter((i) => i.resolution === "create_deposit").length;
     const noQboCount = resolved.filter((i) =>
       ["duplicate_recategorize", "ask_client", "manual_investigation"].includes(i.resolution)
     ).length;
@@ -204,6 +216,12 @@ export function UfAuditClient({
             : "") +
           (writeOffCount > 0
             ? `  • ${writeOffCount} Write-off JE${writeOffCount === 1 ? "" : "s"}\n`
+            : "") +
+          (voidCount > 0
+            ? `  • ${voidCount} duplicate${voidCount === 1 ? "" : "s"} VOIDED in QBO (removes double-counted cash)\n`
+            : "") +
+          (depositCount > 0
+            ? `  • ${depositCount} payment${depositCount === 1 ? "" : "s"} swept into the bank via Bank Deposit\n`
             : "") +
           (noQboCount > 0
             ? `  • ${noQboCount} non-QBO resolution${noQboCount === 1 ? "" : "s"} (just marked done)\n`
@@ -676,8 +694,13 @@ function CustomerOrphanGroup({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [targetAccountId, setTargetAccountId] = useState<string>("");
+  const [bankAccountId, setBankAccountId] = useState<string>("");
   const [pickedResolution, setPickedResolution] = useState<string>("");
   const total = group.items.reduce((s, i) => s + i.payment_amount, 0);
+  const dupCount = group.items.filter((i) => i.suspected_duplicate).length;
+
+  // Bank-type accounts for the create_deposit target picker
+  const bankAccounts = accounts.filter((a) => /bank/i.test(a.accountType));
 
   // Default target suggestions per resolution
   const targetSuggestions: Record<string, string[]> = {
@@ -700,7 +723,19 @@ function CustomerOrphanGroup({
   }, [pickedResolution]);
 
   const needsTarget = pickedResolution === "owner_draw" || pickedResolution === "write_off";
+  const needsBank = pickedResolution === "create_deposit";
   const targetAccount = accounts.find((a) => a.id === targetAccountId);
+  const bankAccount = bankAccounts.find((a) => a.id === bankAccountId);
+
+  // Auto-pick the first/operating bank when create_deposit is selected
+  useEffect(() => {
+    if (pickedResolution !== "create_deposit" || bankAccountId) return;
+    const operating =
+      bankAccounts.find((a) => /(checking|operating|current)/i.test(a.name)) ||
+      bankAccounts[0];
+    if (operating) setBankAccountId(operating.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickedResolution]);
 
   const currentResolution = group.items.every((i) => i.resolution === group.items[0].resolution)
     ? group.items[0].resolution
@@ -714,6 +749,8 @@ function CustomerOrphanGroup({
       resolution: pickedResolution,
       target_account_id: needsTarget ? targetAccountId : undefined,
       target_account_name: needsTarget && targetAccount ? targetAccount.name : undefined,
+      deposit_bank_account_id: needsBank ? bankAccountId : undefined,
+      deposit_bank_account_name: needsBank && bankAccount ? bankAccount.name : undefined,
     });
     setPickedResolution("");
   }
@@ -734,6 +771,12 @@ function CustomerOrphanGroup({
             <span className="text-xs text-ink-slate">
               {group.items.length} payment{group.items.length === 1 ? "" : "s"}
             </span>
+            {dupCount > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded font-bold bg-rose-100 text-rose-800">
+                <Copy size={10} />
+                {dupCount} suspected dup{dupCount === 1 ? "" : "s"}
+              </span>
+            )}
             {currentResolution !== "pending" && currentResolution !== "(mixed)" && (
               <ResolutionBadge resolution={currentResolution} />
             )}
@@ -764,8 +807,21 @@ function CustomerOrphanGroup({
             <tbody>
               {group.items.map((i) => (
                 <tr key={i.id} className="border-t border-gray-100">
-                  <td className="px-3 py-1.5 text-ink-slate whitespace-nowrap">{i.payment_date}</td>
-                  <td className="px-3 py-1.5 text-xs text-ink-slate truncate max-w-sm">{i.payment_memo}</td>
+                  <td className="px-3 py-1.5 text-ink-slate whitespace-nowrap">
+                    {i.payment_date}
+                    {i.payment_ref_num && (
+                      <span className="ml-1 text-[10px] text-ink-light">#{i.payment_ref_num}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-xs text-ink-slate truncate max-w-sm">
+                    {i.payment_memo}
+                    {i.suspected_duplicate && i.duplicate_reason && (
+                      <div className="text-[10px] text-rose-700 font-semibold mt-0.5 flex items-center gap-1">
+                        <Copy size={9} />
+                        {i.duplicate_reason}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-1.5 text-right font-mono">${formatMoney(i.payment_amount)}</td>
                   <td className="px-3 py-1.5">
                     <ResolutionBadge resolution={i.resolution} />
@@ -789,6 +845,8 @@ function CustomerOrphanGroup({
             className="px-2 py-1 rounded border border-gray-200 text-xs"
           >
             <option value="">— pick a resolution —</option>
+            <option value="create_deposit">Create bank deposit (sweep UF → bank)</option>
+            <option value="void_duplicate">Void duplicate (remove double-count)</option>
             <option value="owner_draw">Owner Draw (JE)</option>
             <option value="write_off">Write-off (JE)</option>
             <option value="duplicate_recategorize">Duplicate — handle in QBO</option>
@@ -810,9 +868,23 @@ function CustomerOrphanGroup({
               ))}
             </select>
           )}
+          {needsBank && (
+            <select
+              value={bankAccountId}
+              onChange={(e) => setBankAccountId(e.target.value)}
+              className="px-2 py-1 rounded border border-gray-200 text-xs max-w-[260px]"
+            >
+              <option value="">— deposit into which bank? —</option>
+              {bankAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             onClick={apply}
-            disabled={!pickedResolution || (needsTarget && !targetAccountId)}
+            disabled={!pickedResolution || (needsTarget && !targetAccountId) || (needsBank && !bankAccountId)}
             className="inline-flex items-center gap-1 px-3 py-1 rounded bg-teal hover:bg-teal-dark text-white text-xs font-bold disabled:opacity-50"
           >
             <CheckCircle2 size={11} />

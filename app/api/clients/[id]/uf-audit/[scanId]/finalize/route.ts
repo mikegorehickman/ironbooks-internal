@@ -1,6 +1,13 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
-import { createJournalEntry, fetchAllAccounts, getValidToken, qboErrorResponse } from "@/lib/qbo";
+import {
+  createDeposit,
+  createJournalEntry,
+  fetchAllAccounts,
+  getValidToken,
+  qboErrorResponse,
+  voidPayment,
+} from "@/lib/qbo";
 import { findUndepositedFundsAccountId } from "@/lib/qbo-balance-sheet";
 
 export const dynamic = "force-dynamic";
@@ -110,15 +117,28 @@ export async function POST(
     "manual_investigation",
   ]);
 
-  // For QBO-writing resolutions (owner_draw, write_off), group by
+  // For JE-writing resolutions (owner_draw, write_off), group by
   // (resolution, target_account_id, customer_qbo_id) so each group
-  // gets one balanced JE.
+  // gets one balanced JE. void_duplicate + create_deposit are NOT JEs —
+  // they get their own execution paths below.
+  const JE_RESOLUTIONS = new Set(["owner_draw", "write_off"]);
   type GroupKey = string;
   const groups = new Map<GroupKey, any[]>();
   const noTargetItems: any[] = [];
+  const voidItems: any[] = [];
+  const depositItems: any[] = [];
 
   for (const item of queue) {
     if (NON_QBO_RESOLUTIONS.has(item.resolution)) continue;
+    if (item.resolution === "void_duplicate") {
+      voidItems.push(item);
+      continue;
+    }
+    if (item.resolution === "create_deposit") {
+      depositItems.push(item);
+      continue;
+    }
+    if (!JE_RESOLUTIONS.has(item.resolution)) continue;
     if (!item.resolution_target_account_id) {
       noTargetItems.push(item);
       continue;
@@ -247,6 +267,115 @@ export async function POST(
         failed++;
       }
       results.push({ group: key, status: "failed", error: msg, items: items.length });
+    }
+  }
+
+  // 4) Void duplicates — one QBO void per payment. Voiding a Receive-Payment
+  //    reverses Dr UF / Cr A/R (re-opening the invoice the real payment still
+  //    covers); voiding a SalesReceipt zeroes the receipt. Each has its own
+  //    try/catch so one failure doesn't poison the batch.
+  for (const item of voidItems) {
+    try {
+      const txnType =
+        item.qbo_payment_txn_type === "SalesReceipt" ? "SalesReceipt" : "Payment";
+      const voided = await voidPayment(
+        (client as any).qbo_realm_id,
+        accessToken,
+        String(item.qbo_payment_id),
+        txnType
+      );
+      await service
+        .from("uf_audit_items" as any)
+        .update({
+          resolution: "executed",
+          resolved_at: new Date().toISOString(),
+          resolution_notes:
+            (item.resolution_notes ? item.resolution_notes + " — " : "") +
+            `Voided ${txnType} ${voided.Id} in QBO`,
+        } as any)
+        .eq("id", item.id);
+      executed++;
+      results.push({ id: item.id, status: "ok", type: "void", payment_id: item.qbo_payment_id });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      await service
+        .from("uf_audit_items" as any)
+        .update({ resolution: "failed", execution_error: msg } as any)
+        .eq("id", item.id);
+      failed++;
+      results.push({ id: item.id, status: "failed", type: "void", error: msg });
+    }
+  }
+
+  // 5) Create bank deposits — sweep real UF money into the chosen bank.
+  //    Group by (bank account, payment date) so each deposit is dated to when
+  //    the money actually landed (clean bank reconciliation). One Deposit per
+  //    group, LinkedTxn-referencing every payment in it.
+  const depositGroups = new Map<string, any[]>();
+  for (const item of depositItems) {
+    if (!item.deposit_bank_account_id) {
+      await service
+        .from("uf_audit_items" as any)
+        .update({
+          resolution: "failed",
+          execution_error: "No bank account selected for the deposit — pick one before finalizing.",
+        } as any)
+        .eq("id", item.id);
+      failed++;
+      results.push({ id: item.id, status: "failed", type: "deposit", error: "missing bank account" });
+      continue;
+    }
+    const key = [item.deposit_bank_account_id, item.payment_date].join("|");
+    if (!depositGroups.has(key)) depositGroups.set(key, []);
+    depositGroups.get(key)!.push(item);
+  }
+
+  for (const [key, items] of depositGroups) {
+    const sample = items[0];
+    const bank = accountById.get(sample.deposit_bank_account_id);
+    const total =
+      Math.round(items.reduce((s, it) => s + Number(it.payment_amount || 0), 0) * 100) / 100;
+    try {
+      const deposit = await createDeposit((client as any).qbo_realm_id, accessToken, {
+        bankAccountId: String(sample.deposit_bank_account_id),
+        bankAccountName: bank?.Name || sample.deposit_bank_account_name || undefined,
+        txnDate: String(sample.payment_date),
+        privateNote: `Ironbooks UF Audit (by ${bookkeeperName}) — sweep ${items.length} UF payment${items.length === 1 ? "" : "s"} → ${bank?.Name || "bank"}`,
+        lines: items.map((it: any) => ({
+          txnId: String(it.qbo_payment_id),
+          txnType: it.qbo_payment_txn_type === "SalesReceipt" ? "SalesReceipt" : "Payment",
+          amount: Math.round(Number(it.payment_amount) * 100) / 100,
+        })),
+      });
+      for (const it of items) {
+        await service
+          .from("uf_audit_items" as any)
+          .update({
+            resolution: "executed",
+            resolution_deposit_id: deposit.Id,
+            resolved_at: new Date().toISOString(),
+          } as any)
+          .eq("id", it.id);
+        executed++;
+      }
+      results.push({
+        group: key,
+        deposit_id: deposit.Id,
+        status: "ok",
+        type: "deposit",
+        items: items.length,
+        total,
+      });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      for (const it of items) {
+        await service
+          .from("uf_audit_items" as any)
+          .update({ resolution: "failed", execution_error: msg } as any)
+          .eq("id", it.id);
+        failed++;
+      }
+      results.push({ group: key, status: "failed", type: "deposit", error: msg, items: items.length });
     }
   }
 

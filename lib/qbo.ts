@@ -1626,3 +1626,123 @@ export async function fetchCompanyInfo(
   );
   return data.CompanyInfo;
 }
+
+// ============== UF AUDIT — void duplicates + sweep UF → bank ==============
+
+/**
+ * Void a Payment or SalesReceipt in QBO (operation=void).
+ *
+ * Used by the UF Audit "void_duplicate" resolution: when a UF payment is a
+ * confirmed duplicate of another payment (same check# + amount + customer),
+ * voiding zeroes it out so the double-counted cash is removed.
+ *
+ * We VOID (not delete) to preserve the audit trail — the transaction stays
+ * in QBO at $0 with a "Voided" stamp, which is what an auditor expects.
+ *
+ * Voiding a Receive-Payment reverses its Dr UF / Cr A/R, which re-opens the
+ * invoice it was applied to (A/R goes back up). That is the CORRECT behavior
+ * for a true duplicate — the real payment (the kept copy) still covers the
+ * invoice. Only call this when you're confident it's a duplicate.
+ *
+ * Needs the current SyncToken (optimistic concurrency) — we fetch it first.
+ */
+export async function voidPayment(
+  realmId: string,
+  accessToken: string,
+  paymentId: string,
+  txnType: "Payment" | "SalesReceipt" = "Payment"
+): Promise<{ Id: string; SyncToken: string; PrivateNote?: string }> {
+  const entity = txnType; // "Payment" | "SalesReceipt"
+  const resource = txnType === "SalesReceipt" ? "salesreceipt" : "payment";
+
+  // 1. Fetch current object for SyncToken
+  const query = encodeURIComponent(
+    `SELECT Id, SyncToken FROM ${entity} WHERE Id = '${paymentId}' MAXRESULTS 1`
+  );
+  const fetchData: any = await qboRequest(
+    realmId,
+    accessToken,
+    `/query?query=${query}`,
+    { method: "GET" }
+  );
+  const existing = fetchData?.QueryResponse?.[entity]?.[0];
+  if (!existing) {
+    throw new Error(`${entity} ${paymentId} not found in QBO (can't void)`);
+  }
+
+  // 2. POST operation=void with just Id + SyncToken
+  const data = await qboRequest<any>(
+    realmId,
+    accessToken,
+    `/${resource}?operation=void&minorversion=70`,
+    {
+      method: "POST",
+      body: JSON.stringify({ Id: paymentId, SyncToken: existing.SyncToken }),
+    }
+  );
+  const out = data?.[entity] || data?.Payment || data?.SalesReceipt || {};
+  return { Id: String(out.Id || paymentId), SyncToken: String(out.SyncToken || ""), PrivateNote: out.PrivateNote };
+}
+
+export interface DepositLineInput {
+  /** The Payment / SalesReceipt sitting in UF to sweep into the bank. */
+  txnId: string;
+  txnType: "Payment" | "SalesReceipt";
+  amount: number;
+}
+
+export interface CreatedDeposit {
+  Id: string;
+  TxnDate: string;
+  TotalAmt: number;
+  PrivateNote?: string;
+}
+
+/**
+ * Post a Bank Deposit that sweeps existing UF payments into a real bank
+ * account — the "clear via Bank Deposit" step that actually zeroes UF.
+ *
+ * Each line LinkedTxn-references a Payment/SalesReceipt that currently sits
+ * in Undeposited Funds. QBO moves those funds out of UF and into the account
+ * named by DepositToAccountRef (the chosen bank). This is the clean,
+ * QBO-native way to clear UF (vs a JE), and it shows up on the bank rec.
+ *
+ * The deposit's TxnDate should be the real deposit date (often back-dated to
+ * when the money actually hit the bank) so reconciliation lines up.
+ */
+export async function createDeposit(
+  realmId: string,
+  accessToken: string,
+  params: {
+    bankAccountId: string;
+    bankAccountName?: string;
+    txnDate: string; // YYYY-MM-DD
+    lines: DepositLineInput[];
+    privateNote?: string;
+  }
+): Promise<CreatedDeposit> {
+  if (!params.lines || params.lines.length === 0) {
+    throw new Error("createDeposit: at least one line (UF payment) is required");
+  }
+  const body: any = {
+    DepositToAccountRef: { value: params.bankAccountId, name: params.bankAccountName },
+    TxnDate: params.txnDate,
+    PrivateNote: params.privateNote || undefined,
+    Line: params.lines.map((l) => ({
+      Amount: Number(l.amount.toFixed(2)),
+      DetailType: "DepositLineDetail",
+      // LinkedTxn pulls the payment OUT of Undeposited Funds. No
+      // DepositLineDetail.AccountRef here — that's only for funds NOT already
+      // in UF (e.g. direct income). For a UF sweep we just link the payment.
+      LinkedTxn: [{ TxnId: l.txnId, TxnType: l.txnType }],
+    })),
+  };
+
+  const data = await qboRequest<{ Deposit: CreatedDeposit }>(
+    realmId,
+    accessToken,
+    "/deposit?minorversion=70",
+    { method: "POST", body: JSON.stringify(body) }
+  );
+  return data.Deposit;
+}

@@ -49,6 +49,8 @@ export async function POST(
     "owner_draw",
     "write_off",
     "duplicate_recategorize",
+    "void_duplicate",
+    "create_deposit",
     "ask_client",
     "manual_investigation",
     "pending",
@@ -67,6 +69,20 @@ export async function POST(
   const targetAccountName = body.target_account_name ? String(body.target_account_name) : null;
   const notes = body.notes ? String(body.notes) : null;
 
+  // create_deposit needs a target BANK account to sweep UF into.
+  const depositBankAccountId = body.deposit_bank_account_id
+    ? String(body.deposit_bank_account_id)
+    : null;
+  const depositBankAccountName = body.deposit_bank_account_name
+    ? String(body.deposit_bank_account_name)
+    : null;
+  if (resolution === "create_deposit" && !depositBankAccountId) {
+    return NextResponse.json(
+      { error: "create_deposit requires deposit_bank_account_id (the bank to sweep UF into)" },
+      { status: 400 }
+    );
+  }
+
   // Build the selector
   let q = service
     .from("uf_audit_items" as any)
@@ -74,6 +90,8 @@ export async function POST(
       resolution,
       resolution_target_account_id: targetAccountId,
       resolution_target_account_name: targetAccountName,
+      deposit_bank_account_id: depositBankAccountId,
+      deposit_bank_account_name: depositBankAccountName,
       resolution_notes: notes,
       resolved_by: user.id,
       resolved_at: new Date().toISOString(),
