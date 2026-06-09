@@ -50,7 +50,7 @@ const MODULE_META: Record<CleanupModule, { icon: any; description: string; posts
   },
   accounts_receivable: {
     icon: FileSearch,
-    description: "Finds duplicate invoices (optionally cross-checked against your CRM export). Voids duplicates in QBO on execute.",
+    description: "Connects to QuickBooks, reads open A/R + Undeposited Funds, and matches stuck payments to the right invoice — no upload needed. Also flags duplicate invoices. Posts ReceivePayment / voids on execute.",
     postsToQbo: true,
   },
   accounts_payable: {
@@ -843,6 +843,11 @@ export function CleanupWizardClient({
               const isReviewing = m.status === "reviewing";
               const isComplete = m.status === "complete";
               const inFlight = ["discovering", "executing"].includes(m.status);
+              // Modules whose discovery reads QBO directly (open A/R + UF) —
+              // labelled "Scan QuickBooks" so the bookkeeper knows no upload
+              // is needed, just a live read of QuickBooks.
+              const isQboScan =
+                m.module === "accounts_receivable" || m.module === "undeposited_funds";
 
               return (
                 <div key={m.module}>
@@ -907,7 +912,7 @@ export function CleanupWizardClient({
                       </div>
                     </div>
 
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
                       {isReady && (
                         <button
                           onClick={() => discoverModule(m.module)}
@@ -916,6 +921,8 @@ export function CleanupWizardClient({
                         >
                           {acting && activeModule === m.module ? (
                             <Loader2 size={12} className="animate-spin" />
+                          ) : isQboScan ? (
+                            <>Scan QuickBooks <ArrowRight size={12} /></>
                           ) : (
                             <>Discover <ArrowRight size={12} /></>
                           )}
@@ -931,6 +938,24 @@ export function CleanupWizardClient({
                           className="text-xs font-bold px-3 py-2 rounded-lg bg-amber-500 text-white hover:bg-amber-600 inline-flex items-center gap-1.5"
                         >
                           Review <ArrowRight size={12} />
+                        </button>
+                      )}
+                      {/* Re-scan path — discovery is idempotent (the matcher
+                          skips anything already staged), so the bookkeeper can
+                          safely re-pull QBO after a fix or new transactions
+                          land, even once the module is in review/complete. */}
+                      {(isReviewing || isComplete) && (
+                        <button
+                          onClick={() => discoverModule(m.module)}
+                          disabled={acting}
+                          className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-teal text-teal hover:bg-teal/5 disabled:opacity-50 inline-flex items-center gap-1.5"
+                          title={isQboScan ? "Re-read open A/R + Undeposited Funds from QuickBooks and re-match" : "Re-run discovery for this module"}
+                        >
+                          {acting && activeModule === m.module ? (
+                            <Loader2 size={11} className="animate-spin" />
+                          ) : (
+                            <>{isQboScan ? "Re-scan QuickBooks" : "Re-discover"} <RefreshCw size={10} /></>
+                          )}
                         </button>
                       )}
                       {/* Retry path for failed modules — without this the
