@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   Home, FileText, Scale, Wallet, Receipt, MessageSquare,
-  GraduationCap, Settings, FileCheck2,
+  GraduationCap, Settings, FileCheck2, Mail,
 } from "lucide-react";
 import { SignOutButton } from "./sign-out-button";
 import { ImpersonationBanner } from "./impersonation-banner";
@@ -76,6 +76,23 @@ export default async function PortalLayout({ children }: { children: React.React
   const { ctx } = ctxResult;
   const clientName = ctx.clientName;
 
+  // Unread bookkeeper→client messages drive the red badge on the
+  // Messages nav item — this is the client's notification spot.
+  // try/catch so the portal keeps working if migration 58 hasn't
+  // landed in this environment yet.
+  let unreadMessages = 0;
+  try {
+    const { count } = await (service as any)
+      .from("client_communications")
+      .select("id", { count: "exact", head: true })
+      .eq("client_link_id", ctx.clientLinkId)
+      .eq("direction", "to_client")
+      .is("read_at", null);
+    unreadMessages = count || 0;
+  } catch {
+    unreadMessages = 0;
+  }
+
   return (
     <div className="min-h-screen bg-[#FAFAF7]">
       {ctx.impersonating && (
@@ -101,6 +118,13 @@ export default async function PortalLayout({ children }: { children: React.React
             <NavLink href="/portal/whos-paying" icon={Wallet} label="Who owes you" />
             <NavLink href="/portal/whats-due" icon={Receipt} label="What you owe" />
             <NavLink href="/portal/cleanup-reports" icon={FileCheck2} label="Cleanup Reports" />
+            <NavLink
+              href="/portal/messages"
+              icon={Mail}
+              label="Messages"
+              badge={unreadMessages > 0 ? String(Math.min(unreadMessages, 99)) : undefined}
+              badgeTone="alert"
+            />
             <NavLink href="/portal/ask-ai" icon={MessageSquare} label="Ask the AI" badge="NEW" />
             <NavLink href="/portal/learn" icon={GraduationCap} label="Learn" />
           </nav>
@@ -132,9 +156,11 @@ export default async function PortalLayout({ children }: { children: React.React
 }
 
 function NavLink({
-  href, icon: Icon, label, badge,
+  href, icon: Icon, label, badge, badgeTone = "accent",
 }: {
   href: string; icon: any; label: string; badge?: string;
+  /** accent = teal pill ("NEW"); alert = red unread-count pill */
+  badgeTone?: "accent" | "alert";
 }) {
   return (
     <Link
@@ -144,7 +170,11 @@ function NavLink({
       <Icon size={16} />
       <span className="flex-1">{label}</span>
       {badge && (
-        <span className="text-[9px] font-bold bg-teal text-white px-1.5 py-0.5 rounded">
+        <span
+          className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded ${
+            badgeTone === "alert" ? "bg-red-500 rounded-full min-w-[18px] text-center" : "bg-teal"
+          }`}
+        >
           {badge}
         </span>
       )}

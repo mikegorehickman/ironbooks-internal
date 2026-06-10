@@ -6,6 +6,7 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2, ArrowRight, Sparkles, Clock, Pause } from "lucide-react";
 import { ClientFlagsWidget } from "./client-flags-widget";
 import { ReclassRequestsWidget, type PendingReclassRequest } from "./reclass-requests-widget";
+import { ClientInboxWidget, type InboundCommRow } from "./client-inbox-widget";
 import { MonthlyBsCheckButton } from "./monthly-bs-check";
 
 export const dynamic = "force-dynamic";
@@ -162,11 +163,65 @@ export default async function TodayPage() {
     pendingReclassRequests = [];
   }
 
-  // If nothing's enabled AND no flags AND no reclass requests, show the empty state
+  // ─── Inbound client messages + statement uploads ───
+  // Unread from_client rows in client_communications. Same scoping rules
+  // as flags: seniors see everything, bookkeepers see assigned clients.
+  // Rows clear when the bookkeeper opens /clients/[id]/messages (which
+  // marks them read). try/catch so /today survives pre-migration envs.
+  let inboundComms: InboundCommRow[] = [];
+  try {
+    const { data: commRows } = await service
+      .from("client_communications" as any)
+      .select("id, client_link_id, sender_user_id, body, attachments, created_at")
+      .eq("direction", "from_client")
+      .is("read_at", null)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    let raw = (commRows as any[]) || [];
+
+    if (!isSenior && raw.length > 0) {
+      const { data: ownedClients } = await service
+        .from("client_links")
+        .select("id")
+        .eq("assigned_bookkeeper_id", user.id);
+      const ownedIds = new Set(((ownedClients as any[]) || []).map((c) => c.id));
+      raw = raw.filter((r) => ownedIds.has(r.client_link_id));
+    }
+
+    if (raw.length > 0) {
+      const commClientIds = Array.from(new Set(raw.map((r) => r.client_link_id)));
+      const commSenderIds = Array.from(new Set(raw.map((r) => r.sender_user_id).filter(Boolean)));
+      const [{ data: cn }, { data: sn }] = await Promise.all([
+        service.from("client_links").select("id, client_name").in("id", commClientIds),
+        commSenderIds.length > 0
+          ? service.from("users").select("id, full_name, email").in("id", commSenderIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+      const clientNameById = new Map(((cn as any[]) || []).map((c) => [c.id, c.client_name]));
+      const senderById = new Map(
+        ((sn as any[]) || []).map((u) => [u.id, u.full_name || u.email || ""])
+      );
+      inboundComms = raw.map((r) => ({
+        id: r.id,
+        client_link_id: r.client_link_id,
+        client_name: clientNameById.get(r.client_link_id) || "(unknown client)",
+        sender_name: senderById.get(r.sender_user_id) || "",
+        body: r.body,
+        attachments: Array.isArray(r.attachments) ? r.attachments : [],
+        created_at: r.created_at,
+      }));
+    }
+  } catch {
+    inboundComms = [];
+  }
+
+  // If nothing's enabled AND no flags AND no reclass requests AND no
+  // inbound messages, show the empty state
   if (
     eligibleClients.length === 0 &&
     pendingFlags.length === 0 &&
-    pendingReclassRequests.length === 0
+    pendingReclassRequests.length === 0 &&
+    inboundComms.length === 0
   ) {
     return (
       <AppShell>
@@ -301,6 +356,10 @@ export default async function TodayPage() {
     <AppShell>
       <TopBar title="Today" subtitle={`Daily reconciliation · ${today}`} />
       <div className="px-8 py-6 max-w-5xl space-y-6">
+        {/* Inbound client messages + statement uploads — top slot: a
+            client sending files is usually waiting on us to act on them */}
+        {inboundComms.length > 0 && <ClientInboxWidget rows={inboundComms} />}
+
         {/* Portal flags from clients — shown above daily recon since they're
             often more urgent (client is actively waiting for a response) */}
         {pendingFlags.length > 0 && <ClientFlagsWidget flags={pendingFlags} />}

@@ -23,6 +23,7 @@ import {
   Pause as PauseIcon,
   Play as PlayIcon,
   PowerOff,
+  Mail,
 } from "lucide-react";
 import type {
   OutstandingWork,
@@ -146,6 +147,13 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href={`/clients/${clientLink.id}/messages`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:text-navy hover:border-gray-300"
+          >
+            <Mail size={13} />
+            Messages
+          </Link>
           {canImpersonate && <ViewAsClientButton clientLinkId={clientLink.id} />}
           <DoubleLinkControl
             clientLinkId={clientLink.id}
