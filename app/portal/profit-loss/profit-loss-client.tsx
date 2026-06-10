@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   ChevronDown, AlertTriangle, X, Loader2, ChevronRight, Flag, CheckCircle2,
   Sparkles, Info, ArrowDown, TrendingUp, TrendingDown, CalendarRange, Tag, Search,
+  MessageCircleQuestion,
 } from "lucide-react";
 import type { ProfitLossData } from "@/lib/qbo-reports";
 import { classifyProfitLoss, marginVerdict, type PortalPl, type PlBucket } from "@/lib/portal-pl";
@@ -837,7 +838,7 @@ function DrillDownDrawer({
                   <th className="text-left px-4 py-2 font-semibold">Type / #</th>
                   <th className="text-left px-4 py-2 font-semibold">Payee / Customer</th>
                   <th className="text-right px-4 py-2 font-semibold">Amount</th>
-                  <th className="text-right px-4 py-2 font-semibold w-16">Ask / Flag</th>
+                  <th className="text-right px-4 py-2 font-semibold w-16">Ask</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -856,50 +857,16 @@ function DrillDownDrawer({
                     </td>
                     <td className="px-4 py-2 text-right font-mono text-navy whitespace-nowrap">{fmtMoney(t.amount)}</td>
                     <td className="px-4 py-2">
-                      <div className="flex items-center justify-end gap-0.5">
-                        <AskAboutButton
-                          kind="transaction"
-                          label={`${t.txn_type || "Transaction"}${t.name ? ` — ${t.name}` : ""}`}
-                          amount={t.amount}
-                          period={range.label}
-                          context={{
-                            account: line.label,
-                            account_id: line.account_id,
-                            date: t.date,
-                            doc_number: t.doc_number,
-                            vendor_or_customer: t.name,
-                            memo: t.memo,
-                          }}
-                          variant="icon"
-                        />
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onReclass({
-                              source_account_qbo_id: line.account_id,
-                              source_account_name: line.label,
-                              example_txn_id: t.txn_id || undefined,
-                              example_txn_type: t.txn_type || undefined,
-                              example_txn_date: t.date || undefined,
-                              example_txn_amount: t.amount,
-                              example_txn_memo: t.memo || undefined,
-                              vendor_name: t.name || undefined,
-                              period_label: range.label,
-                              period_start: range.start,
-                              period_end: range.end,
-                            });
-                          }}
-                          title="Suggest this should be in a different category"
-                          className="text-ink-light hover:text-violet-600 transition-colors p-1 rounded hover:bg-violet-50"
-                        >
-                          <Tag size={13} />
-                        </button>
+                      <div className="flex items-center justify-end">
+                        {/* One unified entry point: question, flag, and
+                            optional re-categorize all live in one modal. */}
                         <button
                           onClick={(e) => { e.stopPropagation(); setFlagTxn(t); }}
-                          title="Flag this transaction for your bookkeeper to review"
-                          className="text-ink-light hover:text-amber-600 transition-colors p-1 rounded hover:bg-amber-50"
+                          title="Ask your bookkeeper about this transaction"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full border border-teal/30 text-teal-dark bg-white hover:bg-teal/5 transition-colors"
                         >
-                          <Flag size={13} />
+                          <MessageCircleQuestion size={12} />
+                          Ask
                         </button>
                       </div>
                     </td>
@@ -1044,24 +1011,26 @@ function FlagTransactionModal({
         const body = await res.json();
         if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
       } else {
-        // No category picked (or "None of these") — original flag flow.
-        const res = await fetch("/api/portal/transaction-flags", {
+        // No category picked (or "None of these") — plain question. Goes
+        // through ask-about, which lands in the manager's /today inbox
+        // (client_communications mirror) + the client message thread.
+        const res = await fetch("/api/portal/ask-about", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            qbo_txn_id: transaction.txn_id || null,
-            qbo_txn_type: transaction.txn_type || null,
-            qbo_account_id: accountId,
-            account_label: accountLabel,
-            txn_date: transaction.date || null,
-            txn_amount: transaction.amount,
-            txn_doc_number: transaction.doc_number,
-            txn_vendor_or_customer: transaction.name,
-            txn_memo: transaction.memo,
-            period_label: range.label,
-            period_start: range.start,
-            period_end: range.end,
-            client_note: trimmed,
+            kind: "transaction",
+            label: `${transaction.txn_type || "Transaction"}${transaction.name ? ` — ${transaction.name}` : ""}`,
+            amount: transaction.amount,
+            period: range.label,
+            question: trimmed,
+            context: {
+              account: accountLabel,
+              account_id: accountId,
+              date: transaction.date,
+              doc_number: transaction.doc_number,
+              vendor_or_customer: transaction.name,
+              memo: transaction.memo,
+            },
           }),
         });
         const body = await res.json();
@@ -1081,8 +1050,8 @@ function FlagTransactionModal({
       <div className="bg-white rounded-2xl max-w-lg w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Flag size={16} className="text-amber-600" />
-            <h3 className="font-bold text-navy">Flag this transaction</h3>
+            <MessageCircleQuestion size={16} className="text-teal-dark" />
+            <h3 className="font-bold text-navy">Ask about this transaction</h3>
           </div>
           <button onClick={onClose} className="text-ink-slate hover:text-navy"><X size={20} /></button>
         </div>
@@ -1101,7 +1070,7 @@ function FlagTransactionModal({
                   <span className="text-xs">
                     {pickedAlternative && pickedAlternative !== "none"
                       ? "Your bookkeeper will review and (if approved) reclassify the matching transactions in QuickBooks."
-                      : "They'll review the transaction and reply."}
+                      : "It's on your bookkeeper's Today dashboard — they'll review and reply."}
                   </span>
                 </div>
               </div>
@@ -1110,7 +1079,7 @@ function FlagTransactionModal({
           ) : (
             <>
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
-                <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate mb-1">You're flagging</div>
+                <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate mb-1">You're asking about</div>
                 <div className="flex items-center justify-between">
                   <div className="min-w-0">
                     <div className="font-semibold text-navy">
@@ -1129,7 +1098,7 @@ function FlagTransactionModal({
 
               <div>
                 <label className="text-xs font-semibold text-ink-slate uppercase tracking-wider">
-                  What looks wrong? <span className="text-red-700">*</span>
+                  Your question or note <span className="text-red-700">*</span>
                 </label>
                 <textarea
                   value={note}
@@ -1224,14 +1193,14 @@ function FlagTransactionModal({
                 <button
                   onClick={submit}
                   disabled={submitting || !note.trim()}
-                  className="px-4 py-1.5 bg-amber-500 text-white rounded-lg text-sm font-semibold hover:bg-amber-600 disabled:opacity-50 inline-flex items-center gap-1.5"
+                  className="px-4 py-1.5 bg-teal text-white rounded-lg text-sm font-semibold hover:bg-teal-dark disabled:opacity-50 inline-flex items-center gap-1.5"
                 >
                   {submitting ? (
                     <Loader2 size={12} className="animate-spin" />
                   ) : pickedAlternative && pickedAlternative !== "none" ? (
                     <Tag size={12} />
                   ) : (
-                    <Flag size={12} />
+                    <MessageCircleQuestion size={12} />
                   )}
                   {submitting
                     ? "Sending…"
