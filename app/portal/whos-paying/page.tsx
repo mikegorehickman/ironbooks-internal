@@ -1,4 +1,5 @@
 import { tryResolvePortalContext } from "@/lib/portal-context";
+import { createServiceSupabase } from "@/lib/supabase";
 import { fetchOpenInvoices } from "@/lib/qbo-balance-sheet";
 import { fetchAllCustomers } from "@/lib/qbo-stripe-recon";
 import {
@@ -25,11 +26,25 @@ export default async function WhosPayingPage() {
   if (!ctxResult.ok) return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
   const { ctx } = ctxResult;
 
-  const [invoices, customers, payments] = await Promise.all([
+  const service = createServiceSupabase();
+  const [allInvoices, customers, payments, dismissalRows] = await Promise.all([
     fetchOpenInvoices(ctx.qboRealmId, ctx.accessToken).catch(() => []),
     fetchAllCustomers(ctx.qboRealmId, ctx.accessToken).catch(() => []),
     fetchRecentPayments(ctx.qboRealmId, ctx.accessToken, 180).catch(() => []),
+    (service as any)
+      .from("portal_ar_dismissals")
+      .select("qbo_invoice_id, doc_number, customer_name, amount, created_at")
+      .eq("client_link_id", ctx.clientLinkId)
+      .then((r: any) => (r.data as any[]) || [])
+      .catch(() => []),
   ]);
+
+  // Client-dismissed invoices ("not actually owed") are filtered out of every
+  // number on this page — persistently, even though QBO still shows them open.
+  // The bookkeeper got a /today message when each was dismissed and clears
+  // them in QBO for real; until then this view stays clean.
+  const dismissedIds = new Set(dismissalRows.map((d: any) => String(d.qbo_invoice_id)));
+  const invoices = allInvoices.filter((inv) => !dismissedIds.has(String(inv.qbo_invoice_id)));
 
   const aging = ageInvoices(invoices);
   const dso = computeDSO(payments);
@@ -119,6 +134,12 @@ export default async function WhosPayingPage() {
       paymentsInWindowCount={payments.filter((p) => p.days_to_pay != null).length}
       customers={customerCards}
       topCustomerShare={topCustomerShare}
+      dismissed={dismissalRows.map((d: any) => ({
+        qbo_invoice_id: String(d.qbo_invoice_id),
+        doc_number: d.doc_number || null,
+        customer_name: d.customer_name || null,
+        amount: d.amount != null ? Number(d.amount) : null,
+      }))}
     />
   );
 }

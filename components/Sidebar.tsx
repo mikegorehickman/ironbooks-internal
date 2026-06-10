@@ -12,7 +12,7 @@ import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
 import type { Database } from "@/lib/database.types";
 import { StripeConnectModal } from "./StripeConnectModal";
-import { isMuted, setMuted, onMutedChange } from "@/lib/sounds";
+import { isMuted, setMuted, onMutedChange, playSound } from "@/lib/sounds";
 
 /** Daily work surface — what most bookkeepers need every day. */
 const dailyNav = [
@@ -59,6 +59,7 @@ export function Sidebar() {
   const [userName, setUserName] = useState<string>("");
   const [userRole, setUserRole] = useState<string>("");
   const [flaggedCount, setFlaggedCount] = useState(0);
+  const [unreadComms, setUnreadComms] = useState(0);
   const [stripeModalOpen, setStripeModalOpen] = useState(false);
 
   const isOnToolsRoute = toolsNav.some((i) => pathname.startsWith(i.href));
@@ -101,6 +102,33 @@ export function Sidebar() {
         }
       }
     });
+  }, []);
+
+  // Unread client messages — red badge on Today + a chime when a NEW one
+  // lands while the app is open. Polls every 45s; prev=null skips the
+  // initial load so a pre-existing backlog doesn't ding on every refresh.
+  useEffect(() => {
+    let prev: number | null = null;
+    let stopped = false;
+    async function check() {
+      try {
+        const res = await fetch("/api/comms/unread-count");
+        if (!res.ok || stopped) return;
+        const { count } = await res.json();
+        if (typeof count !== "number") return;
+        if (prev !== null && count > prev) playSound("message_received");
+        prev = count;
+        setUnreadComms(count);
+      } catch {
+        /* transient — next poll retries */
+      }
+    }
+    check();
+    const id = setInterval(check, 45_000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
   }, []);
 
   async function handleSignOut() {
@@ -148,7 +176,13 @@ export function Sidebar() {
 
         <NavSection label="Work" />
         {dailyNav.map((item) => (
-          <NavItem key={item.href} item={item} pathname={pathname} />
+          <NavItem
+            key={item.href}
+            item={item}
+            pathname={pathname}
+            badgeCount={item.href === "/today" ? unreadComms : undefined}
+            badgeTone="red"
+          />
         ))}
 
         {isSenior && (
@@ -254,11 +288,13 @@ function NavItem({
   item,
   pathname,
   badgeCount,
+  badgeTone = "amber",
   dim,
 }: {
   item: { href: string; label: string; icon: any };
   pathname: string;
   badgeCount?: number;
+  badgeTone?: "amber" | "red";
   dim?: boolean;
 }) {
   const active = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -278,7 +314,11 @@ function NavItem({
       <Icon size={dim ? 14 : 16} className="flex-shrink-0" />
       <span className={dim ? "text-[13px]" : "text-[13px]"}>{item.label}</span>
       {badgeCount != null && badgeCount > 0 && (
-        <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/90 text-white tabular-nums">
+        <span
+          className={`ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white tabular-nums ${
+            badgeTone === "red" ? "bg-red-500" : "bg-amber-500/90"
+          }`}
+        >
           {badgeCount > 999 ? "999+" : badgeCount}
         </span>
       )}

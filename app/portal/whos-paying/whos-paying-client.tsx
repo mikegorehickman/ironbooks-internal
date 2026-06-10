@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle, Clock, Mail, Phone, Sparkles, X, Copy, Loader2,
-  TrendingUp, AlertTriangle,
+  TrendingUp, AlertTriangle, EyeOff, Undo2, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { AskAboutButton } from "../ask-about";
 
@@ -33,20 +34,76 @@ interface CustomerCard {
   invoices: { num: string; doc_id: string; date: string; due_date: string | null; amount: number; days_overdue: number }[];
 }
 
+export interface DismissedInvoice {
+  qbo_invoice_id: string;
+  doc_number: string | null;
+  customer_name: string | null;
+  amount: number | null;
+}
+
 export function WhosPayingClient({
   aging,
   dso,
   paymentsInWindowCount,
   customers,
   topCustomerShare,
+  dismissed = [],
 }: {
   aging: AgingSummary;
   dso: number | null;
   paymentsInWindowCount: number;
   customers: CustomerCard[];
   topCustomerShare: number;
+  dismissed?: DismissedInvoice[];
 }) {
+  const router = useRouter();
   const [followupCustomer, setFollowupCustomer] = useState<CustomerCard | null>(null);
+  const [busyInvoice, setBusyInvoice] = useState<string | null>(null);
+
+  // Dismiss / restore persist server-side (portal_ar_dismissals) — every
+  // number on this page recomputes without the dismissed invoices on the
+  // refresh, and they stay hidden on future logins until restored.
+  async function dismissInvoice(
+    inv: { doc_id: string; num: string; amount: number },
+    customerName: string
+  ) {
+    if (
+      !confirm(
+        `Hide invoice ${inv.num} ($${inv.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) from your A/R?\n\nUse this when it isn't actually owed (duplicate, already paid, not yours). Your bookkeeper is notified and will clear it in QuickBooks properly. You can restore it anytime from the "Dismissed" list at the bottom of this page.`
+      )
+    )
+      return;
+    setBusyInvoice(inv.doc_id);
+    try {
+      const res = await fetch("/api/portal/ar-dismissals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          qbo_invoice_id: inv.doc_id,
+          doc_number: inv.num,
+          customer_name: customerName,
+          amount: inv.amount,
+        }),
+      });
+      if (res.ok) router.refresh();
+    } finally {
+      setBusyInvoice(null);
+    }
+  }
+
+  async function restoreInvoice(qboInvoiceId: string) {
+    setBusyInvoice(qboInvoiceId);
+    try {
+      const res = await fetch("/api/portal/ar-dismissals", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qbo_invoice_id: qboInvoiceId }),
+      });
+      if (res.ok) router.refresh();
+    } finally {
+      setBusyInvoice(null);
+    }
+  }
 
   const overdueTotal =
     aging.buckets["1-30"].total + aging.buckets["31-60"].total +
@@ -151,6 +208,8 @@ export function WhosPayingClient({
               key={c.customer_id || c.name}
               c={c}
               onDraftFollowup={() => setFollowupCustomer(c)}
+              onDismissInvoice={(inv) => dismissInvoice(inv, c.name)}
+              busyInvoice={busyInvoice}
             />
           ))
         )}
@@ -161,8 +220,76 @@ export function WhosPayingClient({
         )}
       </div>
 
+      {dismissed.length > 0 && (
+        <DismissedSection
+          dismissed={dismissed}
+          busyInvoice={busyInvoice}
+          onRestore={restoreInvoice}
+        />
+      )}
+
       {followupCustomer && (
         <FollowupModal customer={followupCustomer} onClose={() => setFollowupCustomer(null)} />
+      )}
+    </div>
+  );
+}
+
+// ─── DISMISSED INVOICES ──────────────────────────────────────────────────
+
+function DismissedSection({
+  dismissed,
+  busyInvoice,
+  onRestore,
+}: {
+  dismissed: DismissedInvoice[];
+  busyInvoice: string | null;
+  onRestore: (qboInvoiceId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full px-5 py-3 flex items-center gap-2 text-left text-sm font-semibold text-ink-slate hover:bg-slate-100"
+      >
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <EyeOff size={13} />
+        Dismissed — not actually owed ({dismissed.length})
+      </button>
+      {open && (
+        <div className="px-5 pb-4 space-y-1">
+          <p className="text-[11px] text-ink-light mb-2">
+            These stay hidden from your totals until your bookkeeper clears them
+            in QuickBooks. Restore one if you dismissed it by mistake.
+          </p>
+          {dismissed.map((d) => (
+            <div
+              key={d.qbo_invoice_id}
+              className="flex items-center justify-between text-xs text-ink-slate py-1 border-t border-slate-200/60 first:border-0"
+            >
+              <span>
+                {d.doc_number ? `#${d.doc_number}` : d.qbo_invoice_id}
+                {d.customer_name && <span className="text-ink-light"> · {d.customer_name}</span>}
+                {d.amount != null && (
+                  <span className="font-mono ml-2">{fmtMoney(d.amount)}</span>
+                )}
+              </span>
+              <button
+                onClick={() => onRestore(d.qbo_invoice_id)}
+                disabled={busyInvoice !== null}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal-dark hover:underline disabled:opacity-50"
+              >
+                {busyInvoice === d.qbo_invoice_id ? (
+                  <Loader2 size={10} className="animate-spin" />
+                ) : (
+                  <Undo2 size={10} />
+                )}
+                Restore
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -214,7 +341,17 @@ function Bucket({ label, amount, count, color }: { label: string; amount: string
 
 // ─── CUSTOMER CARD ───────────────────────────────────────────────────────
 
-function CustomerCardView({ c, onDraftFollowup }: { c: CustomerCard; onDraftFollowup: () => void }) {
+function CustomerCardView({
+  c,
+  onDraftFollowup,
+  onDismissInvoice,
+  busyInvoice,
+}: {
+  c: CustomerCard;
+  onDraftFollowup: () => void;
+  onDismissInvoice: (inv: { doc_id: string; num: string; amount: number }) => void;
+  busyInvoice: string | null;
+}) {
   const urgent = c.oldest_days > 30;
   return (
     <div className={`bg-white border rounded-2xl p-5 ${urgent ? "border-red-300" : "border-slate-200"}`}>
@@ -298,16 +435,28 @@ function CustomerCardView({ c, onDraftFollowup }: { c: CustomerCard; onDraftFoll
       {/* Invoices */}
       <div className="space-y-1 mb-3">
         {c.invoices.slice(0, 5).map((inv, i) => (
-          <div key={i} className="flex items-center justify-between text-xs text-ink-slate py-0.5">
+          <div key={i} className="flex items-center justify-between text-xs text-ink-slate py-0.5 group">
             <span>
               {inv.num} · {inv.date}
               {inv.due_date && <span className="text-ink-light"> · due {inv.due_date}</span>}
             </span>
-            <span className="font-mono">
+            <span className="font-mono flex items-center gap-1">
               {fmtMoney(inv.amount)}
               {inv.days_overdue > 0 && (
                 <span className="text-red-700 font-semibold ml-2">({inv.days_overdue}d late)</span>
               )}
+              <button
+                onClick={() => onDismissInvoice(inv)}
+                disabled={busyInvoice !== null}
+                title="Not actually owed? Dismiss it — your bookkeeper is notified and it stays hidden from your A/R"
+                className="ml-1.5 p-0.5 rounded text-ink-light opacity-40 group-hover:opacity-100 hover:text-red-700 hover:bg-red-50 transition-all disabled:opacity-30"
+              >
+                {busyInvoice === inv.doc_id ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <EyeOff size={11} />
+                )}
+              </button>
             </span>
           </div>
         ))}

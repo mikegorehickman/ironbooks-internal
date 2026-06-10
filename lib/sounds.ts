@@ -17,12 +17,14 @@
 export type SoundEvent =
   | "client_graduated"
   | "scan_complete"
-  | "finalize_failed";
+  | "finalize_failed"
+  | "message_received";
 
 const SOUND_FILES: Record<SoundEvent, string> = {
   client_graduated: "/sounds/client-graduated.mp3",
   scan_complete: "/sounds/scan-complete.mp3",
   finalize_failed: "/sounds/finalize-failed.mp3",
+  message_received: "/sounds/message-received.wav",
 };
 
 const MUTE_KEY = "snap.sounds.muted";
