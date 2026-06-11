@@ -220,6 +220,14 @@ export function ReclassReview({
       }
     }
 
+    // "Uncategorized" is the explicit ESCALATION choice — the bookkeeper is
+    // saying "I can't place this, a senior needs to look". It becomes a
+    // human-flagged row (decision=flagged + bookkeeper_override=true, the
+    // exact combination the /flagged queue shows) — NOT an approved reclass
+    // to a meaningless target, and never a bank rule.
+    const isEscalation = targetAccountName === "Uncategorized";
+    const newDecision = isEscalation ? "flagged" : "approved";
+
     // Optimistic local update for all affected rows
     setRows((prev) =>
       prev.map((r) =>
@@ -229,7 +237,7 @@ export function ReclassReview({
               bookkeeper_override: true,
               bookkeeper_override_target_name: targetAccountName,
               to_account_name: targetAccountName,
-              decision: "approved",
+              decision: newDecision,
             }
           : r
       )
@@ -242,7 +250,7 @@ export function ReclassReview({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            decision: "approved",
+            decision: newDecision,
             bookkeeper_override_target_name: targetAccountName,
           }),
         })
@@ -250,8 +258,9 @@ export function ReclassReview({
     );
 
     // Save as bank rule once for this vendor — covers all current AND future
-    // transactions. Skipped for ask_client / unknown-vendor rows.
+    // transactions. Skipped for ask_client / unknown-vendor / escalated rows.
     if (
+      !isEscalation &&
       clientLinkId &&
       row.decision !== "ask_client" &&
       row.vendor_name &&

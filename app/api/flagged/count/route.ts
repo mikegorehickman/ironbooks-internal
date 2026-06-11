@@ -26,12 +26,14 @@ export async function GET() {
       .select(`id, coa_jobs!inner(id, status, users!bookkeeper_id(id))`)
       .eq("action", "flag")
       .eq("executed", false)
+      .eq("bookkeeper_override", true)
       .eq("coa_jobs.status", "in_review"),
 
     service
       .from("reclassifications")
       .select(`id, reclass_jobs!reclass_job_id!inner(id, status, users!bookkeeper_id(id))`)
       .eq("decision", "flagged")
+      .eq("bookkeeper_override", true)
       .eq("reclass_jobs.status", "in_review"),
 
     service
@@ -39,6 +41,7 @@ export async function GET() {
       .select(`id, stripe_recon_jobs!inner(id, status, users!bookkeeper_id(id))`)
       .eq("decision", "flagged")
       .eq("executed", false)
+      .eq("bookkeeper_override", true)
       .eq("stripe_recon_jobs.status", "in_review"),
   ]);
 
