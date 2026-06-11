@@ -53,6 +53,9 @@ export default async function FlaggedPage() {
       `)
       .eq("action", "flag")
       .eq("executed", false)
+      // Active jobs only — flags from complete/failed/cancelled jobs are
+      // unactionable corpses that buried the queue (1,500+ items).
+      .eq("coa_jobs.status", "in_review")
       .order("created_at", { ascending: false }),
 
     service
@@ -63,6 +66,7 @@ export default async function FlaggedPage() {
         reclass_jobs!reclass_job_id!inner(id, status, created_at, bookkeeper_id, client_link_id, client_links(id, client_name, jurisdiction, state_province), users!bookkeeper_id(full_name))
       `)
       .eq("decision", "flagged")
+      .eq("reclass_jobs.status", "in_review")
       .order("transaction_date", { ascending: false })
       .limit(500),
 
@@ -75,6 +79,7 @@ export default async function FlaggedPage() {
       `)
       .eq("decision", "flagged")
       .eq("executed", false)
+      .eq("stripe_recon_jobs.status", "in_review")
       .order("deposit_date", { ascending: false }),
   ]);
 

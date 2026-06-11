@@ -18,24 +18,28 @@ export async function GET() {
     return NextResponse.json({ count: 0 });
   }
 
-  // Run the same queries as the flagged page
+  // Run the same queries as the flagged page — active (in_review) jobs
+  // only, so completed/failed jobs' flags don't inflate the badge.
   const [coaQ, reclassQ, stripeQ] = await Promise.all([
     service
       .from("coa_actions")
-      .select(`id, coa_jobs!inner(id, users!bookkeeper_id(id))`)
+      .select(`id, coa_jobs!inner(id, status, users!bookkeeper_id(id))`)
       .eq("action", "flag")
-      .eq("executed", false),
+      .eq("executed", false)
+      .eq("coa_jobs.status", "in_review"),
 
     service
       .from("reclassifications")
-      .select(`id, reclass_jobs!reclass_job_id!inner(id, users!bookkeeper_id(id))`)
-      .eq("decision", "flagged"),
+      .select(`id, reclass_jobs!reclass_job_id!inner(id, status, users!bookkeeper_id(id))`)
+      .eq("decision", "flagged")
+      .eq("reclass_jobs.status", "in_review"),
 
     service
       .from("stripe_recon_matches")
-      .select(`id, stripe_recon_jobs!inner(id, users!bookkeeper_id(id))`)
+      .select(`id, stripe_recon_jobs!inner(id, status, users!bookkeeper_id(id))`)
       .eq("decision", "flagged")
-      .eq("executed", false),
+      .eq("executed", false)
+      .eq("stripe_recon_jobs.status", "in_review"),
   ]);
 
   // Apply the same JS filtering as the flagged page

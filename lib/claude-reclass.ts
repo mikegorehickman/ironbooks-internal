@@ -5,8 +5,9 @@
  * in the client's available COA + master COA, with confidence scoring.
  *
  * 95% confidence threshold → auto_approve
- * 70-94% → needs_review
- * <70%   → flagged
+ * <95%  → needs_review (bookkeeper approves during the reclass review —
+ *         low-confidence items are NOT escalated to the senior /flagged
+ *         queue; that buried managers in 600+ auto-suggestions)
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -208,10 +209,15 @@ Classify each vendor group. Return the structured JSON.`;
 
     const confidence = Math.max(0, Math.min(1, c.confidence));
 
+    // Two tiers only: high confidence auto-approves, everything else goes
+    // to the bookkeeper's needs-review tab in the reclass flow. The old
+    // third tier (<70% → "flagged") escalated every low-confidence AI
+    // guess to the senior /flagged queue — hundreds of items nobody
+    // actioned. The bookkeeper running the reclass decides; "flagged" is
+    // reserved for the forced cases (e-transfers with no vendor).
     let decision: ReclassClassification["decision"];
     if (confidence >= AUTO_APPROVE_THRESHOLD) decision = "auto_approve";
-    else if (confidence >= NEEDS_REVIEW_THRESHOLD) decision = "needs_review";
-    else decision = "flagged";
+    else decision = "needs_review";
 
     // Force-flag sensitive vendors regardless of confidence
     const isSensitive =
