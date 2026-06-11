@@ -202,7 +202,7 @@ export async function emailPortalUsersAboutMessage(
     const snippet = params.body.length > 400 ? `${params.body.slice(0, 400)}…` : params.body;
     await sendResendEmail({
       to: emails,
-      replyTo: "admin@ironbooks.com",
+      replyTo: process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com",
       subject: `[Ironbooks] New ${noun}${params.subject ? `: ${params.subject}` : ""} — ${params.clientName}`,
       text: [
         `Your Ironbooks bookkeeper sent you a new ${noun}.`,

@@ -107,7 +107,7 @@ export async function POST(request: Request) {
   // Email via Resend
   const apiKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.SUPPORT_FROM_EMAIL || "Ironbooks Support <onboarding@resend.dev>";
-  const toEmail = "admin@ironbooks.com";
+  const toEmail = process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com";
 
   if (!apiKey) {
     // Fail soft — ticket is already in audit_log, so the data isn't lost.

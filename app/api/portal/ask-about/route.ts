@@ -164,7 +164,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.RESEND_API_KEY;
   const fromEmail =
     process.env.SUPPORT_FROM_EMAIL || "Ironbooks Portal <onboarding@resend.dev>";
-  const toEmail = "admin@ironbooks.com";
+  const toEmail = process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com";
 
   if (!apiKey) {
     console.warn(

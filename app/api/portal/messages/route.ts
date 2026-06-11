@@ -104,7 +104,7 @@ export async function POST(request: Request) {
   // The DB row is the source of truth; email failure never fails the send.
   const fileList = attResult.attachments.map((a) => `  • ${a.name}`).join("\n");
   await sendResendEmail({
-    to: ["admin@ironbooks.com"],
+    to: [process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com"],
     replyTo: ctx.userEmail,
     subject: `[Ironbooks Portal] ${attResult.attachments.length > 0 ? "Files from" : "Message from"} ${ctx.clientName}`,
     text: [
