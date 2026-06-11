@@ -118,6 +118,32 @@ function daysSince(iso: string | null): number | null {
   return Math.floor((Date.now() - t) / 86_400_000);
 }
 
+function hoursSince(iso: string | null): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return Math.floor((Date.now() - t) / 3_600_000);
+}
+
+/** How long an initiated reconnect may sit incomplete before we call it stale. */
+const RECONNECT_STALE_HOURS = 24;
+
+function isDeadStatus(s: HealthStatus): boolean {
+  return s === "invalid_grant" || s === "other_error";
+}
+
+/**
+ * "Reconnect started" only means a consent link was opened — NOT that the
+ * OAuth flow finished. If the client is still dead 24h+ after initiation,
+ * the handshake was never completed and someone needs to chase it. This is
+ * the state that let 25 dead connections masquerade as "in progress" for
+ * three days in June 2026.
+ */
+function isStaleReconnect(r: ClientHealthRow): boolean {
+  if (!isDeadStatus(r.status) || !r.reconnect_initiated_at) return false;
+  return (hoursSince(r.reconnect_initiated_at) ?? 0) >= RECONNECT_STALE_HOURS;
+}
+
 function fmtAge(days: number | null): string {
   if (days === null) return "—";
   if (days === 0) return "today";
@@ -133,9 +159,9 @@ export function QboHealthClient({ rows: initialRows, probeNeverRun }: Props) {
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string>("");
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "dead" | "healthy" | "in_progress">(
-    "dead"
-  );
+  const [filter, setFilter] = useState<
+    "all" | "dead" | "healthy" | "in_progress" | "incomplete"
+  >("dead");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // KPIs
@@ -147,7 +173,8 @@ export function QboHealthClient({ rows: initialRows, probeNeverRun }: Props) {
       other_error: 0,
       never_connected: 0,
       unknown: 0,
-      in_progress: 0,
+      in_progress: 0, // initiated <24h ago, still dead — plausibly mid-flow
+      incomplete: 0, // initiated 24h+ ago, STILL dead — handshake never finished
     };
     for (const r of rows) {
       if (r.status === "ok") c.ok++;
@@ -156,11 +183,9 @@ export function QboHealthClient({ rows: initialRows, probeNeverRun }: Props) {
       else if (r.status === "never_connected" || r.status === "no_realm")
         c.never_connected++;
       else if (r.status === "unknown") c.unknown++;
-      if (
-        r.reconnect_initiated_at &&
-        (r.status === "invalid_grant" || r.status === "other_error")
-      ) {
-        c.in_progress++;
+      if (r.reconnect_initiated_at && isDeadStatus(r.status)) {
+        if (isStaleReconnect(r)) c.incomplete++;
+        else c.in_progress++;
       }
     }
     return c;
@@ -177,6 +202,8 @@ export function QboHealthClient({ rows: initialRows, probeNeverRun }: Props) {
       r = r.filter((x) => x.status === "ok");
     } else if (filter === "in_progress") {
       r = r.filter((x) => x.reconnect_initiated_at !== null);
+    } else if (filter === "incomplete") {
+      r = r.filter((x) => isStaleReconnect(x));
     }
     if (search) {
       const s = search.toLowerCase();
@@ -319,8 +346,34 @@ export function QboHealthClient({ rows: initialRows, probeNeverRun }: Props) {
   const deadCount = counts.invalid_grant + counts.other_error;
   return (
     <div className="space-y-5">
+      {/* THE alert that was missing in June 2026: reconnects that were started
+          but never finished look "handled" while the client stays dead. */}
+      {counts.incomplete > 0 && (
+        <div className="rounded-xl border-2 border-red-300 bg-red-50 p-4 flex items-start gap-3">
+          <AlertTriangle size={20} className="text-red-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="text-sm font-bold text-red-800">
+              {counts.incomplete} reconnect{counts.incomplete === 1 ? " was" : "s were"} started
+              but never finished
+            </div>
+            <p className="text-xs text-red-700 mt-1 leading-relaxed">
+              A consent link was opened 24+ hours ago, but the Intuit sign-in was never
+              completed — these clients are <strong>still dead</strong>. Opening the link
+              isn&apos;t enough: someone with QuickBooks access must finish the OAuth screen.
+              Re-run the reconnect and confirm each turns healthy.
+            </p>
+          </div>
+          <button
+            onClick={() => setFilter("incomplete")}
+            className="shrink-0 inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg"
+          >
+            Show them <ArrowRight size={11} />
+          </button>
+        </div>
+      )}
+
       {/* KPI strip */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiTile
           label="Total"
           value={counts.total.toString()}
@@ -343,7 +396,14 @@ export function QboHealthClient({ rows: initialRows, probeNeverRun }: Props) {
           icon={XCircle}
         />
         <KpiTile
-          label="Re-auth in progress"
+          label="Started, never finished"
+          value={counts.incomplete.toString()}
+          color="text-amber-800"
+          bg="bg-amber-50 border-amber-300"
+          icon={AlertTriangle}
+        />
+        <KpiTile
+          label="Re-auth in progress (<24h)"
           value={counts.in_progress.toString()}
           color="text-blue-700"
           bg="bg-blue-50 border-blue-200"
@@ -377,6 +437,13 @@ export function QboHealthClient({ rows: initialRows, probeNeverRun }: Props) {
             onClick={() => setFilter("dead")}
             count={deadCount}
             color="red"
+          />
+          <FilterPill
+            label="Never finished"
+            active={filter === "incomplete"}
+            onClick={() => setFilter("incomplete")}
+            count={counts.incomplete}
+            color="amber"
           />
           <FilterPill
             label="In progress"
@@ -525,15 +592,25 @@ export function QboHealthClient({ rows: initialRows, probeNeverRun }: Props) {
                         <Icon size={11} />
                         {cfg.label}
                       </div>
-                      {inProgress && (
-                        <div className="mt-1 text-[10px] text-blue-700 font-semibold inline-flex items-center gap-1">
-                          <Clock size={10} />
-                          Reconnect started
-                          {row.reconnect_initiated_by_name
-                            ? ` by ${row.reconnect_initiated_by_name.split(" ")[0]}`
-                            : ""}
-                        </div>
-                      )}
+                      {inProgress &&
+                        (isStaleReconnect(row) ? (
+                          <div className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 border border-amber-300 px-1.5 py-0.5 text-[10px] text-amber-900 font-bold">
+                            <AlertTriangle size={10} />
+                            Started {fmtAge(daysSince(row.reconnect_initiated_at))} ago
+                            {row.reconnect_initiated_by_name
+                              ? ` by ${row.reconnect_initiated_by_name.split(" ")[0]}`
+                              : ""}{" "}
+                            — never finished
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-[10px] text-blue-700 font-semibold inline-flex items-center gap-1">
+                            <Clock size={10} />
+                            Reconnect started {hoursSince(row.reconnect_initiated_at)}h ago
+                            {row.reconnect_initiated_by_name
+                              ? ` by ${row.reconnect_initiated_by_name.split(" ")[0]}`
+                              : ""}
+                          </div>
+                        ))}
                       {row.error_message && (
                         <div
                           className="mt-1 text-[10px] text-ink-light truncate max-w-[280px]"
@@ -663,13 +740,14 @@ function FilterPill({
   count: number;
   active: boolean;
   onClick: () => void;
-  color: "red" | "blue" | "green" | "slate";
+  color: "red" | "blue" | "green" | "slate" | "amber";
 }) {
   const palette = {
     red: { active: "bg-red-600 text-white", hover: "hover:bg-red-50 text-red-700" },
     blue: { active: "bg-blue-600 text-white", hover: "hover:bg-blue-50 text-blue-700" },
     green: { active: "bg-green-600 text-white", hover: "hover:bg-green-50 text-green-700" },
     slate: { active: "bg-slate-700 text-white", hover: "hover:bg-slate-100 text-slate-700" },
+    amber: { active: "bg-amber-600 text-white", hover: "hover:bg-amber-50 text-amber-800" },
   }[color];
   return (
     <button

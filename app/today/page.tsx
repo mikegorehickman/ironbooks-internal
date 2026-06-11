@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, ArrowRight, Sparkles, Clock, Pause } from 
 import { ClientFlagsWidget } from "./client-flags-widget";
 import { ReclassRequestsWidget, type PendingReclassRequest } from "./reclass-requests-widget";
 import { ClientInboxWidget, type InboundCommRow } from "./client-inbox-widget";
+import { QboHealthAlert } from "@/components/QboHealthAlert";
 import { MonthlyBsCheckButton } from "./monthly-bs-check";
 
 export const dynamic = "force-dynamic";
@@ -356,6 +357,10 @@ export default async function TodayPage() {
     <AppShell>
       <TopBar title="Today" subtitle={`Daily reconciliation · ${today}`} />
       <div className="px-8 py-6 max-w-5xl space-y-6">
+        {/* Dead QBO connections — seniors only (they run the re-auth flow).
+            Renders nothing when the fleet is healthy. */}
+        {isSenior && <QboHealthAlert />}
+
         {/* Inbound client messages + statement uploads — top slot: a
             client sending files is usually waiting on us to act on them */}
         {inboundComms.length > 0 && <ClientInboxWidget rows={inboundComms} />}

@@ -180,6 +180,11 @@ export async function GET(_request: Request) {
             ? prev.first_failed_at
             : now
           : null,
+        // A verified-healthy probe means the re-auth completed — clear the
+        // "reconnect started" marker so it can't linger as false comfort.
+        ...(r.status === "ok"
+          ? { reconnect_initiated_at: null, reconnect_initiated_by: null }
+          : {}),
         updated_at: now,
       };
     });

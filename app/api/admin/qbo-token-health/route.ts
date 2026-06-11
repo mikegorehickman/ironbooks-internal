@@ -10,9 +10,14 @@ export const maxDuration = 300;
  *
  * Probes every client_links row that has a qbo_refresh_token by calling
  * Intuit's refresh endpoint with `grant_type=refresh_token`. Reports per
- * client whether the token still works. The actual refreshed access_token
- * IS persisted on success (so this probe also self-heals stale-but-still-
- * valid tokens), unless `dry_run=true` is passed.
+ * client whether the token still works. The refreshed access_token AND the
+ * rotated refresh_token are always persisted on success (Intuit rotates the
+ * refresh token on every call — losing it kills the chain).
+ *
+ * `dry_run=true` does NOT probe at all: it lists candidates from stored
+ * state without touching Intuit. (The old behavior — probe but skip the
+ * persist — silently destroyed every probed chain, because the rotation
+ * still happened server-side and the new token was thrown away.)
  *
  * Why this exists: PictureThis + Neighborhood Painting both failed
  * cleanups mid-stream with user_not_in_realm. Looking at the broader
@@ -24,7 +29,7 @@ export const maxDuration = 300;
  *
  * Query params:
  *   - limit=N           cap how many clients to probe (default 50)
- *   - dry_run=true      don't persist the refreshed access_token even on success
+ *   - dry_run=true      list candidates only — no Intuit calls, no writes
  *   - skip_recent=24    skip clients whose access token was refreshed within
  *                       the last N hours (they're known-healthy). Default 24.
  *
@@ -88,13 +93,29 @@ export async function GET(request: Request) {
           )
         : 0;
 
+    // dry_run: DO NOT call Intuit. A refresh "probe" ROTATES the refresh
+    // token server-side at Intuit; skipping the persist (old behavior) threw
+    // the rotated token away and permanently killed the chain for every
+    // client probed. There is no read-only refresh in OAuth — so a dry run
+    // reports stored state only and never touches the network.
+    if (dryRun) {
+      results.push({
+        client_link_id: row.id,
+        client_name: row.client_name,
+        realm_id: row.qbo_realm_id,
+        expired_for_days: expiredForDays,
+        status: "skipped",
+        error: "dry_run — not probed (probing rotates the refresh token; run without dry_run to actually test+persist)",
+      });
+      continue;
+    }
+
     try {
       const tokens = await refreshAccessToken(row.qbo_refresh_token);
-      // Success — persist the freshly-minted access_token + new refresh_token
-      // so the next real operation doesn't have to re-refresh. If dry_run is
-      // set, skip the write (useful for one-time triage scans where we want
-      // pure read-only behavior).
-      if (!dryRun) {
+      // Success — persist the freshly-minted access_token AND the rotated
+      // refresh_token (Intuit rotates it on every refresh; losing it kills
+      // the chain).
+      {
         const newExpiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
         await service
           .from("client_links")
