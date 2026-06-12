@@ -6,7 +6,7 @@ import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
   FileSpreadsheet, Wallet, Volume2, VolumeX, HeartPulse, Gauge, CalendarCheck,
-  ClipboardCheck,
+  ClipboardCheck, ListChecks,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -18,6 +18,7 @@ import { isMuted, setMuted, onMutedChange, playSound } from "@/lib/sounds";
 const dailyNav = [
   { href: "/today", label: "Today", icon: Sun },
   { href: "/kanban", label: "Workflow", icon: KanbanSquare },
+  { href: "/monthly-rec", label: "Monthly Rec", icon: ListChecks },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/balance-sheet/uf-audit", label: "UF Audit", icon: Wallet },
   { href: "/history", label: "History", icon: Clock },
