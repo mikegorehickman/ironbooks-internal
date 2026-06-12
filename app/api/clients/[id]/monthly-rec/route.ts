@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, qboErrorResponse } from "@/lib/qbo";
 import {
+  aiSpotCheckStatements,
   fetchStatementsPreview,
   previousMonthPeriod,
   runMonthlyRecChecks,
@@ -69,7 +70,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const action = body.action;
-  if (!["run", "statements", "send", "reopen"].includes(action || "")) {
+  if (!["run", "statements", "spot_check", "submit", "send", "reopen"].includes(action || "")) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
@@ -148,7 +149,96 @@ export async function POST(
     }
   }
 
+  if (action === "spot_check") {
+    // AI second-opinion on the statements. Requires the statements snapshot
+    // (i.e. the bookkeeper opened the review). Advisory only.
+    const { data: existing } = await (service as any)
+      .from("monthly_rec_runs")
+      .select("id, statements, kind, period")
+      .eq("client_link_id", clientLinkId)
+      .eq("period", period)
+      .maybeSingle();
+    if (!existing?.statements) {
+      return NextResponse.json(
+        { error: "Load the statements first." },
+        { status: 400 }
+      );
+    }
+    const [y, m] = period.split("-").map(Number);
+    const monthLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    const spot = await aiSpotCheckStatements({
+      clientName: (client as any).client_name || "client",
+      monthLabel,
+      statements: existing.statements,
+      kind: existing.kind === "cleanup" ? "cleanup" : "production_me",
+    });
+    const { data: run, error } = await (service as any)
+      .from("monthly_rec_runs")
+      .update({ ai_spot_check: spot })
+      .eq("id", existing.id)
+      .select("*")
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, run });
+  }
+
+  if (action === "submit") {
+    // JR path: attest + submit for senior review. Surfaces on /today for
+    // admin/lead, who approve & send. Same gate as send: checks +
+    // statements + attestation.
+    if (body.attested !== true) {
+      return NextResponse.json(
+        { error: "Attestation required — review the statements and tick the approval box first." },
+        { status: 400 }
+      );
+    }
+    const { data: existing } = await (service as any)
+      .from("monthly_rec_runs")
+      .select("id, checks_ran_at, statements, status")
+      .eq("client_link_id", clientLinkId)
+      .eq("period", period)
+      .maybeSingle();
+    if (!existing?.checks_ran_at) {
+      return NextResponse.json({ error: "Run the checks for this month first." }, { status: 400 });
+    }
+    if (!existing?.statements) {
+      return NextResponse.json({ error: "Review the financial statements first." }, { status: 400 });
+    }
+    if (existing.status === "complete") {
+      return NextResponse.json({ error: "This month is already closed." }, { status: 409 });
+    }
+    const concerns = (body.concerns || "").trim().slice(0, 4000) || null;
+    const now = new Date().toISOString();
+    const { data: run, error } = await (service as any)
+      .from("monthly_rec_runs")
+      .update({
+        status: "pending_review",
+        concerns,
+        has_concerns: !!concerns,
+        attested_by: user.id,
+        attested_at: now,
+        submitted_by: user.id,
+        submitted_at: now,
+      })
+      .eq("id", existing.id)
+      .select("*")
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, run });
+  }
+
   if (action === "send") {
+    // FINAL approval — admin/lead only. JRs submit for review instead.
+    if (!isSenior) {
+      return NextResponse.json(
+        { error: "Only an admin or lead can send statements to the client — use Submit for review instead." },
+        { status: 403 }
+      );
+    }
     if (body.attested !== true) {
       return NextResponse.json(
         { error: "Attestation required — review the statements and tick the approval box first." },
@@ -159,7 +249,7 @@ export async function POST(
     // fetched (i.e. reviewed) for this period before sending.
     const { data: existing } = await (service as any)
       .from("monthly_rec_runs")
-      .select("id, checks_ran_at, statements, status")
+      .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at")
       .eq("client_link_id", clientLinkId)
       .eq("period", period)
       .maybeSingle();
@@ -231,15 +321,17 @@ export async function POST(
       portalOrigin: new URL(request.url).origin,
     });
 
-    // 3. Close the period
+    // 3. Close the period. Preserve the JR's attestation when this is a
+    //    senior approving a submitted run; the senior's approval is the
+    //    completed_by trail.
     const { data: run, error } = await (service as any)
       .from("monthly_rec_runs")
       .update({
         status: "complete",
         concerns,
         has_concerns: !!concerns,
-        attested_by: user.id,
-        attested_at: now,
+        attested_by: existing.attested_by || user.id,
+        attested_at: existing.attested_at || now,
         completed_by: user.id,
         completed_at: now,
         sent_to_client_at: now,
@@ -249,6 +341,19 @@ export async function POST(
       .select("*")
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // Cleanup sign-off: approving + sending the statements IS the cleanup
+    // completion — stamp the client record if it isn't already.
+    if (existing.kind === "cleanup") {
+      await service
+        .from("client_links")
+        .update({
+          cleanup_completed_at: now,
+          cleanup_completed_by: user.id,
+        } as any)
+        .eq("id", clientLinkId)
+        .is("cleanup_completed_at", null);
+    }
 
     return NextResponse.json({
       ok: true,
@@ -267,6 +372,8 @@ export async function POST(
       completed_at: null,
       attested_by: null,
       attested_at: null,
+      submitted_by: null,
+      submitted_at: null,
       sent_to_client_at: null,
     })
     .eq("client_link_id", clientLinkId)

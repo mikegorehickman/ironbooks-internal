@@ -67,11 +67,15 @@ export async function POST(
   }
 
   const now = new Date().toISOString();
+
+  // Save the range + note immediately (the PDF re-pull depends on them),
+  // but DON'T stamp cleanup_completed_at yet — completion now requires the
+  // statement sign-off: bookkeeper reviews P&L/BS/CFS (+ AI spot check),
+  // attests, and a senior approves & sends to the client. The send handler
+  // (monthly-rec, kind='cleanup') stamps cleanup_completed_at.
   const { error: updErr } = await service
     .from("client_links")
     .update({
-      cleanup_completed_at: now,
-      cleanup_completed_by: user.id,
       cleanup_completion_note: note || null,
       cleanup_range_start: rangeStart,
       cleanup_range_end: rangeEnd,
@@ -82,11 +86,34 @@ export async function POST(
     return NextResponse.json({ error: updErr.message }, { status: 500 });
   }
 
+  // Create (or refresh) the sign-off run. Period = current month; the P&L
+  // statement period starts at the cleanup range when we know it, so the
+  // reviewer sees the books the cleanup actually touched.
+  const today = now.slice(0, 10);
+  const period = today.slice(0, 7);
+  let signoffError: string | null = null;
+  try {
+    await (service as any).from("monthly_rec_runs").upsert(
+      {
+        client_link_id: clientLinkId,
+        period,
+        period_start: rangeStart || `${period}-01`,
+        period_end: today,
+        kind: "cleanup",
+        status: "open",
+        created_by: user.id,
+      },
+      { onConflict: "client_link_id,period" }
+    );
+  } catch (e: any) {
+    signoffError = e?.message || "sign-off run creation failed";
+  }
+
   // Audit trail
   try {
     await service.from("audit_log").insert({
       user_id: user.id,
-      event_type: "client_cleanup_completed",
+      event_type: "client_cleanup_signoff_started",
       request_payload: {
         client_link_id: clientLinkId,
         client_name: (client as any).client_name,
@@ -101,7 +128,11 @@ export async function POST(
 
   return NextResponse.json({
     ok: true,
-    cleanup_completed_at: now,
+    requires_signoff: true,
+    signoff_period: period,
+    signoff_error: signoffError,
+    message:
+      "Cleanup work recorded. Final step: review the financial statements in Monthly Rec, attest, and get senior approval to send them to the client — that closes the cleanup.",
     cleanup_range_start: rangeStart,
     cleanup_range_end: rangeEnd,
   });

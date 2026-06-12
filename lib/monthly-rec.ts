@@ -12,8 +12,9 @@
  * uncategorized account + open invoices). No writes, no AI cost.
  */
 
+import Anthropic from "@anthropic-ai/sdk";
 import { fetchAllAccounts, qboRequest } from "./qbo";
-import { fetchProfitAndLoss } from "./qbo-reports";
+import { fetchProfitAndLoss, fetchCashFlow, type CashFlowData } from "./qbo-reports";
 import {
   fetchAccountTransactions,
   fetchOpenInvoices,
@@ -206,6 +207,7 @@ export interface StatementsPreview {
     totalLiabilities: number;
     totalEquity: number;
   };
+  cfs: CashFlowData | null;
 }
 
 /** Flatten QBO BalanceSheet report rows into display lines + totals. */
@@ -235,13 +237,14 @@ export async function fetchStatementsPreview(
   periodStart: string,
   periodEnd: string
 ): Promise<StatementsPreview> {
-  const [pl, bsReport] = await Promise.all([
+  const [pl, bsReport, cfs] = await Promise.all([
     fetchProfitAndLoss(realmId, accessToken, periodStart, periodEnd),
     qboRequest<any>(
       realmId,
       accessToken,
       `/reports/BalanceSheet?end_date=${encodeURIComponent(periodEnd)}&accounting_method=Accrual&minorversion=70`
     ),
+    fetchCashFlow(realmId, accessToken, periodStart, periodEnd).catch(() => null),
   ]);
 
   const lines = flattenBalanceSheet(bsReport?.Rows?.Row || []);
@@ -265,7 +268,116 @@ export async function fetchStatementsPreview(
       totalLiabilities: find(/^total liabilities$/i),
       totalEquity: find(/^total equity$/i),
     },
+    cfs,
   };
+}
+
+// ─── AI SPOT CHECK ───────────────────────────────────────────────────────
+// A second set of eyes before statements go to the client: Claude reviews
+// the P&L / BS / CFS against painting-contractor industry standards and
+// flags anything a reviewer should look at. Advisory only — never blocks
+// the human attestation, just informs it.
+
+export interface SpotCheckFinding {
+  severity: "info" | "warn" | "flag";
+  area: string;
+  note: string;
+}
+
+export interface SpotCheckResult {
+  verdict: "looks_good" | "needs_review";
+  summary: string;
+  findings: SpotCheckFinding[];
+  model?: string;
+  error?: string;
+}
+
+export async function aiSpotCheckStatements(params: {
+  clientName: string;
+  monthLabel: string;
+  statements: StatementsPreview;
+  kind: "production_me" | "cleanup";
+}): Promise<SpotCheckResult> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const MODEL = "claude-opus-4-7";
+  const { pl, bs, cfs } = params.statements;
+
+  const compact = {
+    profit_and_loss: {
+      total_income: pl.totalIncome,
+      total_expenses: pl.totalExpenses,
+      net_income: pl.netIncome,
+      lines: pl.lineItems.slice(0, 120),
+    },
+    balance_sheet: {
+      total_assets: bs.totalAssets,
+      total_liabilities: bs.totalLiabilities,
+      total_equity: bs.totalEquity,
+      lines: bs.lines.slice(0, 120).map((l) => ({ label: l.label, amount: l.amount, group: l.group })),
+    },
+    cash_flow: cfs
+      ? {
+          operating: cfs.operating?.total,
+          investing: cfs.investing?.total,
+          financing: cfs.financing?.total,
+          net_change: cfs.netCashChange,
+          cash_at_end: cfs.cashAtEnd,
+        }
+      : null,
+  };
+
+  const prompt = `You are a senior accountant reviewing monthly financial statements for a PAINTING CONTRACTOR before they go to the business owner. This is a ${params.kind === "cleanup" ? "post-cleanup sign-off" : "routine monthly close"} for "${params.clientName}", period ${params.monthLabel}.
+
+Spot-check against painting-industry standards and general bookkeeping hygiene:
+- Gross margin typically 40–60% for residential painting; materials usually 10–20% of revenue; subcontractors/labor are the biggest cost.
+- Red flags: negative income accounts, Uncategorized/Ask My Accountant/Suspense balances, nonzero Opening Balance Equity, Undeposited Funds balances, negative bank balances, A/R or A/P wildly out of proportion to monthly revenue, payroll with no payroll-tax expense, equity going negative, balance sheet not balancing, sales tax payable that never changes, owner draws coded as expenses.
+- Note month-over-month sanity only from what's visible (one month of data) — don't invent trends.
+
+Statements (JSON):
+${JSON.stringify(compact)}
+
+Respond with ONLY a JSON object:
+{"verdict": "looks_good" | "needs_review", "summary": "<1-2 sentences for the reviewer>", "findings": [{"severity": "info"|"warn"|"flag", "area": "<short area, e.g. Gross margin>", "note": "<specific, numbers-included observation>"}]}
+Use "flag" only for things that should stop the send until checked. 0-8 findings; omit nitpicks.`;
+
+  try {
+    const res = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1500,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = res.content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text)
+      .join("");
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("No JSON in response");
+    const parsed = JSON.parse(match[0]);
+    const findings: SpotCheckFinding[] = Array.isArray(parsed.findings)
+      ? parsed.findings
+          .filter((f: any) => f && f.note)
+          .slice(0, 10)
+          .map((f: any) => ({
+            severity: ["info", "warn", "flag"].includes(f.severity) ? f.severity : "info",
+            area: String(f.area || "General").slice(0, 60),
+            note: String(f.note).slice(0, 500),
+          }))
+      : [];
+    return {
+      verdict: parsed.verdict === "needs_review" ? "needs_review" : "looks_good",
+      summary: String(parsed.summary || "").slice(0, 600),
+      findings,
+      model: MODEL,
+    };
+  } catch (err: any) {
+    // Advisory feature — a failed spot check must never block the close.
+    return {
+      verdict: "needs_review",
+      summary: "AI spot check unavailable — review manually.",
+      findings: [],
+      error: String(err?.message || err).slice(0, 300),
+    };
+  }
 }
 
 /** Previous calendar month for a given date — the default Monthly Rec period. */

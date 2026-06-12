@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, ArrowRight, Sparkles, Clock, Pause } from 
 import { ClientFlagsWidget } from "./client-flags-widget";
 import { ReclassRequestsWidget, type PendingReclassRequest } from "./reclass-requests-widget";
 import { ClientInboxWidget, type InboundCommRow } from "./client-inbox-widget";
+import { StatementApprovalsWidget, type StatementApprovalRow } from "./statement-approvals-widget";
 import { QboHealthAlert } from "@/components/QboHealthAlert";
 import { MonthlyBsCheckButton } from "./monthly-bs-check";
 
@@ -216,13 +217,54 @@ export default async function TodayPage() {
     inboundComms = [];
   }
 
+  // ─── Statements awaiting senior approval ───
+  // JR-submitted monthly closes + cleanup sign-offs (monthly_rec_runs
+  // status=pending_review). Senior-only: this is Lisa's approval queue —
+  // she reviews the statements on /monthly-rec and approves the send.
+  let statementApprovals: StatementApprovalRow[] = [];
+  if (isSenior) {
+    try {
+      const { data: pend } = await (service as any)
+        .from("monthly_rec_runs")
+        .select("client_link_id, period, kind, submitted_by, submitted_at, has_concerns, concerns")
+        .eq("status", "pending_review")
+        .order("submitted_at", { ascending: true });
+      const raw = (pend as any[]) || [];
+      if (raw.length > 0) {
+        const cIds = [...new Set(raw.map((r) => r.client_link_id))];
+        const uIds = [...new Set(raw.map((r) => r.submitted_by).filter(Boolean))];
+        const [{ data: cn }, { data: un }] = await Promise.all([
+          service.from("client_links").select("id, client_name").in("id", cIds),
+          uIds.length > 0
+            ? service.from("users").select("id, full_name, email").in("id", uIds)
+            : Promise.resolve({ data: [] as any[] }),
+        ]);
+        const nameById = new Map(((cn as any[]) || []).map((c) => [c.id, c.client_name]));
+        const userById = new Map(((un as any[]) || []).map((u) => [u.id, u.full_name || u.email]));
+        statementApprovals = raw.map((r) => ({
+          client_link_id: r.client_link_id,
+          client_name: nameById.get(r.client_link_id) || "(unknown client)",
+          period: r.period,
+          kind: r.kind === "cleanup" ? "cleanup" : "production_me",
+          submitted_by_name: userById.get(r.submitted_by) || "",
+          submitted_at: r.submitted_at,
+          has_concerns: !!r.has_concerns,
+          concerns: r.concerns,
+        }));
+      }
+    } catch {
+      statementApprovals = [];
+    }
+  }
+
   // If nothing's enabled AND no flags AND no reclass requests AND no
-  // inbound messages, show the empty state
+  // inbound messages AND no statement approvals, show the empty state
   if (
     eligibleClients.length === 0 &&
     pendingFlags.length === 0 &&
     pendingReclassRequests.length === 0 &&
-    inboundComms.length === 0
+    inboundComms.length === 0 &&
+    statementApprovals.length === 0
   ) {
     return (
       <AppShell>
@@ -363,6 +405,8 @@ export default async function TodayPage() {
 
         {/* Inbound client messages + statement uploads — top slot: a
             client sending files is usually waiting on us to act on them */}
+        {statementApprovals.length > 0 && <StatementApprovalsWidget rows={statementApprovals} />}
+
         {inboundComms.length > 0 && <ClientInboxWidget rows={inboundComms} />}
 
         {/* Portal flags from clients — shown above daily recon since they're

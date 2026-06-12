@@ -50,23 +50,54 @@ export async function GET(request: Request) {
     (c) => !c.daily_recon_enabled && c.cleanup_completed_at
   );
 
+  const RUN_COLS =
+    "client_link_id, period, kind, status, has_concerns, concerns, checks, checks_ran_at, completed_at, sent_to_client_at, email_delivery, ai_spot_check, submitted_by, submitted_at";
+
   // Run rows for the period (table may predate migration 62 in some envs)
   let runsByClient = new Map<string, any>();
+  // Cleanup sign-offs awaiting review/send — any period, scoped like the
+  // roster. These are the 'cleanup complete' gates.
+  let cleanupSignoffs: any[] = [];
   try {
     const ids = production.map((c) => c.id);
     if (ids.length > 0) {
       const { data: runs } = await (service as any)
         .from("monthly_rec_runs")
-        .select("client_link_id, status, has_concerns, concerns, checks, checks_ran_at, completed_at, sent_to_client_at, email_delivery")
+        .select(RUN_COLS)
         .eq("period", period)
+        .eq("kind", "production_me")
         .in("client_link_id", ids);
       runsByClient = new Map(((runs as any[]) || []).map((r) => [r.client_link_id, r]));
+    }
+
+    const allIds = all.map((c) => c.id);
+    if (allIds.length > 0) {
+      const { data: signoffs } = await (service as any)
+        .from("monthly_rec_runs")
+        .select(RUN_COLS)
+        .eq("kind", "cleanup")
+        .neq("status", "complete")
+        .in("client_link_id", allIds);
+      const byId = new Map(all.map((c) => [c.id, c]));
+      cleanupSignoffs = ((signoffs as any[]) || []).map((r) => {
+        const c = byId.get(r.client_link_id);
+        return {
+          id: r.client_link_id,
+          client_name: (c as any)?.client_name || "Unknown",
+          jurisdiction: (c as any)?.jurisdiction || "",
+          state_province: (c as any)?.state_province || null,
+          paused: false,
+          last_synced_at: (c as any)?.last_synced_at || null,
+          run: r,
+        };
+      });
     }
   } catch {
     /* pre-migration env — every client shows "not started" */
   }
 
   return NextResponse.json({
+    cleanup_signoffs: cleanupSignoffs,
     period,
     is_senior: isSenior,
     production: production.map((c) => ({

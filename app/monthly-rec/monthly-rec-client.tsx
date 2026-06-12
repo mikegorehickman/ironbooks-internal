@@ -26,6 +26,12 @@ interface StatementLine {
   depth: number;
 }
 
+interface CashFlowSection {
+  title: string;
+  total: number;
+  items: { label: string; amount: number }[];
+}
+
 interface Statements {
   pl: {
     totalIncome: number;
@@ -39,10 +45,25 @@ interface Statements {
     totalLiabilities: number;
     totalEquity: number;
   };
+  cfs?: {
+    operating: CashFlowSection;
+    investing: CashFlowSection;
+    financing: CashFlowSection;
+    netCashChange: number;
+    cashAtStart: number;
+    cashAtEnd: number;
+  } | null;
+}
+
+interface SpotCheck {
+  verdict: "looks_good" | "needs_review";
+  summary: string;
+  findings: { severity: "info" | "warn" | "flag"; area: string; note: string }[];
+  error?: string;
 }
 
 interface Run {
-  status: "open" | "complete";
+  status: "open" | "pending_review" | "complete";
   has_concerns: boolean;
   concerns: string | null;
   checks: { checks: Check[]; overall: CheckStatus } | null;
@@ -51,6 +72,11 @@ interface Run {
   statements?: Statements | null;
   sent_to_client_at?: string | null;
   email_delivery?: { sent: boolean; reason?: string } | null;
+  kind?: "production_me" | "cleanup";
+  period?: string;
+  ai_spot_check?: SpotCheck | null;
+  submitted_at?: string | null;
+  submitted_by?: string | null;
 }
 
 interface ProdClient {
@@ -107,6 +133,7 @@ function periodLabel(period: string): string {
 export function MonthlyRecClient() {
   const [period, setPeriod] = useState<string>("");
   const [production, setProduction] = useState<ProdClient[]>([]);
+  const [cleanupSignoffs, setCleanupSignoffs] = useState<ProdClient[]>([]);
   const [eligible, setEligible] = useState<EligibleClient[]>([]);
   const [isSenior, setIsSenior] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -121,6 +148,7 @@ export function MonthlyRecClient() {
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
       setPeriod(body.period);
       setProduction(body.production || []);
+      setCleanupSignoffs(body.cleanup_signoffs || []);
       setEligible(body.eligible || []);
       setIsSenior(!!body.is_senior);
     } catch (e: any) {
@@ -182,6 +210,25 @@ export function MonthlyRecClient() {
         </div>
       ) : (
         <>
+          {/* Cleanup sign-offs — the 'cleanup complete' gate. Any period. */}
+          {cleanupSignoffs.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-navy flex items-center gap-2">
+                <Sparkles size={14} className="text-violet-600" />
+                Cleanup sign-offs awaiting statements review ({cleanupSignoffs.length})
+              </h3>
+              {cleanupSignoffs.map((c) => (
+                <ClientRecCard
+                  key={`signoff-${c.id}`}
+                  client={c}
+                  period={c.run?.period || period}
+                  isSenior={isSenior}
+                  onChanged={() => load(period)}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Production roster */}
           {production.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
@@ -196,7 +243,13 @@ export function MonthlyRecClient() {
           ) : (
             <div className="space-y-3">
               {production.map((c) => (
-                <ClientRecCard key={c.id} client={c} period={period} onChanged={() => load(period)} />
+                <ClientRecCard
+                  key={c.id}
+                  client={c}
+                  period={period}
+                  isSenior={isSenior}
+                  onChanged={() => load(period)}
+                />
               ))}
             </div>
           )}
@@ -230,10 +283,12 @@ export function MonthlyRecClient() {
 function ClientRecCard({
   client,
   period,
+  isSenior,
   onChanged,
 }: {
   client: ProdClient;
   period: string;
+  isSenior: boolean;
   onChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -258,6 +313,9 @@ function ClientRecCard({
   const checks = run?.checks?.checks || [];
   const overall = run?.checks?.overall;
   const isComplete = run?.status === "complete";
+  const isPending = run?.status === "pending_review";
+  const isCleanupKind = run?.kind === "cleanup";
+  const [spotChecking, setSpotChecking] = useState(false);
 
   async function act(body: Record<string, unknown>) {
     const res = await fetch(`/api/clients/${client.id}/monthly-rec`, {
@@ -293,10 +351,37 @@ function ClientRecCard({
       setLocalRun(r);
       setReviewing(true);
       setAttested(false);
+      // Fire the AI spot check in the background — advisory second opinion
+      // alongside the human review, never blocking it.
+      setSpotChecking(true);
+      act({ action: "spot_check" })
+        .then((r2) => setLocalRun(r2))
+        .catch(() => {})
+        .finally(() => setSpotChecking(false));
     } catch (e: any) {
       setError(e?.message || "Couldn't load statements");
     } finally {
       setLoadingStatements(false);
+    }
+  }
+
+  async function submitForReview() {
+    setCompleting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/clients/${client.id}/monthly-rec`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "submit", period, attested: true, concerns }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      playSound("scan_complete");
+      onChanged();
+    } catch (e: any) {
+      setError(e?.message || "Couldn't submit");
+    } finally {
+      setCompleting(false);
     }
   }
 
@@ -362,12 +447,22 @@ function ClientRecCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-navy">{client.client_name}</span>
+            {isCleanupKind && (
+              <span className="text-[10px] font-bold bg-violet-100 text-violet-800 px-1.5 py-0.5 rounded">
+                CLEANUP SIGN-OFF
+              </span>
+            )}
             {client.paused && (
               <span className="text-[10px] font-bold bg-gray-100 text-ink-slate px-1.5 py-0.5 rounded">
                 RECON PAUSED
               </span>
             )}
-            {isComplete ? (
+            {isPending && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded">
+                Awaiting senior approval
+              </span>
+            )}
+            {!isPending && isComplete ? (
               <span
                 className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded ${
                   run?.has_concerns
@@ -387,7 +482,7 @@ function ClientRecCard({
             )}
           </div>
         </div>
-        {!isComplete && (
+        {!isComplete && !isPending && (
           <button
             onClick={runChecks}
             disabled={running}
@@ -399,6 +494,34 @@ function ClientRecCard({
               <PlayCircle size={12} />
             )}
             {run?.checks_ran_at ? "Re-run checks" : "Run checks"}
+          </button>
+        )}
+        {isPending && isSenior && !reviewing && (
+          <button
+            onClick={() => {
+              setExpanded(true);
+              loadStatements();
+            }}
+            disabled={loadingStatements}
+            className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-2 rounded-lg disabled:opacity-50 flex-shrink-0"
+          >
+            {loadingStatements ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <FileText size={12} />
+            )}
+            Review &amp; approve
+          </button>
+        )}
+        {isPending && (
+          <button
+            onClick={reopen}
+            disabled={completing}
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-slate hover:text-navy px-2 py-1.5 disabled:opacity-50 flex-shrink-0"
+            title={isSenior ? "Send back to the bookkeeper" : "Withdraw and keep working"}
+          >
+            <RotateCcw size={11} />
+            {isSenior ? "Send back" : "Withdraw"}
           </button>
         )}
         {isComplete && (
@@ -459,7 +582,7 @@ function ClientRecCard({
               Step 1: review the actual financial statements.
               Step 2: attest. Step 3: send → email + portal notification +
               period closed. No shortcut to "complete". */}
-          {!isComplete && !reviewing && (
+          {!isComplete && !isPending && !reviewing && (
             <button
               onClick={loadStatements}
               disabled={loadingStatements || !run?.checks_ran_at}
@@ -475,9 +598,22 @@ function ClientRecCard({
             </button>
           )}
 
+          {isPending && !isSenior && (
+            <p className="text-sm text-ink-slate">
+              Submitted for senior review
+              {run?.submitted_at ? ` ${new Date(run.submitted_at).toLocaleString()}` : ""} —
+              a lead/admin will review the statements and send them to the client.
+              {run?.concerns && (
+                <span className="block mt-1 text-xs text-amber-800">Concerns noted: {run.concerns}</span>
+              )}
+            </p>
+          )}
+
           {!isComplete && reviewing && run?.statements && (
             <div className="space-y-4">
               <StatementsReview statements={run.statements} monthLabel={periodLabel(period)} />
+
+              <SpotCheckPanel spot={run.ai_spot_check || null} loading={spotChecking} />
 
               <div>
                 <label className="text-xs font-semibold text-ink-slate uppercase tracking-wider">
@@ -502,27 +638,53 @@ function ClientRecCard({
                 />
                 <span className="text-xs text-navy leading-relaxed">
                   I have reviewed {client.client_name}&apos;s {periodLabel(period)}{" "}
-                  Profit &amp; Loss and Balance Sheet above, and they are accurate
-                  and ready to share with the client.
+                  Profit &amp; Loss, Balance Sheet, and Cash Flow Statement above
+                  (including the AI spot check), and they are accurate and ready
+                  to share with the client.
                 </span>
               </label>
 
-              <button
-                onClick={sendToClient}
-                disabled={completing || !attested}
-                title={!attested ? "Tick the attestation first" : undefined}
-                className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2 rounded-lg disabled:opacity-50"
-              >
-                {completing ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <Send size={13} />
-                )}
-                Approve &amp; send to client
-              </button>
-              <p className="text-[11px] text-ink-light -mt-2">
-                Emails the client, posts a notification in their portal, and closes {periodLabel(period)}.
-              </p>
+              {isSenior ? (
+                <>
+                  <button
+                    onClick={sendToClient}
+                    disabled={completing || !attested}
+                    title={!attested ? "Tick the attestation first" : undefined}
+                    className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2 rounded-lg disabled:opacity-50"
+                  >
+                    {completing ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Send size={13} />
+                    )}
+                    Approve &amp; send to client
+                  </button>
+                  <p className="text-[11px] text-ink-light -mt-2">
+                    Emails the client, posts a notification in their portal, and closes {periodLabel(period)}
+                    {isCleanupKind ? " — and marks the cleanup complete" : ""}.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={submitForReview}
+                    disabled={completing || !attested}
+                    title={!attested ? "Tick the attestation first" : undefined}
+                    className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold px-4 py-2 rounded-lg disabled:opacity-50"
+                  >
+                    {completing ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Send size={13} />
+                    )}
+                    Submit for senior review
+                  </button>
+                  <p className="text-[11px] text-ink-light -mt-2">
+                    Goes to a lead/admin&apos;s Today queue — they review the same
+                    statements and approve the send to the client.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -571,7 +733,7 @@ function StatementsReview({
   statements: Statements;
   monthLabel: string;
 }) {
-  const { pl, bs } = statements;
+  const { pl, bs, cfs } = statements;
   return (
     <div className="space-y-3">
       {/* P&L */}
@@ -650,6 +812,96 @@ function StatementsReview({
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Cash Flow Statement */}
+      {cfs && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-2.5 bg-navy text-white text-sm font-bold">
+            Cash Flow — {monthLabel}
+          </div>
+          <div className="grid grid-cols-4 divide-x divide-gray-100 text-center border-b border-gray-100">
+            <div className="py-2.5">
+              <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Operating</div>
+              <div className="font-mono font-bold text-navy">${money(cfs.operating?.total || 0)}</div>
+            </div>
+            <div className="py-2.5">
+              <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Investing</div>
+              <div className="font-mono font-bold text-navy">${money(cfs.investing?.total || 0)}</div>
+            </div>
+            <div className="py-2.5">
+              <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Financing</div>
+              <div className="font-mono font-bold text-navy">${money(cfs.financing?.total || 0)}</div>
+            </div>
+            <div className="py-2.5">
+              <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Net change</div>
+              <div className={`font-mono font-bold ${cfs.netCashChange >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                ${money(cfs.netCashChange)}
+              </div>
+            </div>
+          </div>
+          <div className="px-4 py-2 text-xs text-ink-slate flex items-center justify-between">
+            <span>Cash at start: <span className="font-mono text-navy">${money(cfs.cashAtStart)}</span></span>
+            <span>Cash at end: <span className="font-mono font-semibold text-navy">${money(cfs.cashAtEnd)}</span></span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AI SPOT CHECK PANEL ─────────────────────────────────────────────────
+
+function SpotCheckPanel({ spot, loading }: { spot: SpotCheck | null; loading: boolean }) {
+  if (loading && !spot) {
+    return (
+      <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 flex items-center gap-2.5 text-sm text-violet-900">
+        <Loader2 size={14} className="animate-spin text-violet-600" />
+        AI is spot-checking these statements against painting-industry standards…
+      </div>
+    );
+  }
+  if (!spot) return null;
+  const ok = spot.verdict === "looks_good";
+  return (
+    <div
+      className={`rounded-xl border overflow-hidden ${
+        ok ? "border-emerald-200" : "border-amber-300"
+      }`}
+    >
+      <div
+        className={`px-4 py-2.5 flex items-center gap-2 text-sm font-bold ${
+          ok ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"
+        }`}
+      >
+        <Sparkles size={14} className={ok ? "text-emerald-600" : "text-amber-600"} />
+        AI spot check: {ok ? "looks good" : "review the items below"}
+        {loading && <Loader2 size={12} className="animate-spin ml-1 opacity-60" />}
+      </div>
+      <div className="px-4 py-3 bg-white space-y-2">
+        {spot.summary && <p className="text-xs text-ink-slate">{spot.summary}</p>}
+        {spot.findings.length > 0 && (
+          <ul className="space-y-1.5">
+            {spot.findings.map((f, i) => (
+              <li key={i} className="flex items-start gap-2 text-xs">
+                {f.severity === "flag" ? (
+                  <XCircle size={13} className="text-red-600 flex-shrink-0 mt-0.5" />
+                ) : f.severity === "warn" ? (
+                  <AlertTriangle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 size={13} className="text-slate-400 flex-shrink-0 mt-0.5" />
+                )}
+                <span className="text-ink-slate">
+                  <strong className="text-navy">{f.area}:</strong> {f.note}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-[10px] text-ink-light">
+          Advisory only — your review is the one that counts.
+          {spot.error ? ` (AI check degraded: ${spot.error})` : ""}
+        </p>
       </div>
     </div>
   );
