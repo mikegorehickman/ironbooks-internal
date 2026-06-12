@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { previousMonthPeriod } from "@/lib/monthly-rec";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const action = body.action;
-  if (!["enable", "pause", "unpause", "disable", "bs_on", "bs_off"].includes(action || "")) {
+  if (!["enable", "pause", "unpause", "disable", "bs_on", "bs_off", "promote_pl_only"].includes(action || "")) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
@@ -69,7 +70,7 @@ export async function POST(
   // Sanity: don't let someone enable daily recon on a client with no
   // QBO connection — the engine will throw on first run anyway and we'd
   // rather surface the issue here than in a cron failure log.
-  if (action === "enable") {
+  if (action === "enable" || action === "promote_pl_only") {
     const c: any = client;
     if (!c.qbo_realm_id || !c.qbo_refresh_token) {
       return NextResponse.json(
@@ -114,6 +115,18 @@ export async function POST(
     case "bs_on":
       updates.bs_enabled = true;
       break;
+    // One-shot from the BS Cleanup wizard: "P&L ready, BS waiting on
+    // client — move to production." Client goes live on P&L-only service
+    // (portal BS/CFS show the friendly placeholder) AND lands on the
+    // Production board as Waiting on Client / waiting for statements, so
+    // nobody forgets the BS is unfinished.
+    case "promote_pl_only":
+      updates.daily_recon_enabled = true;
+      updates.daily_recon_paused = false;
+      updates.daily_recon_paused_reason = null;
+      updates.daily_recon_enabled_at = now;
+      updates.bs_enabled = false;
+      break;
   }
 
   const { error: updateErr } = await service
@@ -122,6 +135,30 @@ export async function POST(
     .eq("id", id);
   if (updateErr) {
     return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  }
+
+  // promote_pl_only also stamps the Production board: Waiting on Client /
+  // waiting for statements for the current rec period. Best-effort — board
+  // state is bookkeeping convenience, never a reason to fail the promote.
+  if (action === "promote_pl_only") {
+    try {
+      const p = previousMonthPeriod();
+      await (service as any).from("monthly_rec_runs").upsert(
+        {
+          client_link_id: id,
+          period: p.period,
+          period_start: p.periodStart,
+          period_end: p.periodEnd,
+          board_status: "waiting_client",
+          waiting_reasons: ["waiting_statements"],
+          status_note: "P&L-only promote — balance sheet waiting on client docs",
+          created_by: user.id,
+        },
+        { onConflict: "client_link_id,period" }
+      );
+    } catch (err: any) {
+      console.warn(`[production] board stamp failed (non-fatal): ${err?.message}`);
+    }
   }
 
   await service.from("audit_log").insert({

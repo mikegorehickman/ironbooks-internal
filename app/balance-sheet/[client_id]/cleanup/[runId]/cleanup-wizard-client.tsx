@@ -1438,6 +1438,9 @@ function NeedFromClientPanel({
   const [sending, setSending] = useState(false);
   const [sentInfo, setSentInfo] = useState<{ count: number; emailWarning: string | null } | null>(null);
   const [error, setError] = useState("");
+  const [promoting, setPromoting] = useState(false);
+  const [promoted, setPromoted] = useState(false);
+  const [promoteError, setPromoteError] = useState("");
 
   const isChecked = (id: string) => checked[id] !== false; // default checked
   const selected = suggested.filter((i) => isChecked(i.id));
@@ -1500,7 +1503,7 @@ function NeedFromClientPanel({
       </p>
 
       {sentInfo ? (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <div className="text-sm text-emerald-700 flex items-center gap-2">
             <CheckCircle2 size={14} /> Request for {sentInfo.count} item
             {sentInfo.count === 1 ? "" : "s"} sent — replies land on your Today queue.
@@ -1510,6 +1513,60 @@ function NeedFromClientPanel({
               <AlertCircle size={13} className="flex-shrink-0 mt-0.5" /> {sentInfo.emailWarning}
             </div>
           )}
+
+          {/* P&L-only promote — don't make the client wait on their own
+              paperwork for monthly service. BS stays visibly unfinished:
+              Production board shows Waiting on Client, portal greys out
+              the Balance Sheet + Cash Flow until bs_on flips it back. */}
+          <div className="pt-3 border-t border-gray-100">
+            {promoted ? (
+              <div className="text-sm text-emerald-700 flex items-center gap-2">
+                <CheckCircle2 size={14} /> Moved to Production on P&L-only service. They&apos;re on
+                the Production board as &quot;Waiting on Client,&quot; and their portal shows the
+                balance sheet as in-progress. Flip BS back on from the Production board once the
+                docs arrive and the cleanup finishes.
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-ink-light mb-2">
+                  Don&apos;t want monthly service blocked while you wait? Promote them now on P&L
+                  only — the Production board tracks them as Waiting on Client, and their portal
+                  balance sheet is greyed out until you turn it back on.
+                </p>
+                {promoteError && (
+                  <div className="p-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-800 mb-2">
+                    {promoteError}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  disabled={promoting}
+                  onClick={async () => {
+                    setPromoting(true);
+                    setPromoteError("");
+                    try {
+                      const res = await fetch(`/api/clients/${clientLinkId}/production`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "promote_pl_only" }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || "Failed to promote");
+                      setPromoted(true);
+                    } catch (err: any) {
+                      setPromoteError(err.message);
+                    } finally {
+                      setPromoting(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 bg-navy hover:bg-navy/90 text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-40"
+                >
+                  {promoting ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                  P&amp;L ready, BS waiting on client — move to Production
+                </button>
+              </>
+            )}
+          </div>
         </div>
       ) : (
         <>
