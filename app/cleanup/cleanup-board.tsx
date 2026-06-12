@@ -37,6 +37,48 @@ interface KanbanCard {
   bookkeeper: { id: string; full_name: string; avatar_url: string | null } | null;
   latest_coa_job: { id: string; status: string } | null;
   latest_reclass_job: { id: string; status: string } | null;
+  bank_rule_count: number;
+  has_complete_reclass: boolean;
+}
+
+/* ── Next-step chips ──────────────────────────────────────────────────
+   One derived label per card answering "what's the next action?" —
+   mirrors the funnel audit so the board reads as waves instead of one
+   giant In Progress pile. Lower rank = further along (sorted first). */
+
+type ChipKey =
+  | "signoff_submitted"
+  | "signoff_only"
+  | "needs_rules"
+  | "reclass_review"
+  | "needs_reclass"
+  | "coa_review"
+  | "failed"
+  | "not_started";
+
+const CHIP_META: Record<ChipKey, { label: string; cls: string; rank: number }> = {
+  signoff_submitted: { label: "Awaiting mgr review", cls: "bg-purple-100 text-purple-700", rank: 0 },
+  signoff_only: { label: "Sign-off only", cls: "bg-emerald-100 text-emerald-700", rank: 1 },
+  needs_rules: { label: "Needs bank rules", cls: "bg-teal/15 text-teal-dark", rank: 2 },
+  reclass_review: { label: "Reclass in review", cls: "bg-blue-100 text-blue-700", rank: 3 },
+  needs_reclass: { label: "Needs reclass", cls: "bg-amber-100 text-amber-700", rank: 4 },
+  coa_review: { label: "COA in review", cls: "bg-blue-100 text-blue-700", rank: 5 },
+  failed: { label: "Job failed — fix", cls: "bg-red-100 text-red-700", rank: 6 },
+  not_started: { label: "Not started", cls: "bg-gray-100 text-ink-slate", rank: 7 },
+};
+
+function classifyCard(card: KanbanCard, inReview: boolean): ChipKey {
+  if (inReview) return "signoff_submitted";
+  const coa = card.latest_coa_job;
+  const reclass = card.latest_reclass_job;
+  const reclassDone = card.has_complete_reclass || reclass?.status === "complete";
+  if (coa?.status === "failed" || (reclass?.status === "failed" && !reclassDone)) return "failed";
+  if (reclassDone && card.bank_rule_count > 0) return "signoff_only";
+  if (reclassDone) return "needs_rules";
+  if (reclass && ACTIVE.has(reclass.status)) return "reclass_review";
+  if (coa?.status === "complete") return "needs_reclass";
+  if (coa && ACTIVE.has(coa.status)) return "coa_review";
+  return "not_started";
 }
 
 type StepState = "todo" | "active" | "done" | "failed" | "skipped";
@@ -98,7 +140,11 @@ function buildSteps(card: KanbanCard, inReview: boolean): Step[] {
       state: reclassState,
       href: reclass ? `/reclass/${reclass.id}/review` : "/reclass/new",
     },
-    { label: "3 · Bank Rules", state: "todo", href: "/rules/new" },
+    {
+      label: "3 · Bank Rules",
+      state: card.bank_rule_count > 0 ? "done" : "todo",
+      href: reclass ? `/reclass/${reclass.id}/bank-rules` : "/rules/new",
+    },
     { label: "4 · Stripe", state: stripeState, href: null },
     {
       label: "5 · BS Cleanup",
@@ -164,19 +210,45 @@ export function CleanupBoard() {
     load();
   }, []);
 
+  const [chipFilter, setChipFilter] = useState<ChipKey | null>(null);
+
   const collapsed = useMemo(() => {
     const get = (k: string) => columns?.[k]?.cards || [];
+    // In Progress sorts furthest-along first (chip rank asc) so the
+    // sign-off-only cards stack at the top and the column reads as a funnel.
+    const inProgress = [
+      ...get("coa_in_progress"),
+      ...get("reclass_in_progress"),
+      ...get("awaiting_stripe"),
+      ...get("bs_cleanup"),
+    ].sort(
+      (a, b) =>
+        CHIP_META[classifyCard(a, false)].rank - CHIP_META[classifyCard(b, false)].rank
+    );
     return {
       needs_cleanup: get("needs_cleanup"),
-      in_progress: [
-        ...get("coa_in_progress"),
-        ...get("reclass_in_progress"),
-        ...get("awaiting_stripe"),
-        ...get("bs_cleanup"),
-      ],
+      in_progress: inProgress,
       review: get("review"),
     };
   }, [columns]);
+
+  // Funnel counts across the whole board, for the summary strip.
+  const funnel = useMemo(() => {
+    const counts = new Map<ChipKey, number>();
+    const add = (cards: KanbanCard[], inReview: boolean) => {
+      for (const c of cards) {
+        const k = classifyCard(c, inReview);
+        counts.set(k, (counts.get(k) || 0) + 1);
+      }
+    };
+    add(collapsed.needs_cleanup, false);
+    add(collapsed.in_progress, false);
+    add(collapsed.review, true);
+    return counts;
+  }, [collapsed]);
+
+  const visible = (cards: KanbanCard[], inReview: boolean) =>
+    chipFilter ? cards.filter((c) => classifyCard(c, inReview) === chipFilter) : cards;
 
   const signoffByClient = useMemo(
     () => new Map(signoffs.map((s) => [s.id, s])),
@@ -211,6 +283,38 @@ export function CleanupBoard() {
         </Link>
       </div>
 
+      {/* Funnel strip — clickable counts that filter the board */}
+      {!loading && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(Object.keys(CHIP_META) as ChipKey[])
+            .sort((a, b) => CHIP_META[a].rank - CHIP_META[b].rank)
+            .filter((k) => (funnel.get(k) || 0) > 0)
+            .map((k) => (
+              <button
+                key={k}
+                onClick={() => setChipFilter(chipFilter === k ? null : k)}
+                className={`text-xs font-semibold px-2.5 py-1 rounded-full transition-all ${CHIP_META[k].cls} ${
+                  chipFilter === k
+                    ? "ring-2 ring-navy/60"
+                    : chipFilter
+                    ? "opacity-40"
+                    : ""
+                }`}
+              >
+                {funnel.get(k)} {CHIP_META[k].label}
+              </button>
+            ))}
+          {chipFilter && (
+            <button
+              onClick={() => setChipFilter(null)}
+              className="text-xs text-ink-slate underline hover:text-navy ml-1"
+            >
+              Clear filter
+            </button>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
           <Loader2 className="animate-spin text-teal mx-auto" size={28} />
@@ -218,7 +322,7 @@ export function CleanupBoard() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           {COLS.map((col) => {
-            const cards = collapsed[col.id];
+            const cards = visible(collapsed[col.id], col.id === "review");
             return (
               <div key={col.id} className={`bg-white rounded-2xl border-2 ${col.tone} overflow-hidden`}>
                 <div className="px-3 py-2.5 border-b border-gray-100">
@@ -339,12 +443,19 @@ function CleanupCard({
     <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <Link
-            href={`/clients/${card.id}`}
-            className="text-sm font-semibold text-navy hover:text-teal truncate block"
-          >
-            {card.client_name}
-          </Link>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Link
+              href={`/clients/${card.id}`}
+              className="text-sm font-semibold text-navy hover:text-teal truncate"
+            >
+              {card.client_name}
+            </Link>
+            <span
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${CHIP_META[classifyCard(card, inReview)].cls}`}
+            >
+              {CHIP_META[classifyCard(card, inReview)].label}
+            </span>
+          </div>
           <div className="text-[10px] text-ink-light flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => isSenior && setEditing(!editing)}

@@ -116,6 +116,17 @@ export async function GET(request: Request) {
     .select("client_link_id")
     .in("client_link_id", clientIds);
 
+  // Bank-rule counts — drives the "Sign-off only" vs "Needs bank rules"
+  // next-step chip and the step-3 checklist state on the cleanup board.
+  const { data: ruleRows } = await service
+    .from("bank_rules")
+    .select("client_link_id")
+    .in("client_link_id", clientIds);
+  const ruleCountMap = new Map<string, number>();
+  for (const r of (ruleRows as any[]) || []) {
+    ruleCountMap.set(r.client_link_id, (ruleCountMap.get(r.client_link_id) || 0) + 1);
+  }
+
   // Bookkeeper names
   const { data: bookkeepers } = await service
     .from("users")
@@ -235,6 +246,8 @@ export async function GET(request: Request) {
       bookkeeper: bk ? { id: bk.id, full_name: bk.full_name, avatar_url: bk.avatar_url } : null,
       latest_coa_job: coa ? { id: coa.id, status: coa.status } : null,
       latest_reclass_job: reclass ? { id: reclass.id, status: reclass.status } : null,
+      bank_rule_count: ruleCountMap.get(client.id) || 0,
+      has_complete_reclass: hasCompleteReclass,
     };
 
     // ── PRIORITY 1: senior review (submitted, awaiting admin/lead) ──

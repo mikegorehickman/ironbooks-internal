@@ -137,6 +137,37 @@ export function ProductionBoard() {
         )}
       </div>
 
+      {/* BS-owed banner — production clients on P&L-only service still owe
+          a finished balance sheet. Don't let "in production" hide that. */}
+      {!loading && production.some((c) => c.bs_enabled === false) && (
+        <div className="bg-sky-50 border border-sky-200 rounded-2xl p-4">
+          <div className="text-sm font-bold text-sky-900 flex items-center gap-2">
+            <AlertCircle size={15} />
+            {production.filter((c) => c.bs_enabled === false).length} production client
+            {production.filter((c) => c.bs_enabled === false).length === 1 ? "" : "s"} still owe a
+            balance sheet (P&L-only service)
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {production
+              .filter((c) => c.bs_enabled === false)
+              .map((c) => (
+                <a
+                  key={c.id}
+                  href={`/balance-sheet/${c.id}/cleanup`}
+                  className="text-xs font-semibold bg-white border border-sky-200 text-sky-900 px-2.5 py-1 rounded-full hover:border-sky-400"
+                  title="Open BS cleanup — flip BS back on from their card here once it's done"
+                >
+                  {c.client_name} →
+                </a>
+              ))}
+          </div>
+          <p className="text-[11px] text-sky-800/80 mt-2">
+            Their portal shows the balance sheet as in-progress. Finish the BS cleanup, then flip
+            BS back on from their card to restore full statements.
+          </p>
+        </div>
+      )}
+
       {loading ? (
         <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
           <Loader2 className="animate-spin text-teal mx-auto" size={28} />
