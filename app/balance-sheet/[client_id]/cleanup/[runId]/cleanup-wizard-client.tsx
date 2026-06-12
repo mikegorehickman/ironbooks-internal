@@ -5,7 +5,7 @@ import {
   Loader2, RefreshCw, CheckCircle2, AlertCircle, XCircle,
   ArrowRight, Upload, Shield, FileText, Play, Lock,
   Building2, Wallet, FileSearch, Receipt, Coins,
-  Users as UsersIcon, Calculator, HelpCircle, X, Send, ClipboardList,
+  Users as UsersIcon, Calculator, HelpCircle, X, Send, ClipboardList, Mail, Copy,
 } from "lucide-react";
 import { MODULE_LABELS, MODULE_ORDER, type CleanupModule } from "@/lib/cleanup-system/types";
 import { ProposedEntryRow } from "./proposed-entry-row";
@@ -1445,7 +1445,7 @@ function NeedFromClientPanel({
   const [promoting, setPromoting] = useState(false);
   const [promoted, setPromoted] = useState(false);
   const [promoteError, setPromoteError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
   // Statements review gate — promote is locked until the bookkeeper has
   // actually looked at the statements and attested the P&L is right.
   const [stmts, setStmts] = useState<Statements | null>(null);
@@ -1461,78 +1461,22 @@ function NeedFromClientPanel({
 
   if (suggested.length === 0) return null;
 
-  /** Copy a paste-ready email — HTML table variant for Gmail/Double rich
-   *  fields, plain-text numbered list as the fallback. For clients with
-   *  no portal login (or when you'd rather send from your own inbox). */
-  async function copyEmail() {
-    const items = selected.map((i) => i.text);
-    if (extraTrimmed) items.push(extraTrimmed);
-    if (items.length === 0) return;
+  const requestItems = [
+    ...selected.map((i) => i.text),
+    ...(extraTrimmed ? [extraTrimmed] : []),
+  ];
 
-    const esc = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const rows = items
-      .map(
-        (t, i) => `
-      <tr>
-        <td style="border:1px solid #E5E7EB;padding:8px 10px;text-align:center;color:#0F1F2E;font-weight:700;width:36px;">${i + 1}</td>
-        <td style="border:1px solid #E5E7EB;padding:8px 12px;color:#33414E;">${esc(t)}</td>
-      </tr>`
-      )
-      .join("");
-    const html = `
-<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#33414E;font-size:14px;line-height:1.5;">
-  <p>Hi!</p>
-  <p>We're deep-cleaning the books for <strong>${esc(clientName)}</strong> right now, and we need a few things from you to finish the job:</p>
-  <table style="border-collapse:collapse;margin:14px 0;width:100%;max-width:640px;">
-    <tr>
-      <th style="border:1px solid #E5E7EB;background:#F8FAFA;padding:8px 10px;text-align:center;color:#0F1F2E;width:36px;">#</th>
-      <th style="border:1px solid #E5E7EB;background:#F8FAFA;padding:8px 12px;text-align:left;color:#0F1F2E;">What we need</th>
-    </tr>${rows}
-  </table>
-  <p>The easiest way to get these to us: <strong>just reply to this email with the files attached</strong> (PDF, CSV, Excel, or photos all work). For the questions, type your answer right in the reply.</p>
-  <p>Thanks!<br/>Your Ironbooks bookkeeping team</p>
-</div>`;
-    const text = [
-      `Hi!`,
-      ``,
-      `We're deep-cleaning the books for ${clientName} right now, and we need a few things from you to finish the job:`,
-      ``,
-      ...items.map((t, i) => `${i + 1}. ${t}`),
-      ``,
-      `The easiest way to get these to us: just reply to this email with the files attached (PDF, CSV, Excel, or photos all work). For the questions, type your answer right in the reply.`,
-      ``,
-      `Thanks!`,
-      `Your Ironbooks bookkeeping team`,
-    ].join("\n");
-
-    try {
-      if (typeof ClipboardItem !== "undefined") {
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            "text/html": new Blob([html], { type: "text/html" }),
-            "text/plain": new Blob([text], { type: "text/plain" }),
-          }),
-        ]);
-      } else {
-        await navigator.clipboard.writeText(text);
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      setError("Couldn't access the clipboard — copy manually from a draft instead.");
-    }
-  }
-
+  // Branded email preview + Resend send + copy — same modal pattern as
+  // the UF audit email tool.
   const copyButton = (
     <button
       type="button"
-      onClick={copyEmail}
+      onClick={() => setEmailModalOpen(true)}
       disabled={totalCount === 0}
       className="inline-flex items-center gap-2 bg-white hover:bg-gray-50 border border-gray-200 text-navy text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-40"
     >
-      {copied ? <CheckCircle2 size={14} className="text-emerald-600" /> : <FileText size={14} />}
-      {copied ? "Copied — paste into Gmail/Double" : "Copy as email (with table)"}
+      <Mail size={14} />
+      Preview &amp; send email
     </button>
   );
 
@@ -1580,6 +1524,14 @@ function NeedFromClientPanel({
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
+      {emailModalOpen && (
+        <RequestDocsEmailModal
+          clientLinkId={clientLinkId}
+          clientName={clientName}
+          items={requestItems}
+          onClose={() => setEmailModalOpen(false)}
+        />
+      )}
       <h3 className="font-bold text-navy mb-1 flex items-center gap-2">
         <ClipboardList size={14} /> Need from client
       </h3>
@@ -1781,6 +1733,284 @@ function NeedFromClientPanel({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/* ── Request-docs email modal ─────────────────────────────────────────
+   Branded preview + direct send. Mirrors the UF audit EmailDraftModal:
+   rendered/plain preview tabs, copy-formatted (HTML+plain ClipboardItem),
+   and a Send button that delivers through Resend via
+   /api/clients/[id]/request-docs-email (which also mirrors the message
+   into the client thread for the trail). */
+
+function buildRequestDocsEmail(clientName: string, items: string[]) {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rows = items
+    .map(
+      (t, i) => `
+      <tr>
+        <td style="border:1px solid #E5E7EB;padding:9px 10px;text-align:center;color:#1A9B8F;font-weight:700;width:36px;background:#ffffff;">${i + 1}</td>
+        <td style="border:1px solid #E5E7EB;padding:9px 12px;color:#33414E;background:#ffffff;">${esc(t)}</td>
+      </tr>`
+    )
+    .join("");
+  const html = `
+<div style="background:#F4F5F7;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:620px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;">
+    <div style="background:#0F1F2E;padding:22px 28px;">
+      <div style="color:#ffffff;font-size:18px;font-weight:700;">Ironbooks</div>
+      <div style="color:#8CD3CC;font-size:12px;margin-top:2px;">SNAP — your books, live</div>
+    </div>
+    <div style="padding:28px;">
+      <h2 style="margin:0 0 6px;color:#0F1F2E;font-size:18px;">We need a few things to finish your books</h2>
+      <p style="color:#33414E;font-size:14px;line-height:1.55;margin:0 0 16px;">
+        Hi! We're deep-cleaning the books for <strong>${esc(clientName)}</strong> right now,
+        and we need ${items.length === 1 ? "one thing" : `${items.length} things`} from you to finish the job:
+      </p>
+      <table style="border-collapse:collapse;margin:0 0 20px;width:100%;">
+        <tr>
+          <th style="border:1px solid #E5E7EB;background:#F8FAFA;padding:9px 10px;text-align:center;color:#0F1F2E;font-size:12px;width:36px;">#</th>
+          <th style="border:1px solid #E5E7EB;background:#F8FAFA;padding:9px 12px;text-align:left;color:#0F1F2E;font-size:12px;">WHAT WE NEED</th>
+        </tr>${rows}
+      </table>
+      <div style="background:#F8FAFA;border:1px solid #E5E7EB;border-left:3px solid #1A9B8F;border-radius:8px;padding:14px 16px;margin:0 0 20px;color:#33414E;font-size:13px;line-height:1.55;">
+        <strong>The easiest way:</strong> just reply to this email with the files attached —
+        PDF, CSV, Excel, or photos all work. For the questions, type your answer right in the reply.
+      </div>
+      <p style="color:#33414E;font-size:14px;margin:0;">
+        Thanks!<br/>Your Ironbooks bookkeeping team
+      </p>
+    </div>
+  </div>
+  <div style="max-width:620px;margin:12px auto 0;text-align:center;color:#9AA3AD;font-size:11px;">
+    Sent by your Ironbooks bookkeeping team for ${esc(clientName)}.
+  </div>
+</div>`;
+  const text = [
+    `Hi!`,
+    ``,
+    `We're deep-cleaning the books for ${clientName} right now, and we need ${items.length === 1 ? "one thing" : `${items.length} things`} from you to finish the job:`,
+    ``,
+    ...items.map((t, i) => `${i + 1}. ${t}`),
+    ``,
+    `The easiest way: just reply to this email with the files attached (PDF, CSV, Excel, or photos all work). For the questions, type your answer right in the reply.`,
+    ``,
+    `Thanks!`,
+    `Your Ironbooks bookkeeping team`,
+  ].join("\n");
+  return { html, text };
+}
+
+function RequestDocsEmailModal({
+  clientLinkId,
+  clientName,
+  items,
+  onClose,
+}: {
+  clientLinkId: string;
+  clientName: string;
+  items: string[];
+  onClose: () => void;
+}) {
+  const [to, setTo] = useState("");
+  const [subject, setSubject] = useState(
+    `We need ${items.length === 1 ? "one thing" : `${items.length} things`} to finish cleaning up your books`
+  );
+  const [preview, setPreview] = useState<"rendered" | "plain">("rendered");
+  const [sending, setSending] = useState(false);
+  const [sentTo, setSentTo] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [copiedFormatted, setCopiedFormatted] = useState(false);
+
+  const { html, text } = useMemo(() => buildRequestDocsEmail(clientName, items), [clientName, items]);
+
+  // Prefill To with the client's portal-user emails when they exist.
+  useEffect(() => {
+    fetch(`/api/clients/${clientLinkId}/request-docs-email`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.emails) && d.emails.length > 0) {
+          setTo(d.emails.join(", "));
+        }
+      })
+      .catch(() => {});
+  }, [clientLinkId]);
+
+  const recipients = to
+    .split(/[,;\s]+/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+
+  async function sendEmail() {
+    if (recipients.length === 0 || sending) return;
+    setSending(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/request-docs-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: recipients, subject, html, text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Send failed");
+      setSentTo(data.recipients);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function copyFormatted() {
+    setError("");
+    try {
+      if (typeof ClipboardItem === "undefined") {
+        await navigator.clipboard.writeText(text);
+      } else {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([text], { type: "text/plain" }),
+          }),
+        ]);
+      }
+      setCopiedFormatted(true);
+      setTimeout(() => setCopiedFormatted(false), 2000);
+    } catch {
+      setError("Clipboard blocked — use the Plain text tab and copy manually.");
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto"
+      style={{ backgroundColor: "rgba(15, 31, 46, 0.6)", backdropFilter: "blur(4px)" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full my-8 flex flex-col">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <Mail size={18} className="text-teal" />
+              <h3 className="text-lg font-bold text-navy">Document request — {clientName}</h3>
+            </div>
+            <p className="text-xs text-ink-slate mt-1">
+              {items.length} item{items.length === 1 ? "" : "s"} · sends from Ironbooks support
+              via Resend, replies go to the monitored inbox
+            </p>
+          </div>
+          <button onClick={onClose} className="text-ink-slate hover:text-navy">
+            <X size={18} />
+          </button>
+        </div>
+
+        {sentTo !== null ? (
+          <div className="px-6 py-10 text-center space-y-2">
+            <CheckCircle2 size={28} className="mx-auto text-emerald-500" />
+            <div className="text-sm font-semibold text-navy">
+              Email sent to {sentTo} recipient{sentTo === 1 ? "" : "s"}
+            </div>
+            <p className="text-xs text-ink-slate max-w-sm mx-auto">
+              A copy is recorded in the client&apos;s message thread so the whole team can see the
+              request went out.
+            </p>
+            <button
+              onClick={onClose}
+              className="mt-2 inline-flex items-center gap-2 bg-navy text-white text-sm font-semibold px-5 py-2 rounded-lg"
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* To + Subject */}
+            <div className="px-6 pt-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-xs font-semibold text-ink-slate uppercase tracking-wider w-16 flex-shrink-0">To</span>
+                <input
+                  type="text"
+                  value={to}
+                  onChange={(e) => setTo(e.target.value)}
+                  placeholder="client@example.com (comma-separate multiple)"
+                  className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-navy text-sm focus:border-teal focus:outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-xs font-semibold text-ink-slate uppercase tracking-wider w-16 flex-shrink-0">Subject</span>
+                <input
+                  type="text"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  maxLength={200}
+                  className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-navy font-medium text-sm focus:border-teal focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Preview tabs */}
+            <div className="px-6 pt-4 flex items-center gap-1 border-b border-gray-100">
+              {(["rendered", "plain"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPreview(p)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-t ${
+                    preview === p
+                      ? "bg-gray-50 text-navy border-b-2 border-teal"
+                      : "text-ink-slate hover:text-navy"
+                  }`}
+                >
+                  {p === "rendered" ? "Rendered preview" : "Plain text"}
+                </button>
+              ))}
+            </div>
+
+            {/* Preview body */}
+            <div className="flex-1 overflow-y-auto bg-gray-50 px-6 py-4 max-h-[50vh]">
+              {preview === "rendered" ? (
+                <div
+                  className="rounded border border-gray-200 overflow-hidden"
+                  // Our own template — safe for dangerouslySetInnerHTML.
+                  dangerouslySetInnerHTML={{ __html: html }}
+                />
+              ) : (
+                <pre className="text-xs font-mono whitespace-pre-wrap bg-white border border-gray-200 rounded-lg p-4 text-navy">
+                  {text}
+                </pre>
+              )}
+            </div>
+
+            {/* Footer actions */}
+            <div className="px-6 py-4 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+              <button
+                onClick={sendEmail}
+                disabled={recipients.length === 0 || sending || !subject.trim()}
+                className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-40"
+              >
+                {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                Send email{recipients.length > 1 ? ` (${recipients.length})` : ""}
+              </button>
+              <button
+                onClick={copyFormatted}
+                className="inline-flex items-center gap-2 bg-white hover:bg-gray-50 border border-gray-200 text-navy text-sm font-semibold px-4 py-2 rounded-lg"
+              >
+                {copiedFormatted ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                {copiedFormatted ? "Copied" : "Copy formatted"}
+              </button>
+              {recipients.length === 0 && (
+                <span className="text-xs text-amber-700">
+                  Add the client&apos;s email address to send.
+                </span>
+              )}
+              {error && <span className="text-xs text-red-700">{error}</span>}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
