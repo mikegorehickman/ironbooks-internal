@@ -85,7 +85,7 @@ export async function sendAskClientQuestions(
     ``,
     ...list,
     ``,
-    `Just reply to this message with a quick note for each one — for example, "#1 was a payment to a subcontractor for the Hendricks job." Thanks!`,
+    `The fastest way to answer: open the Categorize page in your portal (${params.portalOrigin}/portal/categorize) and pick a category from the dropdown next to each one — if money just moved between your own accounts, choose it under "Money moved between my accounts." Or just reply to this message with a quick note for each. Thanks!`,
   ].join("\n");
 
   const { error: insertErr } = await service.from("client_communications").insert({
@@ -111,6 +111,8 @@ export async function sendAskClientQuestions(
     body,
     portalOrigin: params.portalOrigin,
     snippetChars: 7000,
+    portalPath: "/portal/categorize",
+    ctaLabel: "Log in to categorize",
   });
 
   await service.from("audit_log").insert({

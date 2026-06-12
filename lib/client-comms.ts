@@ -192,6 +192,10 @@ export async function emailPortalUsersAboutMessage(
      *  Batched sends (e.g. ask-client transaction lists) pass a larger
      *  budget so the whole list survives into the email. */
     snippetChars?: number;
+    /** Portal path the email's CTA links to (default /portal/messages). */
+    portalPath?: string;
+    /** CTA button label (default "Log in to reply"). */
+    ctaLabel?: string;
   }
 ): Promise<MessageEmailDelivery> {
   try {
@@ -215,7 +219,8 @@ export async function emailPortalUsersAboutMessage(
     const snippetMax = params.snippetChars ?? 400;
     const snippet =
       params.body.length > snippetMax ? `${params.body.slice(0, snippetMax)}…` : params.body;
-    const link = `${params.portalOrigin}/portal/messages`;
+    const link = `${params.portalOrigin}${params.portalPath || "/portal/messages"}`;
+    const cta = params.ctaLabel || "Log in to reply";
 
     // Plain-text fallback for clients whose mail app blocks HTML
     const text = [
@@ -223,7 +228,7 @@ export async function emailPortalUsersAboutMessage(
       ``,
       snippet,
       ``,
-      `Log in to read and reply: ${link}`,
+      `${cta}: ${link}`,
       ``,
       `Do not reply to this email — replies aren't monitored. Use the portal to respond.`,
     ].join("\n");
@@ -244,7 +249,7 @@ export async function emailPortalUsersAboutMessage(
       <div style="background:#F8FAFA;border:1px solid #E5E7EB;border-left:3px solid #1A9B8F;border-radius:8px;padding:14px 16px;margin:14px 0 22px;color:#33414E;font-size:14px;line-height:1.55;">
         ${esc(snippet)}
       </div>
-      <a href="${link}" style="display:inline-block;background:#1A9B8F;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;">Log in to reply</a>
+      <a href="${link}" style="display:inline-block;background:#1A9B8F;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;">${cta}</a>
       <p style="color:#8A94A0;font-size:12px;margin:24px 0 0;line-height:1.5;">
         Do not reply to this email — replies aren't monitored.<br/>
         Read and respond securely in your portal: <a href="${link}" style="color:#1A9B8F;">${link}</a>

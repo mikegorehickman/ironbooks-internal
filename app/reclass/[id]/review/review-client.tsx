@@ -67,6 +67,10 @@ interface Reclassification {
   bookkeeper_override: boolean;
   bookkeeper_override_target_id: string | null;
   bookkeeper_override_target_name: string | null;
+  // Client's answer from the portal Categorize page (migration 67)
+  client_response_account?: string | null;
+  client_response_note?: string | null;
+  client_responded_at?: string | null;
 }
 
 type Tab = "auto" | "review" | "flagged" | "ask_client" | "skipped";
@@ -995,6 +999,15 @@ function RowTable({
                   {isMovedOut && (
                     <span className="text-[10px] font-bold bg-green-600 text-white px-1.5 py-0.5 rounded inline-flex items-center gap-0.5">
                       <CheckCircle2 size={10} /> Moved to Auto-Approved
+                    </span>
+                  )}
+                  {r.client_responded_at && (
+                    <span
+                      className="text-xs bg-teal/15 text-teal-dark font-semibold px-1.5 py-0.5 rounded"
+                      title={r.client_response_note || undefined}
+                    >
+                      Client: {r.client_response_account || "see note"}
+                      {r.client_response_note ? ` — "${r.client_response_note.slice(0, 80)}${r.client_response_note.length > 80 ? "…" : ""}"` : ""}
                     </span>
                   )}
                   {r.is_reconciled && (

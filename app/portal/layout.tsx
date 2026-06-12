@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   Home, Wallet, Receipt, MessageSquare,
-  GraduationCap, Settings, FileCheck2, Mail, BookOpen,
+  GraduationCap, Settings, FileCheck2, Mail, BookOpen, Tags,
 } from "lucide-react";
 import { MessagesNavLink } from "./messages-nav-link";
 import { FinancialStatementsNav } from "./financial-statements-nav";
@@ -95,6 +95,28 @@ export default async function PortalLayout({ children }: { children: React.React
     unreadMessages = 0;
   }
 
+  // Open ask-client questions drive the red badge on Categorize.
+  // try/catch so the portal keeps working before migration 67 lands.
+  let openCategorize = 0;
+  try {
+    const { data: jobs } = await (service as any)
+      .from("reclass_jobs")
+      .select("id")
+      .eq("client_link_id", ctx.clientLinkId);
+    const jobIds = ((jobs as any[]) || []).map((j) => j.id);
+    if (jobIds.length > 0) {
+      const { count } = await (service as any)
+        .from("reclassifications")
+        .select("id", { count: "exact", head: true })
+        .in("reclass_job_id", jobIds)
+        .eq("decision", "ask_client")
+        .is("client_responded_at", null);
+      openCategorize = count || 0;
+    }
+  } catch {
+    openCategorize = 0;
+  }
+
   return (
     <div className="min-h-screen bg-[#FAFAF7]">
       {ctx.impersonating && (
@@ -121,6 +143,13 @@ export default async function PortalLayout({ children }: { children: React.React
             <NavLink href="/portal/cleanup-reports" icon={FileCheck2} label="Cleanup Reports" />
             {/* Live: polls unread count, red pill + chime on new messages */}
             <MessagesNavLink initialCount={unreadMessages} />
+            <NavLink
+              href="/portal/categorize"
+              icon={Tags}
+              label="Categorize"
+              badge={openCategorize > 0 ? String(openCategorize) : undefined}
+              badgeTone="alert"
+            />
             <NavLink href="/portal/ask-ai" icon={MessageSquare} label="Ask the AI" badge="NEW" />
             <NavLink href="/portal/knowledge-base" icon={BookOpen} label="Knowledge Base" />
             <NavLink href="/portal/learn" icon={GraduationCap} label="Learn" />
