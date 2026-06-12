@@ -1,5 +1,6 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
+import { previousMonthPeriod } from "@/lib/monthly-rec";
 
 /**
  * Cleanup completion endpoints for a client.
@@ -86,19 +87,20 @@ export async function POST(
     return NextResponse.json({ error: updErr.message }, { status: 500 });
   }
 
-  // Create (or refresh) the sign-off run. Period = current month; the P&L
-  // statement period starts at the cleanup range when we know it, so the
-  // reviewer sees the books the cleanup actually touched.
-  const today = now.slice(0, 10);
-  const period = today.slice(0, 7);
+  // Create (or refresh) the sign-off run. Period = the PREVIOUS calendar
+  // month — the most recent complete month, which is what the statements
+  // (P&L for the month, BS as of month end) should reflect. The current
+  // month is still in flight and would show partial numbers.
+  const prev = previousMonthPeriod(new Date(now));
+  const period = prev.period;
   let signoffError: string | null = null;
   try {
     await (service as any).from("monthly_rec_runs").upsert(
       {
         client_link_id: clientLinkId,
         period,
-        period_start: rangeStart || `${period}-01`,
-        period_end: today,
+        period_start: prev.periodStart,
+        period_end: prev.periodEnd,
         kind: "cleanup",
         status: "open",
         created_by: user.id,
