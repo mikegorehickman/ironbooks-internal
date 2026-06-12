@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle, ArrowUpRight, CalendarCheck, CheckCircle2, ChevronDown,
-  ChevronLeft, ChevronRight, Loader2, PlayCircle, RotateCcw, Sparkles,
-  XCircle,
+  ChevronLeft, ChevronRight, FileText, Loader2, PlayCircle, RotateCcw,
+  Send, Sparkles, XCircle,
 } from "lucide-react";
 import { playSound } from "@/lib/sounds";
 
@@ -19,6 +19,28 @@ interface Check {
   fix?: "reclass" | "uf_audit" | "ar" | "profile" | "connections";
 }
 
+interface StatementLine {
+  label: string;
+  amount: number;
+  group: string;
+  depth: number;
+}
+
+interface Statements {
+  pl: {
+    totalIncome: number;
+    totalExpenses: number;
+    netIncome: number;
+    lineItems: { label: string; amount: number; group: string }[];
+  };
+  bs: {
+    lines: StatementLine[];
+    totalAssets: number;
+    totalLiabilities: number;
+    totalEquity: number;
+  };
+}
+
 interface Run {
   status: "open" | "complete";
   has_concerns: boolean;
@@ -26,6 +48,9 @@ interface Run {
   checks: { checks: Check[]; overall: CheckStatus } | null;
   checks_ran_at: string | null;
   completed_at: string | null;
+  statements?: Statements | null;
+  sent_to_client_at?: string | null;
+  email_delivery?: { sent: boolean; reason?: string } | null;
 }
 
 interface ProdClient {
@@ -217,6 +242,12 @@ function ClientRecCard({
   const [concerns, setConcerns] = useState(client.run?.concerns || "");
   const [localRun, setLocalRun] = useState<Run | null>(client.run);
   const [error, setError] = useState("");
+  // The close gate: statements must be loaded + reviewed, then attested,
+  // before "Send to client" unlocks.
+  const [loadingStatements, setLoadingStatements] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [attested, setAttested] = useState(false);
+  const [sendWarning, setSendWarning] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalRun(client.run);
@@ -254,14 +285,43 @@ function ClientRecCard({
     }
   }
 
-  async function complete() {
+  async function loadStatements() {
+    setLoadingStatements(true);
+    setError("");
+    try {
+      const r = await act({ action: "statements" });
+      setLocalRun(r);
+      setReviewing(true);
+      setAttested(false);
+    } catch (e: any) {
+      setError(e?.message || "Couldn't load statements");
+    } finally {
+      setLoadingStatements(false);
+    }
+  }
+
+  async function sendToClient() {
     setCompleting(true);
     setError("");
     try {
-      await act({ action: "complete", concerns });
+      const res = await fetch(`/api/clients/${client.id}/monthly-rec`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send", period, attested: true, concerns }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      if (json.email_delivery && !json.email_delivery.sent) {
+        setSendWarning(
+          json.email_delivery.reason === "no_portal_user" || json.email_delivery.reason === "no_active_email"
+            ? "Month closed — but this client has no portal login, so no email went out. Their portal notification is waiting whenever they get access."
+            : "Month closed and portal updated — but the email notification failed to send."
+        );
+      }
+      playSound("client_graduated");
       onChanged();
     } catch (e: any) {
-      setError(e?.message || "Couldn't complete");
+      setError(e?.message || "Couldn't send");
     } finally {
       setCompleting(false);
     }
@@ -395,8 +455,30 @@ function ClientRecCard({
             </ul>
           )}
 
-          {!isComplete && (
-            <>
+          {/* ── THE CLOSE GATE ──
+              Step 1: review the actual financial statements.
+              Step 2: attest. Step 3: send → email + portal notification +
+              period closed. No shortcut to "complete". */}
+          {!isComplete && !reviewing && (
+            <button
+              onClick={loadStatements}
+              disabled={loadingStatements || !run?.checks_ran_at}
+              title={!run?.checks_ran_at ? "Run the checks first" : undefined}
+              className="inline-flex items-center gap-2 bg-navy hover:bg-ink-light text-white text-sm font-bold px-4 py-2 rounded-lg disabled:opacity-50"
+            >
+              {loadingStatements ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <FileText size={13} />
+              )}
+              Review financial statements
+            </button>
+          )}
+
+          {!isComplete && reviewing && run?.statements && (
+            <div className="space-y-4">
+              <StatementsReview statements={run.statements} monthLabel={periodLabel(period)} />
+
               <div>
                 <label className="text-xs font-semibold text-ink-slate uppercase tracking-wider">
                   Concerns (optional)
@@ -410,29 +492,165 @@ function ClientRecCard({
                   className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-teal/50 focus:outline-none"
                 />
               </div>
+
+              <label className="flex items-start gap-2.5 cursor-pointer bg-white border border-gray-200 rounded-xl px-3 py-3">
+                <input
+                  type="checkbox"
+                  checked={attested}
+                  onChange={(e) => setAttested(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-2 border-gray-300 text-teal focus:ring-teal"
+                />
+                <span className="text-xs text-navy leading-relaxed">
+                  I have reviewed {client.client_name}&apos;s {periodLabel(period)}{" "}
+                  Profit &amp; Loss and Balance Sheet above, and they are accurate
+                  and ready to share with the client.
+                </span>
+              </label>
+
               <button
-                onClick={complete}
-                disabled={completing || !run?.checks_ran_at}
-                title={!run?.checks_ran_at ? "Run the checks first" : undefined}
+                onClick={sendToClient}
+                disabled={completing || !attested}
+                title={!attested ? "Tick the attestation first" : undefined}
                 className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2 rounded-lg disabled:opacity-50"
               >
                 {completing ? (
                   <Loader2 size={13} className="animate-spin" />
                 ) : (
-                  <CheckCircle2 size={13} />
+                  <Send size={13} />
                 )}
-                Mark {periodLabel(period)} complete
+                Approve &amp; send to client
               </button>
-            </>
+              <p className="text-[11px] text-ink-light -mt-2">
+                Emails the client, posts a notification in their portal, and closes {periodLabel(period)}.
+              </p>
+            </div>
           )}
-          {isComplete && run?.concerns && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
-              <strong className="block mb-0.5">Concerns noted:</strong>
-              {run.concerns}
+
+          {sendWarning && (
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-900">{sendWarning}</div>
+          )}
+
+          {isComplete && (
+            <div className="space-y-2">
+              <div className="text-xs text-emerald-800 font-semibold flex items-center gap-1.5">
+                <Send size={11} />
+                Sent to client{run?.sent_to_client_at ? ` · ${new Date(run.sent_to_client_at).toLocaleString()}` : ""}
+              </div>
+              {run?.email_delivery && !run.email_delivery.sent && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+                  No email went out ({run.email_delivery.reason === "no_portal_user" ? "client has no portal login" : "send failed"}) — the portal notification is there, but consider reaching them another way.
+                </div>
+              )}
+              {run?.concerns && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+                  <strong className="block mb-0.5">Concerns noted:</strong>
+                  {run.concerns}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── STATEMENTS REVIEW ───────────────────────────────────────────────────
+// What the client will see — reviewed in full before the attestation.
+
+const money = (n: number) => {
+  const v = Number(n) || 0;
+  const s = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return v < 0 ? `(${s})` : s;
+};
+
+function StatementsReview({
+  statements,
+  monthLabel,
+}: {
+  statements: Statements;
+  monthLabel: string;
+}) {
+  const { pl, bs } = statements;
+  return (
+    <div className="space-y-3">
+      {/* P&L */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-2.5 bg-navy text-white text-sm font-bold">
+          Profit &amp; Loss — {monthLabel}
+        </div>
+        <div className="grid grid-cols-3 divide-x divide-gray-100 text-center border-b border-gray-100">
+          <div className="py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Income</div>
+            <div className="font-mono font-bold text-navy">${money(pl.totalIncome)}</div>
+          </div>
+          <div className="py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Expenses</div>
+            <div className="font-mono font-bold text-navy">${money(pl.totalExpenses)}</div>
+          </div>
+          <div className="py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">
+              Net {pl.netIncome >= 0 ? "profit" : "loss"}
+            </div>
+            <div className={`font-mono font-bold ${pl.netIncome >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+              ${money(pl.netIncome)}
+            </div>
+          </div>
+        </div>
+        <div className="max-h-56 overflow-y-auto">
+          <table className="w-full text-xs">
+            <tbody>
+              {pl.lineItems.map((li, i) => (
+                <tr key={i} className="border-t border-gray-50">
+                  <td className="px-4 py-1 text-ink-slate">
+                    <span className="text-ink-light">{li.group ? `${li.group} · ` : ""}</span>
+                    {li.label}
+                  </td>
+                  <td className="px-4 py-1 text-right font-mono text-navy whitespace-nowrap">${money(li.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Balance Sheet */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-2.5 bg-navy text-white text-sm font-bold">
+          Balance Sheet — as of end of {monthLabel}
+        </div>
+        <div className="grid grid-cols-3 divide-x divide-gray-100 text-center border-b border-gray-100">
+          <div className="py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Assets</div>
+            <div className="font-mono font-bold text-navy">${money(bs.totalAssets)}</div>
+          </div>
+          <div className="py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Liabilities</div>
+            <div className="font-mono font-bold text-navy">${money(bs.totalLiabilities)}</div>
+          </div>
+          <div className="py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Equity</div>
+            <div className="font-mono font-bold text-navy">${money(bs.totalEquity)}</div>
+          </div>
+        </div>
+        <div className="max-h-56 overflow-y-auto">
+          <table className="w-full text-xs">
+            <tbody>
+              {bs.lines.map((l, i) => (
+                <tr key={i} className="border-t border-gray-50">
+                  <td
+                    className={`px-4 py-1 ${/^total/i.test(l.label) ? "font-semibold text-navy" : "text-ink-slate"}`}
+                    style={{ paddingLeft: `${16 + Math.min(l.depth, 4) * 12}px` }}
+                  >
+                    {l.label}
+                  </td>
+                  <td className="px-4 py-1 text-right font-mono text-navy whitespace-nowrap">${money(l.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

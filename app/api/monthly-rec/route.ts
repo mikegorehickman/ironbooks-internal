@@ -57,7 +57,7 @@ export async function GET(request: Request) {
     if (ids.length > 0) {
       const { data: runs } = await (service as any)
         .from("monthly_rec_runs")
-        .select("client_link_id, status, has_concerns, concerns, checks, checks_ran_at, completed_at")
+        .select("client_link_id, status, has_concerns, concerns, checks, checks_ran_at, completed_at, sent_to_client_at, email_delivery")
         .eq("period", period)
         .in("client_link_id", ids);
       runsByClient = new Map(((runs as any[]) || []).map((r) => [r.client_link_id, r]));

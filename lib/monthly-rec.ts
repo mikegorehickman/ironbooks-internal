@@ -12,7 +12,8 @@
  * uncategorized account + open invoices). No writes, no AI cost.
  */
 
-import { fetchAllAccounts } from "./qbo";
+import { fetchAllAccounts, qboRequest } from "./qbo";
+import { fetchProfitAndLoss } from "./qbo-reports";
 import {
   fetchAccountTransactions,
   fetchOpenInvoices,
@@ -177,6 +178,94 @@ export async function runMonthlyRecChecks(
     : "pass";
 
   return { checks, overall };
+}
+
+// ─── FINANCIAL STATEMENT PREVIEW ─────────────────────────────────────────
+// The close gate: before a month can be sent to the client, the bookkeeper
+// reviews the actual statements (P&L for the period + Balance Sheet as of
+// period end) and attests they're ready. This builds that preview from the
+// same QBO reports the client-facing pages use.
+
+export interface StatementLine {
+  label: string;
+  amount: number;
+  group: string;
+  depth: number;
+}
+
+export interface StatementsPreview {
+  pl: {
+    totalIncome: number;
+    totalExpenses: number;
+    netIncome: number;
+    lineItems: { label: string; amount: number; group: string }[];
+  };
+  bs: {
+    lines: StatementLine[];
+    totalAssets: number;
+    totalLiabilities: number;
+    totalEquity: number;
+  };
+}
+
+/** Flatten QBO BalanceSheet report rows into display lines + totals. */
+function flattenBalanceSheet(rows: any[], group = "", depth = 0, out: StatementLine[] = []): StatementLine[] {
+  for (const row of rows || []) {
+    const header = row?.Header?.ColData?.[0]?.value || "";
+    if (row?.ColData) {
+      const label = row.ColData[0]?.value;
+      const amount = Number(row.ColData[1]?.value || 0);
+      if (label) out.push({ label, amount, group, depth });
+    }
+    if (row?.Rows?.Row) {
+      flattenBalanceSheet(row.Rows.Row, header || group, depth + 1, out);
+    }
+    if (row?.Summary?.ColData) {
+      const label = row.Summary.ColData[0]?.value;
+      const amount = Number(row.Summary.ColData[1]?.value || 0);
+      if (label) out.push({ label, amount, group: header || group, depth });
+    }
+  }
+  return out;
+}
+
+export async function fetchStatementsPreview(
+  realmId: string,
+  accessToken: string,
+  periodStart: string,
+  periodEnd: string
+): Promise<StatementsPreview> {
+  const [pl, bsReport] = await Promise.all([
+    fetchProfitAndLoss(realmId, accessToken, periodStart, periodEnd),
+    qboRequest<any>(
+      realmId,
+      accessToken,
+      `/reports/BalanceSheet?end_date=${encodeURIComponent(periodEnd)}&accounting_method=Accrual&minorversion=70`
+    ),
+  ]);
+
+  const lines = flattenBalanceSheet(bsReport?.Rows?.Row || []);
+  const find = (re: RegExp) =>
+    lines.find((l) => re.test(l.label))?.amount ?? 0;
+
+  return {
+    pl: {
+      totalIncome: pl.totalIncome,
+      totalExpenses: pl.totalExpenses,
+      netIncome: pl.netIncome,
+      lineItems: pl.lineItems.map((i) => ({
+        label: i.label,
+        amount: i.amount,
+        group: i.group,
+      })),
+    },
+    bs: {
+      lines,
+      totalAssets: find(/^total assets$/i),
+      totalLiabilities: find(/^total liabilities$/i),
+      totalEquity: find(/^total equity$/i),
+    },
+  };
 }
 
 /** Previous calendar month for a given date — the default Monthly Rec period. */
