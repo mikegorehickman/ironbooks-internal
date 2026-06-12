@@ -5,7 +5,7 @@ import {
   Loader2, RefreshCw, CheckCircle2, AlertCircle, XCircle,
   ArrowRight, Upload, Shield, FileText, Play, Lock,
   Building2, Wallet, FileSearch, Receipt, Coins,
-  Users as UsersIcon, Calculator, HelpCircle, X,
+  Users as UsersIcon, Calculator, HelpCircle, X, Send, ClipboardList,
 } from "lucide-react";
 import { MODULE_LABELS, MODULE_ORDER, type CleanupModule } from "@/lib/cleanup-system/types";
 import { ProposedEntryRow } from "./proposed-entry-row";
@@ -766,6 +766,12 @@ export function CleanupWizardClient({
               </div>
             </div>
 
+            <NeedFromClientPanel
+              clientLinkId={clientLinkId}
+              accountGrades={(hs?.account_grades as any[]) || []}
+              periodStart={status?.run?.period_lock_date || null}
+            />
+
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
               <h3 className="font-bold text-navy mb-1 flex items-center gap-2">
                 <Upload size={14} /> Import CSV / Excel (optional)
@@ -1337,6 +1343,214 @@ export function CleanupWizardClient({
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Need from client ─────────────────────────────────────────────────
+   Turns the diagnose results into a document-request checklist. Each
+   flagged account maps to the statement/answer that unblocks its module:
+   bank/CC → statements, loans → loan statement, owner accounts → a
+   draws-vs-contributions answer, payroll → provider reports, UF → CRM
+   job report. Sending reuses the messages pipeline (portal thread +
+   branded email + delivery warning); clients attach files by replying
+   in their portal Messages page. */
+
+interface ClientRequestItem {
+  id: string;
+  text: string;
+}
+
+function buildClientRequests(
+  grades: Array<{ account_name: string; account_type: string; module: string | null }>,
+  periodStart: string | null
+): ClientRequestItem[] {
+  const rangeLabel = periodStart
+    ? `from ${periodStart} through today`
+    : "for the cleanup period";
+  const items: ClientRequestItem[] = [];
+  const seen = new Set<string>();
+  const push = (id: string, text: string) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    items.push({ id, text });
+  };
+
+  const ownerAccounts: string[] = [];
+  for (const g of grades) {
+    const name = g.account_name;
+    const type = (g.account_type || "").toLowerCase();
+    switch (g.module) {
+      case "bank_recon":
+        if (type.includes("credit")) {
+          push(`cc-${name}`, `Credit card statements for "${name}" ${rangeLabel} (PDF or CSV)`);
+        } else {
+          push(`bank-${name}`, `Bank statements for "${name}" ${rangeLabel} (PDF or CSV)`);
+        }
+        break;
+      case "loans":
+        push(`loan-${name}`, `Most recent loan statement for "${name}" showing the current balance and payment breakdown`);
+        break;
+      case "shareholder_draws":
+        ownerAccounts.push(name);
+        break;
+      case "tax_payroll":
+        push("payroll", "Latest payroll reports from your payroll provider (Gusto, ADP, etc.) and your most recent payroll tax filing");
+        break;
+      case "undeposited_funds":
+        push("crm", "A completed-jobs or payments report from your CRM (Jobber, DripJobs, etc.) so we can match deposits to jobs");
+        break;
+      case "accounts_receivable":
+        push("ar", "A quick review of your open invoices — which are still collectible, and which were already paid or won't be?");
+        break;
+      case "accounts_payable":
+        push("ap", "A quick review of your open bills — which do you still actually owe?");
+        break;
+      default:
+        break;
+    }
+  }
+  if (ownerAccounts.length > 0) {
+    push(
+      "owner",
+      `A quick note on ${ownerAccounts.map((n) => `"${n}"`).join(" and ")}: was this activity owner draws, owner contributions, or business expenses?`
+    );
+  }
+  return items;
+}
+
+function NeedFromClientPanel({
+  clientLinkId,
+  accountGrades,
+  periodStart,
+}: {
+  clientLinkId: string;
+  accountGrades: any[];
+  periodStart: string | null;
+}) {
+  const suggested = useMemo(
+    () => buildClientRequests(accountGrades || [], periodStart),
+    [accountGrades, periodStart]
+  );
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [extra, setExtra] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sentInfo, setSentInfo] = useState<{ count: number; emailWarning: string | null } | null>(null);
+  const [error, setError] = useState("");
+
+  const isChecked = (id: string) => checked[id] !== false; // default checked
+  const selected = suggested.filter((i) => isChecked(i.id));
+  const extraTrimmed = extra.trim();
+  const totalCount = selected.length + (extraTrimmed ? 1 : 0);
+
+  if (suggested.length === 0) return null;
+
+  async function send() {
+    if (totalCount === 0 || sending) return;
+    setSending(true);
+    setError("");
+    try {
+      const lines = selected.map((i, idx) => `${idx + 1}. ${i.text}`);
+      if (extraTrimmed) lines.push(`${lines.length + 1}. ${extraTrimmed}`);
+      const body = [
+        `Hi! We're deep-cleaning your books right now and need a few things from you to finish the job:`,
+        ``,
+        ...lines,
+        ``,
+        `The easiest way to get these to us: reply to this message in your portal and attach the files (PDF, CSV, Excel, or photos all work). For the questions, just type your answer in the reply.`,
+      ].join("\n");
+      const res = await fetch(`/api/clients/${clientLinkId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "message",
+          subject: `We need ${totalCount} thing${totalCount === 1 ? "" : "s"} to finish cleaning up your books`,
+          body,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to send");
+      const d = data.email_delivery;
+      setSentInfo({
+        count: totalCount,
+        emailWarning:
+          d && !d.sent
+            ? d.reason === "no_portal_user"
+              ? "The client has no portal login yet — they won't see this until they're invited. Follow up directly."
+              : "The notification email failed to send — the message is in their portal, but follow up directly."
+            : null,
+      });
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5">
+      <h3 className="font-bold text-navy mb-1 flex items-center gap-2">
+        <ClipboardList size={14} /> Need from client
+      </h3>
+      <p className="text-xs text-ink-light mb-3">
+        Built from the issues above — statements and answers that unblock the cleanup. Uncheck
+        anything you already have, then send it as one portal message + email. The client replies
+        with attachments right in their portal.
+      </p>
+
+      {sentInfo ? (
+        <div className="space-y-2">
+          <div className="text-sm text-emerald-700 flex items-center gap-2">
+            <CheckCircle2 size={14} /> Request for {sentInfo.count} item
+            {sentInfo.count === 1 ? "" : "s"} sent — replies land on your Today queue.
+          </div>
+          {sentInfo.emailWarning && (
+            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-1.5">
+              <AlertCircle size={13} className="flex-shrink-0 mt-0.5" /> {sentInfo.emailWarning}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1.5 mb-3">
+            {suggested.map((item) => (
+              <label key={item.id} className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isChecked(item.id)}
+                  onChange={(e) => setChecked((c) => ({ ...c, [item.id]: e.target.checked }))}
+                  className="mt-0.5 accent-teal"
+                />
+                <span className={isChecked(item.id) ? "text-navy" : "text-ink-light line-through"}>
+                  {item.text}
+                </span>
+              </label>
+            ))}
+          </div>
+          <input
+            type="text"
+            value={extra}
+            onChange={(e) => setExtra(e.target.value)}
+            placeholder="Anything else to ask for? (optional)"
+            maxLength={500}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3"
+          />
+          {error && (
+            <div className="p-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-800 mb-2">
+              {error}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={send}
+            disabled={totalCount === 0 || sending}
+            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-40"
+          >
+            {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            Send request to client ({totalCount})
+          </button>
+        </>
       )}
     </div>
   );
