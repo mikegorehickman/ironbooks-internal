@@ -774,6 +774,9 @@ export function CleanupWizardClient({
               </div>
             </div>
 
+            {/* Recommended fix input: upload the actual statements. */}
+            <StatementAnalysisPanel runId={runId} onApplied={refresh} />
+
             <NeedFromClientPanel
               clientLinkId={clientLinkId}
               clientName={clientName}
@@ -781,12 +784,14 @@ export function CleanupWizardClient({
               periodStart={status?.run?.period_lock_date || null}
             />
 
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <h3 className="font-bold text-navy mb-1 flex items-center gap-2">
-                <Upload size={14} /> Import CSV / Excel (optional)
-              </h3>
-              <p className="text-xs text-ink-light mb-3">
-                Attach exports from Stripe, the bank, or a CRM to give the matcher more to work with. Skip this if you don't have one handy.
+            {/* Advanced / fallback: raw CSV or Excel export instead of PDFs. */}
+            <details className="bg-white rounded-2xl border border-gray-100 px-5 py-3">
+              <summary className="text-xs font-semibold text-ink-slate cursor-pointer flex items-center gap-2">
+                <Upload size={13} /> Advanced: import a CSV / Excel export instead
+              </summary>
+              <p className="text-xs text-ink-light mt-2 mb-3">
+                Have a Stripe, bank, or CRM export handy? Attach it to give the matcher more to work
+                with. Most cleanups just use the statement PDFs above.
               </p>
               <div className="flex gap-2 mb-2 flex-wrap">
                 {["stripe", "bank", "jobber", "drip_jobs", "loan_statement"].map((s) => (
@@ -812,9 +817,7 @@ export function CleanupWizardClient({
                 {acting ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
                 Import CSV
               </button>
-            </div>
-
-            <StatementAnalysisPanel runId={runId} onApplied={refresh} />
+            </details>
           </div>
         </div>
       )}
@@ -1451,17 +1454,7 @@ function NeedFromClientPanel({
   const [sending, setSending] = useState(false);
   const [sentInfo, setSentInfo] = useState<{ count: number; emailWarning: string | null } | null>(null);
   const [error, setError] = useState("");
-  const [promoting, setPromoting] = useState(false);
-  const [promoted, setPromoted] = useState(false);
-  const [promoteError, setPromoteError] = useState("");
   const [emailModalOpen, setEmailModalOpen] = useState(false);
-  // Statements review gate — promote is locked until the bookkeeper has
-  // actually looked at the statements and attested the P&L is right.
-  const [stmts, setStmts] = useState<Statements | null>(null);
-  const [stmtsPeriod, setStmtsPeriod] = useState<string>("");
-  const [loadingStmts, setLoadingStmts] = useState(false);
-  const [stmtsError, setStmtsError] = useState("");
-  const [attested, setAttested] = useState(false);
 
   const isChecked = (id: string) => checked[id] !== false; // default checked
   const selected = suggested.filter((i) => isChecked(i.id));
@@ -1561,142 +1554,13 @@ function NeedFromClientPanel({
               <AlertCircle size={13} className="flex-shrink-0 mt-0.5" /> {sentInfo.emailWarning}
             </div>
           )}
-          {/* Manual fallback: paste-ready email with the same items as a
-              table — the path when the client has no portal login. */}
+          {/* Manual fallback: paste-ready email for clients with no portal. */}
           <div className="flex items-center gap-2">{copyButton}</div>
-
-          {/* Statements review — pull last month's statements live from QBO
-              and put eyes on them BEFORE the P&L-only promote. Same preview
-              + period the Production rec flow uses, so what you attest here
-              is exactly what monthly service will start from. */}
-          {!promoted && (
-            <div className="pt-3 border-t border-gray-100">
-              <div className="text-sm font-bold text-navy mb-1">
-                Review financial statements
-              </div>
-              <p className="text-xs text-ink-light mb-2">
-                Before moving them to production, look at last month&apos;s statements and confirm
-                the P&amp;L is ready for the client. The balance sheet is shown for context — it
-                stays hidden from their portal until the cleanup finishes.
-              </p>
-              {stmtsError && (
-                <div className="p-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-800 mb-2">
-                  {stmtsError}
-                </div>
-              )}
-              {stmts ? (
-                <div className="space-y-3">
-                  <StatementsReview
-                    statements={stmts}
-                    monthLabel={stmtsPeriod ? periodLabel(stmtsPeriod) : "Last month"}
-                  />
-                  <label className="flex items-start gap-2 text-sm cursor-pointer p-3 rounded-lg border border-teal/30 bg-teal/5">
-                    <input
-                      type="checkbox"
-                      checked={attested}
-                      onChange={(e) => setAttested(e.target.checked)}
-                      className="mt-0.5 accent-teal"
-                    />
-                    <span className="text-navy">
-                      I reviewed these statements. The <strong>P&amp;L is accurate and ready</strong>{" "}
-                      for the client; the balance sheet is still in cleanup and stays off their
-                      portal.
-                    </span>
-                  </label>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setLoadingStmts(true);
-                    setStmtsError("");
-                    try {
-                      const res = await fetch(`/api/clients/${clientLinkId}/monthly-rec`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ action: "statements" }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok) throw new Error(data.error || "Couldn't load statements");
-                      setStmts(data.run?.statements || null);
-                      setStmtsPeriod(data.run?.period || "");
-                      if (!data.run?.statements) {
-                        setStmtsError("QBO returned no statements for last month.");
-                      }
-                    } catch (err: any) {
-                      setStmtsError(err.message);
-                    } finally {
-                      setLoadingStmts(false);
-                    }
-                  }}
-                  disabled={loadingStmts}
-                  className="inline-flex items-center gap-2 bg-white hover:bg-gray-50 border border-gray-200 text-navy text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-40"
-                >
-                  {loadingStmts ? <Loader2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
-                  {loadingStmts ? "Pulling from QuickBooks…" : "Load last month's statements"}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* P&L-only promote — don't make the client wait on their own
-              paperwork for monthly service. BS stays visibly unfinished:
-              Production board shows Waiting on Client, portal greys out
-              the Balance Sheet + Cash Flow until bs_on flips it back. */}
-          <div className="pt-3 border-t border-gray-100">
-            {promoted ? (
-              <div className="text-sm text-emerald-700 flex items-center gap-2">
-                <CheckCircle2 size={14} /> Moved to Production on P&L-only service. They&apos;re on
-                the Production board as &quot;Waiting on Client,&quot; and their portal shows the
-                balance sheet as in-progress. Flip BS back on from the Production board once the
-                docs arrive and the cleanup finishes.
-              </div>
-            ) : (
-              <>
-                <p className="text-xs text-ink-light mb-2">
-                  Don&apos;t want monthly service blocked while you wait? Promote them now on P&L
-                  only — the Production board tracks them as Waiting on Client, and their portal
-                  balance sheet is greyed out until you turn it back on.
-                  {!attested && (
-                    <span className="text-amber-700 font-semibold">
-                      {" "}Review the statements above and attest first.
-                    </span>
-                  )}
-                </p>
-                {promoteError && (
-                  <div className="p-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-800 mb-2">
-                    {promoteError}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  disabled={promoting || !attested}
-                  onClick={async () => {
-                    setPromoting(true);
-                    setPromoteError("");
-                    try {
-                      const res = await fetch(`/api/clients/${clientLinkId}/production`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ action: "promote_pl_only" }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok) throw new Error(data.error || "Failed to promote");
-                      setPromoted(true);
-                    } catch (err: any) {
-                      setPromoteError(err.message);
-                    } finally {
-                      setPromoting(false);
-                    }
-                  }}
-                  className="inline-flex items-center gap-2 bg-navy hover:bg-navy/90 text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-40"
-                >
-                  {promoting ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                  P&amp;L ready, BS waiting on client — move to Production
-                </button>
-              </>
-            )}
-          </div>
+          <p className="text-xs text-ink-light">
+            Don&apos;t want to wait on the docs? Use the{" "}
+            <strong className="text-navy">&ldquo;Send to Production&rdquo;</strong> card at the top
+            of this page to ship them on P&amp;L now.
+          </p>
         </div>
       ) : (
         <>
@@ -2311,19 +2175,28 @@ function PLOnlyPromoteCard({
   }
 
   return (
-    <div className="rounded-2xl border border-sky-200 bg-sky-50/60 overflow-hidden">
+    <div className="rounded-2xl border-2 border-navy/15 bg-white overflow-hidden shadow-sm">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left"
+        className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left hover:bg-slate-50 transition-colors"
       >
-        <div className="flex items-center gap-2">
-          <ArrowRight size={15} className="text-sky-700" />
-          <span className="text-sm font-bold text-navy">
-            P&amp;L ready? Send to Production while the BS waits on statements
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="w-9 h-9 rounded-full bg-navy/10 flex items-center justify-center flex-shrink-0">
+            <ArrowRight size={16} className="text-navy" />
           </span>
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-navy">
+              P&amp;L done? Send {clientName} to Production
+            </div>
+            <div className="text-xs text-ink-light mt-0.5">
+              Ship monthly P&amp;L service now; the balance sheet keeps waiting on client docs.
+            </div>
+          </div>
         </div>
-        <span className="text-xs font-semibold text-sky-700 flex-shrink-0">{open ? "Hide" : "Open"}</span>
+        <span className="text-xs font-bold text-white bg-navy px-3 py-1.5 rounded-lg flex-shrink-0">
+          {open ? "Close" : "Review & send →"}
+        </span>
       </button>
 
       {open && (
