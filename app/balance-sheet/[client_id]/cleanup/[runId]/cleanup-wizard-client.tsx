@@ -5,7 +5,7 @@ import {
   Loader2, RefreshCw, CheckCircle2, AlertCircle, XCircle,
   ArrowRight, Upload, Shield, FileText, Play, Lock,
   Building2, Wallet, FileSearch, Receipt, Coins,
-  Users as UsersIcon, Calculator, HelpCircle, X, Send, ClipboardList, Mail, Copy,
+  Users as UsersIcon, Calculator, HelpCircle, X, Send, ClipboardList, Mail, Copy, Sparkles,
 } from "lucide-react";
 import { MODULE_LABELS, MODULE_ORDER, type CleanupModule } from "@/lib/cleanup-system/types";
 import { ProposedEntryRow } from "./proposed-entry-row";
