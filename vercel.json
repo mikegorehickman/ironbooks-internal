@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/jobs/sweep-stale",
-      "schedule": "*/30 * * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron/daily-recon?dryRun=false",

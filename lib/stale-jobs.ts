@@ -54,6 +54,17 @@ const RECLASS_SILENT_MS = 15 * 60 * 1000;
 // Even a giant cleanup (hundreds of actions) finishes well inside this.
 const STARTED_STALE_MS = 45 * 60 * 1000;
 
+// COA silent-progress window. The executor stamps coa_actions.executed_at
+// on every action as it writes to QBO, so the latest executed_at is the
+// real "is the loop alive" signal. A dead `after()` background task (e.g.
+// White Oak, Jun 2026: died after 68 of 99 actions) leaves the row in
+// `executing` with a frozen latest-executed_at. We fail it once the job
+// is at least 10 min old AND no action has executed in 10 min — catching
+// the stall ~4.5× faster than the 45-min blanket rule, without touching
+// a job that's steadily writing actions (each write resets the clock).
+const COA_SILENT_MS = 10 * 60 * 1000;
+const COA_MIN_AGE_MS = 10 * 60 * 1000;
+
 // 6 hours of bookkeeper inactivity in `web_search_paused` → unpark the job
 // to `in_review` so the same-client concurrency guard doesn't permanently
 // block new reclass runs. The AI work is already done; this just hands
@@ -108,6 +119,52 @@ export async function sweepStaleJobs(): Promise<SweepResult> {
     .eq("status", "executing")
     .lt("execution_started_at", startedStaleCutoff)
     .select("id");
+
+  // coa_jobs — silent-progress mode (fast catch). For every job still
+  // `executing` and at least COA_MIN_AGE_MS old, check the most recent
+  // action it wrote to QBO. If nothing has executed in COA_SILENT_MS the
+  // background worker is dead mid-loop — fail it so the row stops spinning
+  // and the bookkeeper can re-run (the executor skips already-applied
+  // actions, so a re-run only finishes the remainder).
+  const coaSilentIds: string[] = [];
+  {
+    const coaMinAgeCutoff = new Date(now - COA_MIN_AGE_MS).toISOString();
+    const coaSilentCutoff = new Date(now - COA_SILENT_MS).toISOString();
+    const { data: candidates } = await service
+      .from("coa_jobs")
+      .select("id, execution_started_at")
+      .eq("status", "executing")
+      .lt("execution_started_at", coaMinAgeCutoff)
+      .gte("execution_started_at", startedStaleCutoff); // 45-min rule owns the older ones
+    for (const job of (candidates as any[]) || []) {
+      const { data: lastAction } = await service
+        .from("coa_actions")
+        .select("executed_at")
+        .eq("job_id", (job as any).id)
+        .eq("executed", true)
+        .order("executed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const lastExecuted = (lastAction as any)?.executed_at;
+      // Stalled if the last QBO write is older than the silent window, or
+      // (no action ever executed) the job has been started past the window.
+      const silent = lastExecuted
+        ? lastExecuted < coaSilentCutoff
+        : (job as any).execution_started_at < coaSilentCutoff;
+      if (silent) {
+        await service
+          .from("coa_jobs")
+          .update({
+            status: "failed",
+            error_message:
+              "Auto-failed by watchdog: execution stalled mid-run (no QuickBooks action in 10+ min — background task died). Already-applied changes are kept; re-run execute to finish the rest.",
+            execution_completed_at: new Date().toISOString(),
+          } as any)
+          .eq("id", (job as any).id);
+        coaSilentIds.push((job as any).id);
+      }
+    }
+  }
 
   // reclass_jobs — never-started mode. Now requires BOTH conditions:
   //   - created_at older than 25 min (NEVER_STARTED_RECLASS_MS), AND
@@ -214,7 +271,7 @@ export async function sweepStaleJobs(): Promise<SweepResult> {
   }
 
   return {
-    coa_failed: (coaA?.length || 0) + (coaB?.length || 0),
+    coa_failed: (coaA?.length || 0) + (coaB?.length || 0) + coaSilentIds.length,
     reclass_failed: (reclassA?.length || 0) + (reclassB?.length || 0) + (reclassC?.length || 0),
     stripe_recon_failed: stripeFailed,
     cleanup_runs_failed: cleanupFailed,

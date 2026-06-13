@@ -38,6 +38,33 @@ export async function POST(
     return NextResponse.json({ message: "Already complete", started: false });
   }
 
+  // Source guard: refuse to execute a job with no actions to run. Without
+  // this a zero-action job flips to `executing`, the background task has
+  // nothing to do (or the worker dies), and the row spins until the
+  // watchdog catches it. Nothing-to-execute → mark complete immediately
+  // so the bookkeeper moves on cleanly instead of staring at a spinner.
+  const { count: actionableCount } = await service
+    .from("coa_actions")
+    .select("id", { count: "exact", head: true })
+    .eq("job_id", jobId)
+    .eq("executed", false)
+    .not("action", "in", '("flag","ignore","keep")');
+  if (!actionableCount || actionableCount === 0) {
+    await service
+      .from("coa_jobs")
+      .update({
+        status: "complete",
+        execution_completed_at: new Date().toISOString(),
+        error_message: "Nothing to execute — no pending cleanup actions. Re-analyze if you expected changes.",
+      } as any)
+      .eq("id", jobId);
+    return NextResponse.json({
+      started: false,
+      complete: true,
+      message: "No pending actions to execute — marked complete.",
+    });
+  }
+
   // Mark as starting (so the status page knows execution has begun)
   await service
     .from("coa_jobs")
