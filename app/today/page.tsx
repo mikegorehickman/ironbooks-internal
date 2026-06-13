@@ -8,6 +8,7 @@ import { ClientFlagsWidget } from "./client-flags-widget";
 import { ReclassRequestsWidget, type PendingReclassRequest } from "./reclass-requests-widget";
 import { ClientInboxWidget, type InboundCommRow } from "./client-inbox-widget";
 import { StatementApprovalsWidget, type StatementApprovalRow } from "./statement-approvals-widget";
+import { StatementEscalationsWidget, type StatementEscalationRow } from "./statement-escalations-widget";
 import { CleanupDeadlinesWidget, type CleanupDeadlineRow } from "./cleanup-deadlines-widget";
 import { ViewAsSelector } from "./view-as-selector";
 import { QboHealthAlert } from "@/components/QboHealthAlert";
@@ -307,6 +308,32 @@ export default async function TodayPage({
     }
   }
 
+  // ─── Statements flagged wrong by a bookkeeper (senior-only) ───
+  // Pulled from audit_log (append-only). Show the last 30 days so resolved
+  // ones age off without needing a status column.
+  let statementEscalations: StatementEscalationRow[] = [];
+  if (isSenior) {
+    try {
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: esc } = await (service as any)
+        .from("audit_log")
+        .select("occurred_at, request_payload")
+        .eq("event_type", "statements_escalated")
+        .gte("occurred_at", cutoff)
+        .order("occurred_at", { ascending: false })
+        .limit(50);
+      statementEscalations = ((esc as any[]) || []).map((r) => ({
+        client_link_id: r.request_payload?.client_link_id || "",
+        client_name: r.request_payload?.client_name || "(unknown client)",
+        note: r.request_payload?.note || "",
+        escalated_by_name: r.request_payload?.escalated_by_name || "",
+        at: r.occurred_at,
+      })).filter((r) => r.client_link_id);
+    } catch {
+      statementEscalations = [];
+    }
+  }
+
   // If nothing's enabled AND no flags AND no reclass requests AND no
   // inbound messages AND no statement approvals, show the empty state
   if (
@@ -314,7 +341,8 @@ export default async function TodayPage({
     pendingFlags.length === 0 &&
     pendingReclassRequests.length === 0 &&
     inboundComms.length === 0 &&
-    statementApprovals.length === 0
+    statementApprovals.length === 0 &&
+    statementEscalations.length === 0
   ) {
     return (
       <AppShell>
@@ -466,6 +494,8 @@ export default async function TodayPage({
         )}
 
         {statementApprovals.length > 0 && <StatementApprovalsWidget rows={statementApprovals} />}
+
+        {statementEscalations.length > 0 && <StatementEscalationsWidget rows={statementEscalations} />}
 
         {inboundComms.length > 0 && <ClientInboxWidget rows={inboundComms} />}
 

@@ -2235,6 +2235,30 @@ function PLOnlyPromoteCard({
   const [promoting, setPromoting] = useState(false);
   const [promoted, setPromoted] = useState(false);
   const [error, setError] = useState("");
+  const [escalateOpen, setEscalateOpen] = useState(false);
+  const [escalateNote, setEscalateNote] = useState("");
+  const [escalating, setEscalating] = useState(false);
+  const [escalated, setEscalated] = useState(false);
+
+  async function escalate() {
+    if (!escalateNote.trim() || escalating) return;
+    setEscalating(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/escalate-statements`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: escalateNote.trim(), context: "BS cleanup — P&L review" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't escalate");
+      setEscalated(true);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setEscalating(false);
+    }
+  }
 
   async function loadStatements() {
     setLoadingStmts(true);
@@ -2325,15 +2349,58 @@ function PLOnlyPromoteCard({
                   client; the balance sheet is still in cleanup and stays off their portal.
                 </span>
               </label>
-              <button
-                type="button"
-                disabled={!attested || promoting}
-                onClick={promote}
-                className="inline-flex items-center gap-2 bg-navy hover:bg-navy/90 text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-40"
-              >
-                {promoting ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                Mark P&amp;L complete &amp; send to Production
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  disabled={!attested || promoting}
+                  onClick={promote}
+                  className="inline-flex items-center gap-2 bg-navy hover:bg-navy/90 text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-40"
+                >
+                  {promoting ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                  Mark P&amp;L complete &amp; send to Production
+                </button>
+                {!escalated && (
+                  <button
+                    type="button"
+                    onClick={() => setEscalateOpen((o) => !o)}
+                    className="inline-flex items-center gap-2 bg-white hover:bg-red-50 border border-red-200 text-red-700 text-sm font-semibold px-4 py-2 rounded-lg"
+                  >
+                    <AlertCircle size={14} />
+                    These are wrong — escalate to manager
+                  </button>
+                )}
+              </div>
+
+              {/* Escalation note → manager's Today queue */}
+              {escalated ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-center gap-2">
+                  <CheckCircle2 size={15} /> Escalated to your manager — it&apos;s on their Today
+                  queue with your note. They&apos;ll take it from here.
+                </div>
+              ) : escalateOpen ? (
+                <div className="rounded-lg border border-red-200 bg-red-50/60 p-3 space-y-2">
+                  <div className="text-xs font-semibold text-red-800">
+                    What looks wrong? (sent to your manager)
+                  </div>
+                  <textarea
+                    value={escalateNote}
+                    onChange={(e) => setEscalateNote(e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="e.g. Revenue looks understated — I think the March Stripe deposits didn't get categorized to income."
+                    className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:border-red-400 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={escalate}
+                    disabled={!escalateNote.trim() || escalating}
+                    className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-40"
+                  >
+                    {escalating ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    Send to manager
+                  </button>
+                </div>
+              ) : null}
             </>
           ) : (
             <button
