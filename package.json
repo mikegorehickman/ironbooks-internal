@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "types": "npx supabase gen types typescript --project-id omzobviyhrgiqywfjzwo > lib/database.types.ts",
+    "typecheck": "node scripts/typecheck.mjs",
+    "typecheck:update": "node scripts/typecheck.mjs --update",
+    "types": "npx supabase gen types typescript --project-id omzobviyhrgiqywfjzwo > lib/database.types.ts.tmp && head -1 lib/database.types.ts.tmp | grep -q 'export type Json' && mv lib/database.types.ts.tmp lib/database.types.ts || (echo 'supabase gen types failed (auth?) — keeping existing database.types.ts' && rm -f lib/database.types.ts.tmp && exit 1)",
     "test:cleanup-synthetic": "npx tsx scripts/test-cleanup-synthetic-e2e.ts"
   },
   "dependencies": {

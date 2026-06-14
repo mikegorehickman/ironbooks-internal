@@ -1,39 +1,38 @@
 /**
- * Daily reconciliation worker — SCAFFOLDED, NOT WIRED LIVE.
- * =========================================================
+ * Daily reconciliation worker — LIVE (writes to client QBO ledgers).
+ * =================================================================
+ *
+ * Wired live: vercel.json runs /api/cron/daily-recon?dryRun=false daily, and
+ * /admin/daily-recon can trigger it for enrolled clients (daily_recon_enabled).
+ * dryRun=true is still the default for ad-hoc/admin previews — nothing writes
+ * to QBO in dry-run mode — but the scheduled run executes for real.
  *
  * Pulls the delta of new QBO transactions since the client's last_synced_at,
- * runs the same 4-tier pipeline as the reclass discovery (KB → bank rules →
- * AI → web search), then either:
- *
+ * runs the same 4-tier pipeline as reclass discovery (KB → bank rules → AI →
+ * web search), then either:
  *   - Auto-executes high-confidence (>=0.95) matches via reclassifyTransactionLines
  *   - Queues medium/low-confidence + anomaly-flagged items for bookkeeper review
  *
- * Idempotency: every QBO line we touch is recorded in processed_qbo_lines.
- * Re-running a window is a no-op for already-processed lines.
+ * Idempotency: every QBO line we touch is recorded in processed_qbo_lines, so
+ * re-running a window is a no-op for already-processed lines. (Note: the JE/
+ * reclass QBO write itself is not yet token-idempotent — a crash AFTER the QBO
+ * write but BEFORE the processed_qbo_lines insert could re-touch a line on the
+ * next run. Low-frequency, tracked separately.)
  *
- * Safety bar: this code is going to run unsupervised against production books,
- * so it ships with multiple guards:
- *   - Hard-block list (payroll, tax authorities, owner draws) — always queue,
- *     never auto-execute regardless of confidence
+ * Safety bar — guards before any auto-execute:
+ *   - Closed-period gate: never auto-execute a line dated on/before the QBO
+ *     book-close date (getBookCloseDate); such lines queue flagged 'closed_period'
+ *   - Hard-block list (payroll, tax authorities, owner draws) — always queue
  *   - Per-run cap: if auto_executed > MAX_AUTO_PER_RUN, pause the client and
  *     queue everything for the remainder of the run
- *   - target_account_id must be live in QBO's current COA before auto-execute
- *
- * Default mode is dryRun=true. The cron and admin trigger pass dryRun=false
- * explicitly. Nothing writes to QBO in dry-run mode.
- *
- * WIRING CHECKLIST (when ready to go live):
- *   [ ] Apply scripts/migration_31_daily_recon.sql
- *   [ ] Add cron entry to vercel.json (path: /api/cron/daily-recon)
- *   [ ] Set daily_recon_enabled=true on pilot clients via /admin/daily-recon
- *   [ ] Run a few dry-runs and review the daily_review_queue output
- *   [ ] Flip to dryRun=false in the cron route once confidence is high
+ *   - target_account_id must be live in QBO's current COA (accountById) before
+ *     auto-execute
+ *   - any anomaly flag on a line forces it to the review queue
  */
 
 import { createServiceSupabase } from "./supabase";
 import { fetchAllTransactionLines, getValidToken, reclassifyTransactionLines, type ReclassLine } from "./qbo-reclass";
-import { fetchAllAccounts } from "./qbo";
+import { fetchAllAccounts, getBookCloseDate } from "./qbo";
 import {
   categorizeAllTransactions,
   webSearchVendor,
@@ -269,6 +268,21 @@ export async function runDailyRecon(
       availableAccounts.map((a) => [a.account_name.toLowerCase(), a])
     );
 
+    // 7b. Closed-period guard. Read the client's QBO book-close date so we
+    //     NEVER auto-reclassify a transaction dated in a closed (filed)
+    //     period — those go to the review queue flagged 'closed_period'
+    //     instead. Fail-soft: if we can't read it, treat as no close date
+    //     (the per-run cap + hard-block list + confidence floor still apply).
+    let bookCloseDate: string | null = null;
+    try {
+      bookCloseDate = await getBookCloseDate(c.qbo_realm_id, accessToken);
+    } catch (e: any) {
+      console.warn(
+        `[daily-recon ${clientLinkId}] could not read book-close date:`,
+        e?.message
+      );
+    }
+
     // 8. Load bank rules cache
     const { data: bankRules } = await service
       .from("bank_rules")
@@ -428,7 +442,20 @@ export async function runDailyRecon(
         reasoning: "No KB / bank rule match and AI did not return a decision",
       };
 
-      const lineAnomalies = anomalies.get(line.line_id) || [];
+      const lineAnomalies = [...(anomalies.get(line.line_id) || [])];
+      // Closed-period guard: a transaction dated on/before the QBO book-close
+      // date lives in a filed period — flag it so it can never auto-execute
+      // and the bookkeeper sees why it's in the queue.
+      if (
+        bookCloseDate &&
+        line.transaction_date &&
+        String(line.transaction_date).slice(0, 10) <= bookCloseDate
+      ) {
+        lineAnomalies.push({
+          code: "closed_period",
+          message: `Transaction dated ${String(line.transaction_date).slice(0, 10)} is on/before the QBO book-close date (${bookCloseDate}) — queued instead of auto-applied so a filed period is never silently changed.`,
+        });
+      }
       const isHardBlocked = isHardBlock(line);
       const targetValid = !!(d.target_account_id && accountById.has(d.target_account_id));
 
