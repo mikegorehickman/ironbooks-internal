@@ -1780,6 +1780,28 @@ export async function updateClosingDate(
 }
 
 /**
+ * Read the QBO book-closing date (AccountingInfoPrefs.BookCloseDate), or
+ * null when no close date is set. Used to gate automated writes (daily
+ * recon) OUT of closed periods — we must never silently re-categorize a
+ * transaction the client/CPA has already closed and filed against.
+ *
+ * Returns an ISO date string "YYYY-MM-DD" (QBO's format) or null.
+ */
+export async function getBookCloseDate(
+  realmId: string,
+  accessToken: string
+): Promise<string | null> {
+  const prefs = await qboRequest<any>(
+    realmId,
+    accessToken,
+    `/preferences?minorversion=70`,
+    { method: "GET" }
+  );
+  const raw = prefs?.Preferences?.AccountingInfoPrefs?.BookCloseDate;
+  return raw ? String(raw).slice(0, 10) : null;
+}
+
+/**
  * Void an Invoice in QBO (operation=void). Reverses Dr A/R / Cr Income —
  * removes any open balance from A/R and backs the revenue out. Used by the
  * UF Audit "void pair" resolution for CRM-duplicated invoice+payment pairs:
