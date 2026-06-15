@@ -112,6 +112,13 @@ export interface CleanupReportData {
   top_categories: CategorySummaryRow[];
   top_vendors: VendorSummaryRow[];
 
+  // Bank rules — count of permanent auto-categorization rules created
+  // for this client during the cleanup. These prevent the same
+  // miscategorizations from recurring on future imports.
+  bank_rules_count: number;
+  /** rules that are pushed to QBO + active in the daily-recon engine */
+  bank_rules_active: number;
+
   // Stripe section (null if not applicable)
   stripe: StripeReconSummary | null;
 }
@@ -471,6 +478,15 @@ export function CleanupReportPDF({ data }: { data: CleanupReportData }) {
               <Text style={styles.statLabel}>Transactions categorized</Text>
               <Text style={styles.statValue}>{fmtCount(data.reclass_total_count)}</Text>
               <Text style={styles.statSub}>{fmtMoney(data.reclass_total_volume)} total volume</Text>
+            </View>
+            <View style={styles.statTile}>
+              <Text style={styles.statLabel}>Bank rules created</Text>
+              <Text style={styles.statValue}>{fmtCount(data.bank_rules_count)}</Text>
+              <Text style={styles.statSub}>
+                {data.bank_rules_active > 0
+                  ? `${data.bank_rules_active} active for future imports`
+                  : "auto-categorize future imports"}
+              </Text>
             </View>
             {hasStripe ? (
               <View style={styles.statTile}>

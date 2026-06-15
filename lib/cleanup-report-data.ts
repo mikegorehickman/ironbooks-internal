@@ -148,24 +148,40 @@ export async function buildCleanupReportData(
     flagged: coa_actions.filter((a) => a.action === "flag").length,
   };
 
-  // ─── Reclass jobs completed in the range → executed reclassifications ───
+  // ─── Reclassifications for transactions whose date falls in the report
+  //     period ───
+  //
+  // Previously filtered reclass_jobs by execution_completed_at within the
+  // period — which misses every reclass job that was finalized OUTSIDE the
+  // period window (e.g. bookkeeper cleans a Jan–Dec 2025 book in June
+  // 2026; the report for 2025 would show 0 transactions categorized). The
+  // right semantic for a cleanup deliverable is "we re-categorized X
+  // transactions whose date falls in this period", regardless of when the
+  // bookkeeper actually clicked finalize.
+  //
+  // Strategy: pull all completed reclass_jobs for this client (no
+  // execution-date filter), then filter the reclassifications themselves
+  // by transaction_date within the period.
   const { data: reclassJobs } = await service
     .from("reclass_jobs")
-    .select("id, status, execution_completed_at")
+    .select("id, status")
     .eq("client_link_id", params.client_link_id)
-    .eq("status", "complete")
-    .not("execution_completed_at", "is", null)
-    .gte("execution_completed_at", startIso)
-    .lt("execution_completed_at", endIso);
+    .eq("status", "complete");
 
   const reclassJobIds = (reclassJobs || []).map((j) => j.id);
+  const periodStartDate = params.period_start; // YYYY-MM-DD
+  const periodEndDate = params.period_end;     // YYYY-MM-DD inclusive
   let reclassRows: any[] = [];
   if (reclassJobIds.length > 0) {
     const { data } = await service
       .from("reclassifications")
-      .select("vendor_name, from_account_name, to_account_name, bookkeeper_override_target_name, transaction_amount, status")
+      .select(
+        "vendor_name, from_account_name, to_account_name, bookkeeper_override_target_name, transaction_amount, transaction_date, status"
+      )
       .in("reclass_job_id", reclassJobIds)
-      .eq("status", "executed");
+      .eq("status", "executed")
+      .gte("transaction_date", periodStartDate)
+      .lte("transaction_date", periodEndDate);
     reclassRows = data || [];
   }
 
@@ -271,6 +287,25 @@ export async function buildCleanupReportData(
     }
   }
 
+  // ─── Bank rules created for this client during the cleanup ───
+  // Counts every bank_rule we created from this client's reclass work.
+  // No period filter — bank rules are stand-alone artifacts of the
+  // cleanup ("we created X auto-categorization rules") and aren't
+  // bound to transaction dates. We DO surface active-vs-total separately
+  // so the report can say "12 rules created, 10 active on future imports".
+  const { data: bankRules } = await service
+    .from("bank_rules")
+    .select("status, pushed_to_qbo")
+    .eq("client_link_id", params.client_link_id);
+  const allRules = (bankRules as Array<{ status: string | null; pushed_to_qbo: boolean | null }> | null) || [];
+  const bank_rules_count = allRules.length;
+  // "Active" here = the rule will fire on future bank-feed imports:
+  // either the daily-recon engine matched it (status='active') or it was
+  // pushed to QBO via the .xls export.
+  const bank_rules_active = allRules.filter(
+    (r) => r.status === "active" || r.pushed_to_qbo === true
+  ).length;
+
   const generatedAt = new Date().toLocaleString("en-US", {
     month: "long",
     day: "numeric",
@@ -293,6 +328,8 @@ export async function buildCleanupReportData(
     reclass_total_volume,
     top_categories,
     top_vendors,
+    bank_rules_count,
+    bank_rules_active,
     stripe,
   };
 }
