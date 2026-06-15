@@ -84,13 +84,83 @@ export async function resendOnboardingEmail(contactId: string): Promise<void> {
   await ghlRequest(`/contacts/${contactId}/workflow/${workflowId}`, { method: "POST" });
 }
 
+export interface GhlOpportunity {
+  id: string;
+  contactId: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  contactCompany: string | null;
+  wonAt: string | null;
+  createdAt: string | null;
+}
+
 /**
- * Reconciliation backstop (future): pull recently-Won opportunities so the
- * board self-heals if a webhook was missed. PLACEHOLDER until we confirm the
- * pipeline/stage ids to query.
+ * Pull Won opportunities from GHL, paginating until all results are fetched.
+ * Used by the reconciliation backstop (/api/onboarding/reconcile) so missed
+ * webhooks don't leave sales off the board.
+ *
+ * @param since  ISO date string — only return opportunities created/updated
+ *               after this date (defaults to 90 days ago). For a first-time
+ *               backfill, pass an earlier date.
+ * @param maxPages  Safety cap — each page is 100 results (default 20 pages = 2000 ops).
  */
-export async function fetchRecentWonOpportunities(): Promise<any[]> {
+export async function fetchRecentWonOpportunities(
+  since?: string,
+  maxPages = 20
+): Promise<GhlOpportunity[]> {
   if (!ghlConfigured()) return [];
-  // TODO: GET /opportunities/search?location_id=...&status=won&date>=...
-  return [];
+
+  const locationId = process.env.GHL_LOCATION_ID;
+  if (!locationId) return [];
+
+  const startDate =
+    since || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  const results: GhlOpportunity[] = [];
+  let page = 1;
+
+  while (page <= maxPages) {
+    const params = new URLSearchParams({
+      location_id: locationId,
+      status: "won",
+      startDate,
+      limit: "100",
+      page: String(page),
+    });
+
+    let body: any;
+    try {
+      body = await ghlRequest<any>(`/opportunities/search?${params.toString()}`);
+    } catch (err: any) {
+      console.error(`[ghl] fetchRecentWonOpportunities page ${page} failed:`, err.message);
+      break;
+    }
+
+    const ops: any[] = body?.opportunities || [];
+    for (const op of ops) {
+      const contact = op.contact || {};
+      const name =
+        contact.name ||
+        [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||
+        null;
+      results.push({
+        id: op.id,
+        contactId: contact.id || op.contactId || "",
+        contactName: name || null,
+        contactEmail: contact.email || null,
+        contactPhone: contact.phone || null,
+        contactCompany: contact.companyName || contact.company || null,
+        wonAt: op.closedDate || op.updatedAt || op.createdAt || null,
+        createdAt: op.createdAt || null,
+      });
+    }
+
+    // GHL returns nextPageUrl in meta when there are more pages
+    const hasMore = body?.meta?.nextPageUrl || ops.length === 100;
+    if (!hasMore || ops.length === 0) break;
+    page++;
+  }
+
+  return results;
 }

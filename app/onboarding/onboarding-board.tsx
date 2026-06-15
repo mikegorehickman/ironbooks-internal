@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Mail, FileText, CalendarCheck, CheckCircle2, Clock, Loader2, UserPlus,
-  ArrowRight, AlertTriangle, X,
+  ArrowRight, AlertTriangle, X, RefreshCw,
 } from "lucide-react";
 import { deriveStage, slaLevel, type OnboardingLead, type OnboardingStage } from "@/lib/onboarding";
 
@@ -35,6 +35,34 @@ export function OnboardingBoard({ leads, bookkeepers }: { leads: OnboardingLead[
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  async function syncGhl(since?: string) {
+    setSyncing(true);
+    setSyncResult(null);
+    setError("");
+    try {
+      const res = await fetch("/api/onboarding/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(since ? { since } : {}),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const { added, updated, total } = data;
+      setSyncResult(
+        total === 0
+          ? "No won opportunities found — check GHL env vars."
+          : `Synced ${total} opportunities: ${added} new, ${updated} updated.`
+      );
+      if (added > 0) router.refresh();
+    } catch (e: any) {
+      setError(e.message || "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   async function act(id: string, action: string, extra: Record<string, any> = {}) {
     setBusyId(id);
@@ -60,6 +88,33 @@ export function OnboardingBoard({ leads, bookkeepers }: { leads: OnboardingLead[
 
   return (
     <div>
+      {/* Toolbar */}
+      <div className="mb-4 flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => syncGhl()}
+          disabled={syncing}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-navy hover:bg-gray-50 disabled:opacity-50"
+          title="Pull won opportunities from GHL and add any that are missing"
+        >
+          {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Sync GHL
+        </button>
+        <button
+          onClick={() => {
+            const since = prompt("Backfill from date (YYYY-MM-DD):", new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0]);
+            if (since) syncGhl(since);
+          }}
+          disabled={syncing}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-ink-slate hover:bg-gray-50 disabled:opacity-50"
+          title="Pull won opportunities back to a specific date — use for first-time backfill"
+        >
+          Backfill…
+        </button>
+        {syncResult && (
+          <span className="text-sm text-emerald-700 font-medium">{syncResult}</span>
+        )}
+      </div>
+
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{error}</div>
       )}
