@@ -103,11 +103,21 @@ const RANGE_PRESETS: Array<{ key: string; label: string }> = [
   { key: "ytd", label: "YTD" },
 ];
 
+export interface OnboardingProfile {
+  won_at: string | null;
+  ob_form_submitted_at: string | null;
+  ob_call_time: string | null;
+  ob_call_status: string | null;
+  ob_call_attended_at: string | null;
+  answers: { label: string; value: string }[];
+}
+
 interface Props {
   clientLink: ClientLink;
   actorRole: string;
   overview: OverviewBundle;
   financials: FinancialsBundle;
+  onboarding?: OnboardingProfile | null;
 }
 
 type TabId = "overview" | "pl" | "bs" | "bank" | "activity";
@@ -120,7 +130,7 @@ const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: "activity", label: "Activity", icon: Clock },
 ];
 
-export function ClientProfileShell({ clientLink, actorRole, overview, financials }: Props) {
+export function ClientProfileShell({ clientLink, actorRole, overview, financials, onboarding }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const canImpersonate = actorRole === "admin" || actorRole === "lead";
 
@@ -196,6 +206,7 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           clientLink={clientLink}
           overview={overview}
           qboStatus={financials.qboStatus}
+          onboarding={onboarding}
         />
       )}
       {activeTab === "pl" && (
@@ -625,10 +636,12 @@ function OverviewTab({
   clientLink,
   overview,
   qboStatus,
+  onboarding,
 }: {
   clientLink: ClientLink;
   overview: OverviewBundle;
   qboStatus: "connected" | "token_expired" | "never_connected";
+  onboarding?: OnboardingProfile | null;
 }) {
   const { outstanding, summary, activity, progress } = overview;
 
@@ -676,6 +689,11 @@ function OverviewTab({
           bookkeeper sees the "where are we" answer before the "what's
           broken" list. */}
       {progress && <ProgressFlowChart progress={progress} />}
+
+      {/* Onboarding details — the GHL onboarding-form answers + call status,
+          carried over when this client was created from the onboarding board,
+          so a senior can reference them here instead of toggling to GHL. */}
+      {onboarding && <OnboardingDetailsCard onboarding={onboarding} />}
 
       {/* Outstanding work — top-priority card. If empty we show a positive
           "all clear" state because seeing "0 outstanding items" hidden in
@@ -1949,5 +1967,76 @@ function ViewAsClientButton({ clientLinkId }: { clientLinkId: string }) {
       {loading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
       View as client
     </button>
+  );
+}
+
+// ─── ONBOARDING DETAILS ────────────────────────────────────────────────
+// The GHL onboarding-form answers + call status, carried over when the client
+// was created from the onboarding board. Lets a senior reference everything
+// the client told us at signup without opening GoHighLevel.
+function OnboardingDetailsCard({ onboarding }: { onboarding: OnboardingProfile }) {
+  const fmt = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
+  const fmtDT = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null;
+
+  const attended = !!onboarding.ob_call_attended_at || onboarding.ob_call_status === "attended";
+  const callLine = attended
+    ? `Onboarding call attended${onboarding.ob_call_time ? ` · ${fmtDT(onboarding.ob_call_time)}` : ""}`
+    : onboarding.ob_call_status === "cancelled"
+    ? "Onboarding call cancelled"
+    : onboarding.ob_call_time
+    ? `Onboarding call booked · ${fmtDT(onboarding.ob_call_time)}`
+    : "Onboarding call not booked";
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold text-navy flex items-center gap-2">
+          <FileText size={15} className="text-teal" />
+          Onboarding details
+        </h3>
+        <span className="text-[11px] text-ink-light">from GoHighLevel</span>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-4 text-[11px]">
+        {onboarding.won_at && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-lighter text-teal font-semibold">
+            <CheckCircle2 size={11} /> Won {fmt(onboarding.won_at)}
+          </span>
+        )}
+        <span
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold ${
+            onboarding.ob_form_submitted_at ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+          }`}
+        >
+          <FileText size={11} /> {onboarding.ob_form_submitted_at ? `Form ${fmt(onboarding.ob_form_submitted_at)}` : "Form pending"}
+        </span>
+        <span
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold ${
+            attended ? "bg-emerald-50 text-emerald-700" : onboarding.ob_call_status === "cancelled" ? "bg-red-50 text-red-700" : "bg-gray-50 text-ink-slate"
+          }`}
+        >
+          <Clock size={11} /> {callLine}
+        </span>
+      </div>
+
+      {onboarding.answers.length > 0 ? (
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2.5">
+          {onboarding.answers.map((a, i) => (
+            <div key={i} className="min-w-0">
+              <dt className="text-[10px] font-bold uppercase tracking-wider text-ink-light">{a.label}</dt>
+              <dd className="text-sm text-navy break-words whitespace-pre-wrap">{a.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="text-xs text-ink-slate italic">
+          {onboarding.ob_form_submitted_at
+            ? "Form submitted — no displayable answers captured."
+            : "Onboarding form not submitted yet."}
+        </p>
+      )}
+    </div>
   );
 }

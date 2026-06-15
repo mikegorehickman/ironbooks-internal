@@ -55,6 +55,8 @@ create table if not exists onboarding_leads (
 create index if not exists onboarding_leads_status_idx on onboarding_leads(status);
 create index if not exists onboarding_leads_assigned_idx on onboarding_leads(assigned_to);
 create index if not exists onboarding_leads_won_idx on onboarding_leads(won_at);
+-- Profile lookup: the client profile reads the lead by its linked client.
+create index if not exists onboarding_leads_client_link_idx on onboarding_leads(client_link_id);
 
 -- Append-only log of every inbound GHL webhook — idempotency + audit trail.
 create table if not exists onboarding_webhook_events (

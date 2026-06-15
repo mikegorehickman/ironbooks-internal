@@ -10,6 +10,7 @@ import {
   fetchClientProgress,
 } from "@/lib/internal-client-profile";
 import { getValidToken, QBOReauthRequiredError } from "@/lib/qbo";
+import { extractFormAnswers } from "@/lib/onboarding";
 import {
   fetchOverview,
   fetchBalanceSheetSummary,
@@ -296,6 +297,33 @@ export default async function ClientProfilePage({
     ]);
   }
 
+  // Onboarding lead linked to this client (set when the lead was converted
+  // via the onboarding board). Surfaces the GHL onboarding-form answers + call
+  // info on the profile so a senior can reference them without opening GHL.
+  // Tolerates migration 70 not being applied yet.
+  let onboarding: any = null;
+  try {
+    const { data: ob } = await (service as any)
+      .from("onboarding_leads")
+      .select(
+        "won_at, ob_form_submitted_at, ob_form_payload, ob_call_time, ob_call_status, ob_call_attended_at"
+      )
+      .eq("client_link_id", id)
+      .maybeSingle();
+    if (ob) {
+      onboarding = {
+        won_at: ob.won_at,
+        ob_form_submitted_at: ob.ob_form_submitted_at,
+        ob_call_time: ob.ob_call_time,
+        ob_call_status: ob.ob_call_status,
+        ob_call_attended_at: ob.ob_call_attended_at,
+        answers: extractFormAnswers(ob.ob_form_payload),
+      };
+    }
+  } catch (e: any) {
+    console.warn(`[client-profile ${id}] onboarding fetch failed:`, e?.message);
+  }
+
   return (
     <AppShell>
       <TopBar
@@ -313,6 +341,7 @@ export default async function ClientProfilePage({
       <ClientProfileShell
         clientLink={clientLink as any}
         actorRole={role}
+        onboarding={onboarding}
         overview={{
           outstanding,
           activity,

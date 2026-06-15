@@ -105,6 +105,66 @@ export function extractContactId(payload: any): string | null {
   return v ? String(v) : null;
 }
 
+// Keys that are plumbing/contact identity, not onboarding-form answers — so
+// the profile shows the questions the client actually answered, not GHL noise.
+const FORM_SYSTEM_KEYS = new Set([
+  "contact_id", "contactid", "location_id", "locationid", "id", "workflow",
+  "opportunity_id", "opportunityid", "first_name", "firstname", "last_name",
+  "lastname", "full_name", "name", "email", "phone", "company_name", "companyname",
+  "business_name", "businessname", "date_created", "datecreated", "timestamp",
+  "tags", "source", "customdata", "type", "event",
+]);
+
+function humanizeKey(k: string): string {
+  return k
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function flattenValue(v: any): string | null {
+  if (v == null) return null;
+  if (Array.isArray(v)) {
+    const parts = v.map((x) => flattenValue(x)).filter(Boolean);
+    return parts.length ? parts.join(", ") : null;
+  }
+  if (typeof v === "object") {
+    const parts = Object.entries(v)
+      .map(([k, val]) => {
+        const fv = flattenValue(val);
+        return fv ? `${humanizeKey(k)}: ${fv}` : null;
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join("; ") : null;
+  }
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
+
+/**
+ * Flatten a GHL onboarding-form payload into readable label/value answers for
+ * the client profile, so a senior can reference them without opening GHL.
+ * Prefers a nested `customData` block (GHL's usual home for custom form
+ * fields), else the top-level payload, dropping the system keys above.
+ * Generic by design — curate labels/order once we see a real payload, but no
+ * answer is ever lost (the raw payload is stored too).
+ */
+export function extractFormAnswers(payload: any): { label: string; value: string }[] {
+  if (!payload || typeof payload !== "object") return [];
+  const src =
+    payload.customData && typeof payload.customData === "object" ? payload.customData : payload;
+  const out: { label: string; value: string }[] = [];
+  for (const [k, v] of Object.entries(src)) {
+    if (FORM_SYSTEM_KEYS.has(k.toLowerCase())) continue;
+    const val = flattenValue(v);
+    if (val == null) continue;
+    out.push({ label: humanizeKey(k), value: val });
+  }
+  return out;
+}
+
 export function extractContactFields(payload: any) {
   const first = pick(payload, ["first_name", "firstName", "contact.firstName"]);
   const last = pick(payload, ["last_name", "lastName", "contact.lastName"]);
