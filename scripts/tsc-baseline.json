@@ -148,7 +148,6 @@
   "components/Sidebar.tsx: error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.",
   "lib/cleanup-system/synthetic-fixtures.ts: error TS2739: Type '{ qbo_invoice_id: string; doc_number: string; customer_id: string; customer_name: string; txn_date: string; balance: number; total_amount: number; }' is missing the following properties from type 'OpenInvoice': due_date, currency",
   "lib/executor.ts: error TS2322: Type 'any' is not assignable to type 'never'.",
-  "lib/stripe-invite-detector.ts: error TS2769: No overload matches this call.",
   "lib/supabase.ts: error TS7006: Parameter 'cookiesToSet' implicitly has an 'any' type.",
   "lib/supabase.ts: error TS7031: Binding element 'name' implicitly has an 'any' type.",
   "lib/supabase.ts: error TS7031: Binding element 'options' implicitly has an 'any' type.",

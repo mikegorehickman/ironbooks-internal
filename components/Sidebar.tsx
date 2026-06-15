@@ -6,7 +6,7 @@ import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
   FileSpreadsheet, Wallet, Volume2, VolumeX, HeartPulse, Gauge, CalendarCheck,
-  ClipboardCheck, ListChecks,
+  ClipboardCheck, ListChecks, UserPlus,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -15,8 +15,9 @@ import { StripeConnectModal } from "./StripeConnectModal";
 import { isMuted, setMuted, onMutedChange, playSound } from "@/lib/sounds";
 
 /** Daily work surface — the whole job in five stops. */
-const dailyNav = [
+const dailyNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
   { href: "/today", label: "Today", icon: Sun },
+  { href: "/onboarding", label: "Onboarding", icon: UserPlus, senior: true },
   { href: "/cleanup", label: "Cleanup", icon: ClipboardCheck },
   { href: "/production", label: "Production", icon: ListChecks },
   { href: "/clients", label: "Clients", icon: Users },
@@ -165,15 +166,17 @@ export function Sidebar() {
         </Link>
 
         <NavSection label="Work" />
-        {dailyNav.map((item) => (
-          <NavItem
-            key={item.href}
-            item={item}
-            pathname={pathname}
-            badgeCount={item.href === "/today" ? unreadComms : undefined}
-            badgeTone="red"
-          />
-        ))}
+        {dailyNav
+          .filter((item) => !item.senior || isSenior)
+          .map((item) => (
+            <NavItem
+              key={item.href}
+              item={item}
+              pathname={pathname}
+              badgeCount={item.href === "/today" ? unreadComms : undefined}
+              badgeTone="red"
+            />
+          ))}
 
         {isSenior && (
           <>
