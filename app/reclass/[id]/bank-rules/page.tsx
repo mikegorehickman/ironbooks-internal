@@ -131,17 +131,21 @@ export default async function BankRulesFromReclassPage({
   //
   // The only filter is `vendor_name IS NOT NULL` — without a vendor name
   // there's no pattern to build a rule from.
+  // Pull `description` too so the unknown-vendor fallback can group by
+  // the bank descriptor (the "second line" on each card). Without this,
+  // every "Unknown vendor" row collapses into a single mega-group that's
+  // impossible to categorize meaningfully.
   const { data: rows } = await service
     .from("reclassifications")
     .select(
-      "vendor_name, vendor_pattern_normalized, to_account_id, to_account_name, bookkeeper_override_target_id, bookkeeper_override_target_name, transaction_amount, decision"
+      "vendor_name, vendor_pattern_normalized, description, to_account_id, to_account_name, bookkeeper_override_target_id, bookkeeper_override_target_name, transaction_amount, decision"
     )
-    .eq("reclass_job_id", id)
-    .not("vendor_name", "is", null);
+    .eq("reclass_job_id", id);
 
   type ReclassRow = {
     vendor_name: string | null;
     vendor_pattern_normalized: string | null;
+    description: string | null;
     to_account_id: string;
     to_account_name: string | null;
     bookkeeper_override_target_id: string | null;
@@ -149,6 +153,17 @@ export default async function BankRulesFromReclassPage({
     transaction_amount: number | null;
     decision: string;
   };
+
+  // QBO emits e-transfers, ACH withdrawals, and cash-app transactions
+  // with vendor_name = "Unknown vendor" (literal). When 200+ rows share
+  // that one vendor name, the description field — which holds the
+  // actual bank-feed descriptor (e.g. "MENARDS #3014", "ACE HW DENVER")
+  // — is the only thing distinguishing them.
+  function isUnknownVendor(v: string | null | undefined): boolean {
+    if (!v) return true;
+    const norm = v.trim().toLowerCase();
+    return norm === "" || norm === "unknown vendor" || norm === "unknown";
+  }
 
   const groupMap = new Map<
     string,
@@ -161,12 +176,30 @@ export default async function BankRulesFromReclassPage({
   >();
 
   for (const row of (rows || []) as ReclassRow[]) {
-    const groupKey = row.vendor_pattern_normalized || row.vendor_name || "";
+    // Fallback to description when vendor_name is the generic "Unknown
+    // vendor" — pulls the bank descriptor out so each unique payee
+    // (whatever QBO mis-attributed as unknown) becomes its own rule
+    // candidate instead of all collapsing into one row.
+    const unknownVendor = isUnknownVendor(row.vendor_name);
+    const descriptionKey = (row.description || "").trim();
+
+    let groupKey: string;
+    let vendorDisplay: string;
+    if (unknownVendor && descriptionKey) {
+      // Uppercase + collapsed-whitespace normalization mirrors how QBO
+      // surfaces the descriptor in incoming bank feeds — keeps case
+      // variations from splintering the same payee.
+      groupKey = descriptionKey.toUpperCase().replace(/\s+/g, " ");
+      vendorDisplay = descriptionKey;
+    } else {
+      groupKey = row.vendor_pattern_normalized || row.vendor_name || "";
+      vendorDisplay = row.vendor_name || groupKey;
+    }
     if (!groupKey) continue;
 
     if (!groupMap.has(groupKey)) {
       groupMap.set(groupKey, {
-        vendorDisplay: row.vendor_name || groupKey,
+        vendorDisplay,
         targetCounts: new Map(),
         txCount: 0,
         totalAmount: 0,
@@ -261,12 +294,14 @@ export default async function BankRulesFromReclassPage({
     `[bank-rules ${id}] Proposed: ${proposedRules.length} total — ${ready} ready, ${needsTarget} need target, ${inQbo} already in QBO`
   );
 
-  // Build the FINAL dropdown list, grouped so the bookkeeper is never stuck:
-  //   group "master" → curated master COA accounts (shown first) + any
-  //                    target the AI/bookkeeper actually used in this job
-  //   group "other"  → every other live QBO account (safety net — a real
-  //                    account is never unselectable, even when master↔QBO
-  //                    name matching is imperfect)
+  // Build the FINAL dropdown list — MASTER COA ONLY. We deliberately do
+  // NOT surface the client's raw/old QBO chart of accounts here: rule
+  // targets must come from our curated master COA (post-cleanup), not the
+  // legacy accounts we're migrating away from. The only non-master-name
+  // entries allowed are targets the AI/bookkeeper actually used in THIS
+  // job — kept solely so an already-selected row never blanks out (its
+  // current value stays selectable). `otherActiveAccounts` is still
+  // computed above for the diagnostic log but excluded from the dropdown.
   const dropdownById = new Map<
     string,
     { id: string; name: string; type: string; group: "master" | "other" }
@@ -284,16 +319,11 @@ export default async function BankRulesFromReclassPage({
       group: "master",
     });
   }
-  for (const a of otherActiveAccounts) {
-    if (dropdownById.has(a.id)) continue;
-    dropdownById.set(a.id, { ...a, group: "other" });
-  }
-  const availableAccountsForDropdown = Array.from(dropdownById.values()).sort((a, b) => {
-    if (a.group !== b.group) return a.group === "master" ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
+  const availableAccountsForDropdown = Array.from(dropdownById.values()).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
   console.log(
-    `[bank-rules ${id}] Dropdown final: ${availableAccountsForDropdown.length} accounts (${availablePnLAccounts.length} master + ${otherActiveAccounts.length} other QBO + job targets)`
+    `[bank-rules ${id}] Dropdown final: ${availableAccountsForDropdown.length} master-COA accounts (excluded ${otherActiveAccounts.length} legacy QBO accounts; ${availablePnLAccounts.length} master-matched + job targets)`
   );
 
   return (
