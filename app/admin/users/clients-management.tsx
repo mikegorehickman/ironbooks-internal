@@ -23,10 +23,11 @@ export interface ClientRow {
   assigned_bookkeeper_name: string | null;
   has_portal: boolean;
   portal_user_count: number;
+  last_login_at: string | null;
   created_at: string | null;
 }
 
-const GRID = "2fr 1.7fr 1.2fr 0.9fr 1fr 0.8fr";
+const GRID = "2fr 1.7fr 1.2fr 0.9fr 1fr 1fr 0.8fr";
 
 export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
   const [rows, setRows] = useState(clients);
@@ -138,6 +139,7 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
           <div>Phone</div>
           <div>Status</div>
           <div>Portal</div>
+          <div>Last login</div>
           <div></div>
         </div>
 
@@ -199,6 +201,11 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
                   No portal
                 </span>
               )}
+            </div>
+
+            {/* Last login */}
+            <div className="text-xs text-ink-slate" title={c.last_login_at || ""}>
+              {formatLastLogin(c.last_login_at)}
             </div>
 
             {/* Actions */}
@@ -319,6 +326,20 @@ function EditableCell({
       <Pencil size={11} className="text-ink-light opacity-0 group-hover:opacity-100 flex-shrink-0" />
     </button>
   );
+}
+
+/** Compact last-portal-login label: "Today" / "Yesterday" / "3d ago" /
+ *  "Mar 14" for older, "Never" when the client has never signed in. */
+function formatLastLogin(iso: string | null): string {
+  if (!iso) return "Never";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "Never";
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function StatusBadge({ status, isActive }: { status: string | null; isActive: boolean }) {
