@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -38,5 +39,9 @@ export async function POST(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  // Refresh the inbox surfaces so the now-read rows drop off when the
+  // bookkeeper navigates back to /today or /clients.
+  revalidatePath("/today");
+  revalidatePath("/clients");
   return NextResponse.json({ ok: true });
 }

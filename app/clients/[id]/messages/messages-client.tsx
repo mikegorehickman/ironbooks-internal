@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Bell, Download, FileText, Loader2, MessageSquare, Send,
 } from "lucide-react";
@@ -28,6 +29,7 @@ export function BookkeeperMessagesClient({
   initialMessages: ClientCommunication[];
   canSend: boolean;
 }) {
+  const router = useRouter();
   const [messages, setMessages] = useState<ClientCommunication[]>(initialMessages);
   const [draft, setDraft] = useState("");
   const [subject, setSubject] = useState("");
@@ -40,8 +42,13 @@ export function BookkeeperMessagesClient({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`/api/clients/${clientLinkId}/messages/read`, { method: "POST" }).catch(() => {});
-  }, [clientLinkId]);
+    // Mark inbound read on open, then refresh so the /today + /clients inbox
+    // surfaces (and their client-side Router Cache entries) reflect the cleared
+    // state when the bookkeeper navigates back.
+    fetch(`/api/clients/${clientLinkId}/messages/read`, { method: "POST" })
+      .then(() => router.refresh())
+      .catch(() => {});
+  }, [clientLinkId, router]);
 
   // Live thread: poll every 20s so a client reply appears without a manual
   // refresh. New from_client messages chime + get marked read (thread is
@@ -101,6 +108,9 @@ export function BookkeeperMessagesClient({
       setMessages((prev) => [...prev, json.message]);
       setDraft("");
       setSubject("");
+      // Sending cleared the inbound unread server-side — refresh so the inbox
+      // surfaces show it cleared when the bookkeeper returns to /today / /clients.
+      router.refresh();
       const d = json.email_delivery;
       if (d && !d.sent) {
         setDeliveryWarning(

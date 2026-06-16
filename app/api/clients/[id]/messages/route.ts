@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import {
   emailPortalUsersAboutMessage,
@@ -122,6 +123,25 @@ export async function POST(
   if (insertErr) {
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
   }
+
+  // Sending into the thread means the bookkeeper has handled it — clear any
+  // unread inbound messages so this client drops out of the /today "Inbound
+  // from clients" widget and the /clients unread count. Opening the thread
+  // already marks these read, but doing it on send too guarantees the inbox
+  // clears even if that fire-and-forget call was missed (the reported bug:
+  // "replied but it didn't clear from the inbox").
+  await (service as any)
+    .from("client_communications")
+    .update({ read_at: new Date().toISOString(), read_by: user.id })
+    .eq("client_link_id", id)
+    .eq("direction", "from_client")
+    .is("read_at", null);
+
+  // Refresh the server-rendered inbox surfaces so the cleared state shows
+  // when the bookkeeper navigates back (they're force-dynamic, but this also
+  // busts the client Router Cache for these paths on the next navigation).
+  revalidatePath("/today");
+  revalidatePath("/clients");
 
   // Best-effort email so the client knows to check their portal. The
   // outcome goes back to the composer so the bookkeeper is warned
