@@ -65,6 +65,152 @@ async function ghlRequest<T>(
   return res.json();
 }
 
+export interface GhlContact {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  companyName: string | null;
+  address1: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  country: string | null;
+  /** Raw custom fields array (id/value pairs) — kept for downstream mapping. */
+  customFields: any[];
+}
+
+/**
+ * Look up a GHL contact by email within our location. Returns the first
+ * exact-email match (case-insensitive), or null. Used by the profile
+ * backfill to pull name / phone / address straight from GHL.
+ */
+export async function findGhlContactByEmail(email: string): Promise<GhlContact | null> {
+  const locationId = process.env.GHL_LOCATION_ID;
+  const trimmed = (email || "").trim();
+  if (!locationId || !trimmed) return null;
+
+  const params = new URLSearchParams({ locationId, query: trimmed, limit: "20" });
+  let body: any;
+  try {
+    body = await ghlRequest<any>(`/contacts/?${params.toString()}`);
+  } catch (err: any) {
+    console.warn(`[ghl] contact search failed for ${trimmed}: ${err.message}`);
+    return null;
+  }
+
+  const contacts: any[] = body?.contacts || [];
+  const wanted = trimmed.toLowerCase();
+  const match =
+    contacts.find((c) => (c.email || "").toLowerCase() === wanted) || null;
+  if (!match) return null;
+
+  return {
+    id: match.id,
+    firstName: match.firstName ?? null,
+    lastName: match.lastName ?? null,
+    name: match.contactName ?? match.name ?? null,
+    email: match.email ?? null,
+    phone: match.phone ?? null,
+    companyName: match.companyName ?? null,
+    address1: match.address1 ?? null,
+    city: match.city ?? null,
+    state: match.state ?? null,
+    postalCode: match.postalCode ?? null,
+    country: match.country ?? null,
+    customFields: match.customFields ?? match.customField ?? [],
+  };
+}
+
+/** Normalize a business name for fuzzy comparison: drop legal suffixes,
+ *  punctuation, and case so "Clean Cut Painters LLC" ≈ "clean cut painters". */
+function normalizeCompany(s: string): string {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(llc|inc|incorporated|ltd|limited|corp|corporation|company|co|the)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Find a GHL contact by business name (when we have no email to match on).
+ * Searches the location for the name, then keeps the candidate whose
+ * companyName (or contact name) strongly matches — exact normalized equality
+ * or a clear containment. Returns null when nothing matches confidently, so
+ * we never attach the wrong person's details to a client.
+ */
+export async function findGhlContactByCompany(companyName: string): Promise<GhlContact | null> {
+  const locationId = process.env.GHL_LOCATION_ID;
+  const raw = (companyName || "").trim();
+  if (!locationId || !raw) return null;
+
+  // GHL's text search is literal — "Top Notch Painters LLC" matches nothing
+  // while "Top Notch Painters" matches. Strip legal suffixes/punctuation for
+  // the QUERY (better recall); we still strict-match on the normalized result.
+  const query = raw
+    .replace(/\b(llc|inc|incorporated|ltd|limited|corp|corporation|co)\b/gi, "")
+    .replace(/[.,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim() || raw;
+
+  const params = new URLSearchParams({ locationId, query, limit: "20" });
+  let body: any;
+  try {
+    body = await ghlRequest<any>(`/contacts/?${params.toString()}`);
+  } catch (err: any) {
+    console.warn(`[ghl] company search failed for ${query}: ${err.message}`);
+    return null;
+  }
+
+  const contacts: any[] = body?.contacts || [];
+  if (contacts.length === 0) return null;
+
+  const want = normalizeCompany(raw);
+  const wantTokens = want.replace(/\s+/g, "");
+  let best: any = null;
+  let bestScore = 0;
+  for (const c of contacts) {
+    const candidates = [c.companyName, c.contactName, `${c.firstName || ""} ${c.lastName || ""}`]
+      .map((x) => normalizeCompany(x || ""))
+      .filter(Boolean);
+    let score = 0;
+    for (const cand of candidates) {
+      if (cand === want) score = Math.max(score, 3);
+      else if (cand.includes(want) || want.includes(cand)) score = Math.max(score, 2);
+    }
+    // Tie-break bonus: email domain echoes the business name
+    // (e.g. business@topnotchpainters.com for "Top Notch Painters").
+    const domain = (c.email || "").split("@")[1]?.toLowerCase() || "";
+    const domainCore = domain.replace(/\.(com|ca|net|org|co|io|biz)$/g, "").replace(/[^a-z0-9]/g, "");
+    if (score >= 2 && domainCore && wantTokens && (domainCore.includes(wantTokens) || wantTokens.includes(domainCore))) {
+      score += 0.5;
+    }
+    if (score > bestScore) { bestScore = score; best = c; }
+  }
+
+  // Require at least a containment-level match (score ≥ 2) to accept.
+  if (!best || bestScore < 2) return null;
+
+  return {
+    id: best.id,
+    firstName: best.firstName ?? null,
+    lastName: best.lastName ?? null,
+    name: best.contactName ?? best.name ?? null,
+    email: best.email ?? null,
+    phone: best.phone ?? null,
+    companyName: best.companyName ?? null,
+    address1: best.address1 ?? null,
+    city: best.city ?? null,
+    state: best.state ?? null,
+    postalCode: best.postalCode ?? null,
+    country: best.country ?? null,
+    customFields: best.customFields ?? best.customField ?? [],
+  };
+}
+
 /**
  * Re-send the onboarding email (form + booking link) to a contact.
  *

@@ -77,6 +77,48 @@ export async function findStripeCustomerIdByEmail(email: string): Promise<string
   return customers[0]?.id ?? null;
 }
 
+export interface StripeCustomerInfo {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  address: {
+    line1: string | null;
+    line2: string | null;
+    city: string | null;
+    state: string | null;
+    postal_code: string | null;
+    country: string | null;
+  } | null;
+}
+
+/**
+ * Fetch a single Stripe customer's contact + address details. Used by the
+ * profile backfill to enrich client records with the billing address Stripe
+ * already has on file.
+ */
+export async function getStripeCustomer(stripeCustomerId: string): Promise<StripeCustomerInfo | null> {
+  const c = await stripeGet<any>(`/customers/${encodeURIComponent(stripeCustomerId)}`);
+  if (!c || c.deleted) return null;
+  const a = c.address || null;
+  return {
+    id: c.id,
+    name: c.name ?? null,
+    email: c.email ?? null,
+    phone: c.phone ?? null,
+    address: a
+      ? {
+          line1: a.line1 ?? null,
+          line2: a.line2 ?? null,
+          city: a.city ?? null,
+          state: a.state ?? null,
+          postal_code: a.postal_code ?? null,
+          country: a.country ?? null,
+        }
+      : null,
+  };
+}
+
 /** Derive tier from the monthly amount in dollars. */
 export function tierFromAmountDollars(dollars: number): ServiceTier {
   if (dollars <= 300) return "insight";
