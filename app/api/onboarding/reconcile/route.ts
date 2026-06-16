@@ -36,7 +36,7 @@ export async function POST(request: Request) {
 
   const opportunities = await fetchRecentWonOpportunities(since);
   if (opportunities.length === 0) {
-    return NextResponse.json({ added: 0, updated: 0, skipped: 0, errors: 0, total: 0, message: "No won opportunities found (check GHL_API_KEY + GHL_LOCATION_ID env vars)" });
+    return NextResponse.json({ added: 0, updated: 0, skipped: 0, errors: 0, total: 0, message: "No won opportunities returned from GHL. If you have won deals, check the server logs for a GHL API error and confirm GHL_API_KEY + GHL_LOCATION_ID are set in Vercel." });
   }
 
   let added = 0;

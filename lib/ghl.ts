@@ -100,49 +100,58 @@ export interface GhlOpportunity {
  * Used by the reconciliation backstop (/api/onboarding/reconcile) so missed
  * webhooks don't leave sales off the board.
  *
- * @param since  ISO date string — only return opportunities created/updated
- *               after this date (defaults to 90 days ago). For a first-time
- *               backfill, pass an earlier date.
- * @param maxPages  Safety cap — each page is 100 results (default 20 pages = 2000 ops).
+ * @param since  Optional ISO date string. Filters CLIENT-SIDE (GHL's search
+ *               has no date param). Omit for a full backfill of every Won
+ *               opportunity (the default — needed to pull historical clients).
+ * @param maxPages  Safety cap — each page is 100 results (default 50 = 5000 ops).
  */
 export async function fetchRecentWonOpportunities(
   since?: string,
-  maxPages = 20
+  maxPages = 50
 ): Promise<GhlOpportunity[]> {
   if (!ghlConfigured()) return [];
 
   const locationId = process.env.GHL_LOCATION_ID;
   if (!locationId) return [];
 
-  const startDate =
-    since || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  // GHL's /opportunities/search has NO server-side date-filter param — passing
+  // `startDate` 422s ("property startDate should not exist"), which used to
+  // kill every reconcile call and leave the board empty. So we pull ALL won
+  // opportunities via GHL's cursor (startAfter + startAfterId) and apply
+  // `since` CLIENT-SIDE. Default (no `since`) = pull everything, so a
+  // first-time reconcile picks up historical clients, not just recent ones.
+  const sinceMs = since ? new Date(since).getTime() : null;
 
   const results: GhlOpportunity[] = [];
-  let page = 1;
+  let startAfter: string | number | undefined;
+  let startAfterId: string | undefined;
 
-  while (page <= maxPages) {
+  for (let page = 0; page < maxPages; page++) {
     const params = new URLSearchParams({
       location_id: locationId,
       status: "won",
-      startDate,
       limit: "100",
-      page: String(page),
     });
+    if (startAfter != null) params.set("startAfter", String(startAfter));
+    if (startAfterId) params.set("startAfterId", startAfterId);
 
     let body: any;
     try {
       body = await ghlRequest<any>(`/opportunities/search?${params.toString()}`);
     } catch (err: any) {
-      console.error(`[ghl] fetchRecentWonOpportunities page ${page} failed:`, err.message);
+      console.error(`[ghl] fetchRecentWonOpportunities page ${page + 1} failed:`, err.message);
       break;
     }
 
     const ops: any[] = body?.opportunities || [];
     for (const op of ops) {
+      const created = op.createdAt || null;
+      if (sinceMs && created && new Date(created).getTime() < sinceMs) continue;
       const contact = op.contact || {};
       const name =
         contact.name ||
         [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||
+        op.name || // GHL opportunity name is usually the person/business name
         null;
       results.push({
         id: op.id,
@@ -151,15 +160,20 @@ export async function fetchRecentWonOpportunities(
         contactEmail: contact.email || null,
         contactPhone: contact.phone || null,
         contactCompany: contact.companyName || contact.company || null,
-        wonAt: op.closedDate || op.updatedAt || op.createdAt || null,
+        // lastStatusChangeAt = when it moved to "won" (best Won timestamp).
+        wonAt: op.lastStatusChangeAt || op.updatedAt || op.createdAt || null,
         createdAt: op.createdAt || null,
       });
     }
 
-    // GHL returns nextPageUrl in meta when there are more pages
-    const hasMore = body?.meta?.nextPageUrl || ops.length === 100;
-    if (!hasMore || ops.length === 0) break;
-    page++;
+    // Advance GHL's cursor. It ignores ?page= on this endpoint — pagination is
+    // the startAfter/startAfterId pair echoed back in meta.nextPageUrl.
+    const meta = body?.meta || {};
+    if (!meta.nextPageUrl || ops.length === 0 || meta.startAfter == null || !meta.startAfterId) {
+      break;
+    }
+    startAfter = meta.startAfter;
+    startAfterId = meta.startAfterId;
   }
 
   return results;
