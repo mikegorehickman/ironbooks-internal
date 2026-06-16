@@ -199,6 +199,47 @@ export async function listClientGrainRecordings(params: {
 }
 
 /**
+ * List ALL recordings the token can see (not client-scoped), paging through
+ * up to `maxPages`. Used by the backfill to cache every Ironbooks-hosted call.
+ * Each result is enriched with summary + action items via the detail endpoint
+ * when the list row didn't include them.
+ */
+export async function listAllRecordings(maxPages = 50): Promise<GrainRecording[]> {
+  if (!grainConfigured()) return [];
+  const all: GrainRecording[] = [];
+  let cursor: string | null = null;
+  let page = 0;
+  while (page < maxPages) {
+    page++;
+    const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    let body: any;
+    try {
+      body = await grainGet<any>(`/recordings${qs}`);
+    } catch (err: any) {
+      console.warn(`[grain] listAll page ${page} failed:`, err.message);
+      break;
+    }
+    const rows: any[] = body?.recordings || body?.list || [];
+    for (const r of rows) all.push(normalizeRecording(r));
+    cursor = body?.cursor || null;
+    if (!cursor || rows.length === 0) break;
+  }
+  return all;
+}
+
+/** Fetch a single recording's detail (summary + action items + participants). */
+export async function getRecordingDetail(id: string): Promise<GrainRecording | null> {
+  if (!grainConfigured()) return null;
+  try {
+    const detail = await grainGet<any>(`/recordings/${id}?intelligence_notes_format=json`);
+    return normalizeRecording({ ...detail, id });
+  } catch (err: any) {
+    console.warn(`[grain] detail ${id} failed:`, err.message);
+    return null;
+  }
+}
+
+/**
  * Split a recording's action items into the client's vs the Ironbooks BK's
  * to-do lists, by matching the assignee name. Items assigned to the
  * ironbooks host (or another ironbooks participant) go to `bookkeeper`;

@@ -6,7 +6,7 @@ import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
   FileSpreadsheet, Wallet, Volume2, VolumeX, HeartPulse, Gauge, CalendarCheck,
-  ClipboardCheck, ListChecks, UserPlus,
+  ClipboardCheck, ListChecks, UserPlus, Video,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -44,6 +44,7 @@ const toolsNav = [
 
 const adminItems = [
   { href: "/admin", label: "Admin", icon: Shield },
+  { href: "/admin/call-matching", label: "Call Matching", icon: Video },
   { href: "/admin/audit", label: "Audit Log", icon: BookOpen },
 ];
 

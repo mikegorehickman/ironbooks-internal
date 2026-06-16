@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import {
-  grainConfigured,
-  listClientGrainRecordings,
-  splitActionItems,
-} from "@/lib/grain";
+import { normName, isIronbooks } from "@/lib/grain-matching";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/clients/[id]/grain
  *
- * Returns the client's Ironbooks-hosted Grain recordings (summary +
- * action-items split into client vs bookkeeper to-dos). Internal roles only.
- * Matches recordings by the client's email(s) + contact name; only calls with
- * an @ironbooks.com host are included (enforced in lib/grain).
+ * Returns this client's matched Grain recordings (summary + action items
+ * split into client/bookkeeper to-dos) from the persisted cache — populated
+ * by the backfill + the Call Matching tab. Internal roles only.
  */
 export async function GET(
   _request: Request,
@@ -27,63 +22,71 @@ export async function GET(
 
   const service = createServiceSupabase();
   const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
-  const role = (actor as any)?.role;
-  if (!role || role === "client") {
+  if (!(actor as any)?.role || (actor as any).role === "client") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (!grainConfigured()) {
-    return NextResponse.json({ configured: false, recordings: [] });
-  }
+  // Matched recording ids for this client.
+  const { data: matches } = await service
+    .from("grain_recording_matches")
+    .select("recording_id")
+    .eq("client_link_id", id);
+  const recIds = ((matches as any[]) || []).map((m) => m.recording_id);
+  if (recIds.length === 0) return NextResponse.json({ configured: true, recordings: [] });
 
-  // Resolve the client's match keys: email + contact name + business name.
+  const { data: recs } = await service
+    .from("grain_recordings")
+    .select("id, title, url, start_datetime, duration, summary, host_name, host_email, participants, action_items")
+    .in("id", recIds)
+    .order("start_datetime", { ascending: false });
+
+  // Resolve the client's contact name(s) for the to-do split.
   const { data: cl } = await service
     .from("client_links")
-    .select("client_name, client_email, contact_first_name, contact_last_name")
+    .select("client_name, contact_first_name, contact_last_name")
     .eq("id", id)
     .single();
-  if (!cl) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+  const c = (cl as any) || {};
+  const clientNames = [
+    [c.contact_first_name, c.contact_last_name].filter(Boolean).join(" "),
+    c.client_name,
+  ].filter(Boolean).map((n: string) => normName(n));
 
-  const c = cl as any;
-  const matchEmails = [c.client_email].filter(Boolean) as string[];
+  const payload = ((recs as any[]) || []).map((r) => {
+    const participants: any[] = r.participants || [];
+    const ironbooksNames = participants
+      .filter((p) => isIronbooks(p.email))
+      .map((p) => normName(p.name)).filter(Boolean);
 
-  // Also gather any portal-user emails for this client (they may have joined
-  // the call under their login email rather than the client_links email).
-  try {
-    const { data: cu } = await (service as any)
-      .from("client_users")
-      .select("users(email)")
-      .eq("client_link_id", id);
-    for (const row of (cu || []) as any[]) {
-      const e = row?.users?.email;
-      if (e && !matchEmails.includes(e)) matchEmails.push(e);
+    const todos = { client: [] as any[], bookkeeper: [] as any[], unassigned: [] as any[] };
+    for (const a of (r.action_items || []) as any[]) {
+      const item = {
+        text: a.text,
+        status: a.status ?? null,
+        dueDate: a.due_date ?? a.dueDate ?? null,
+        assigneeName: a.assignee_name ?? a.assigneeName ?? null,
+        transcriptUrl: a.transcript_url ?? a.transcriptUrl ?? null,
+      };
+      const an = normName(item.assigneeName);
+      if (!an) todos.unassigned.push(item);
+      else if (ironbooksNames.some((n) => an.includes(n) || n.includes(an))) todos.bookkeeper.push(item);
+      else todos.client.push(item);
     }
-  } catch { /* client_users join optional */ }
 
-  const contactName = [c.contact_first_name, c.contact_last_name].filter(Boolean).join(" ");
-  const matchNames = [contactName, c.client_name].filter(Boolean) as string[];
-
-  let recordings;
-  try {
-    recordings = await listClientGrainRecordings({ matchEmails, matchNames });
-  } catch (e: any) {
-    console.error("[grain route] fetch failed:", e.message);
-    return NextResponse.json({ configured: true, error: "Could not reach Grain", recordings: [] }, { status: 502 });
-  }
-
-  const payload = recordings.map((rec) => ({
-    id: rec.id,
-    title: rec.title,
-    url: rec.url,
-    start_datetime: rec.startDatetime,
-    duration: rec.durationLabel,
-    host: rec.ironbooksHost ? { name: rec.ironbooksHost.name, email: rec.ironbooksHost.email } : null,
-    summary: rec.summary,
-    participants: rec.participants
-      .filter((p) => (p.email || "").split("@")[1]?.toLowerCase() !== "ironbooks.com")
-      .map((p) => ({ name: p.name, email: p.email })),
-    todos: splitActionItems(rec, matchNames),
-  }));
+    return {
+      id: r.id,
+      title: r.title,
+      url: r.url,
+      start_datetime: r.start_datetime,
+      duration: r.duration,
+      host: r.host_name || r.host_email ? { name: r.host_name, email: r.host_email } : null,
+      summary: r.summary,
+      participants: participants
+        .filter((p) => !isIronbooks(p.email))
+        .map((p) => ({ name: p.name, email: p.email })),
+      todos,
+    };
+  });
 
   return NextResponse.json({ configured: true, recordings: payload });
 }
