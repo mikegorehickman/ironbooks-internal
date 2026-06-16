@@ -35,6 +35,7 @@ import type {
 } from "@/lib/internal-client-profile";
 import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
 import { ClientDetailsCard } from "./client-details-card";
+import { GrainSection } from "./grain-section";
 
 type ClientLink = {
   id: string;
@@ -704,6 +705,10 @@ function ProfileTab({
         onboardingAnswers={onboarding?.answers}
       />
       {onboarding && <OnboardingDetailsCard onboarding={onboarding} />}
+
+      {/* Grain call recordings — Ironbooks-hosted calls matched to this
+          client by email/name, with AI summary + client/BK action items. */}
+      <GrainSection clientLinkId={clientLink.id} />
     </div>
   );
 }
