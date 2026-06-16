@@ -213,7 +213,7 @@ export default async function ClientProfilePage({
   // used elsewhere in this codebase pending a types regen.
   const { data: clientLinkRaw } = await service
     .from("client_links")
-    .select("id, client_name, qbo_realm_id, industry, jurisdiction, state_province, status, last_synced_at, double_client_id, double_client_name, daily_recon_enabled, daily_recon_paused, daily_recon_paused_reason, daily_recon_enabled_at, cleanup_completed_at" as any)
+    .select("id, client_name, qbo_realm_id, industry, jurisdiction, state_province, status, last_synced_at, double_client_id, double_client_name, daily_recon_enabled, daily_recon_paused, daily_recon_paused_reason, daily_recon_enabled_at, cleanup_completed_at, contact_first_name, contact_last_name, client_email, client_phone, legal_business_name, trade_type, corporate_type, fiscal_year_end, country, address_line1, address_line2, city, postal_code, annual_revenue_range, taxes_up_to_date, prior_bookkeeper, accounting_software, payroll_provider, employee_count_range, uses_business_cards, keeps_receipts, bank_connected_to_software, profile_updated_at" as any)
     .eq("id", id)
     .single();
 

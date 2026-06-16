@@ -33,6 +33,7 @@ import type {
   ProgressStage,
 } from "@/lib/internal-client-profile";
 import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
+import { ClientDetailsCard } from "./client-details-card";
 
 type ClientLink = {
   id: string;
@@ -50,6 +51,30 @@ type ClientLink = {
   daily_recon_paused_reason?: string | null;
   daily_recon_enabled_at?: string | null;
   cleanup_completed_at?: string | null;
+  // Profile detail fields (migration 73)
+  contact_first_name?: string | null;
+  contact_last_name?: string | null;
+  client_email?: string | null;
+  client_phone?: string | null;
+  legal_business_name?: string | null;
+  trade_type?: string | null;
+  corporate_type?: string | null;
+  fiscal_year_end?: string | null;
+  country?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  annual_revenue_range?: string | null;
+  taxes_up_to_date?: string | null;
+  prior_bookkeeper?: string | null;
+  accounting_software?: string | null;
+  payroll_provider?: string | null;
+  employee_count_range?: string | null;
+  uses_business_cards?: string | null;
+  keeps_receipts?: string | null;
+  bank_connected_to_software?: string | null;
+  profile_updated_at?: string | null;
 };
 
 /** A client is "really linked" to Double when double_client_id is set AND
@@ -693,6 +718,40 @@ function OverviewTab({
       {/* Onboarding details — the GHL onboarding-form answers + call status,
           carried over when this client was created from the onboarding board,
           so a senior can reference them here instead of toggling to GHL. */}
+      {/* Client details — structured, editable business profile (contact,
+          address, corporate type, revenue band, software, etc.). Editable
+          inline; "Fill from onboarding" pulls the GHL answers in as a draft. */}
+      <ClientDetailsCard
+        clientLinkId={clientLink.id}
+        initial={{
+          contact_first_name: clientLink.contact_first_name ?? null,
+          contact_last_name: clientLink.contact_last_name ?? null,
+          client_email: clientLink.client_email ?? null,
+          client_phone: clientLink.client_phone ?? null,
+          legal_business_name: clientLink.legal_business_name ?? null,
+          trade_type: clientLink.trade_type ?? null,
+          corporate_type: clientLink.corporate_type ?? null,
+          fiscal_year_end: clientLink.fiscal_year_end ?? null,
+          country: clientLink.country ?? null,
+          state_province: clientLink.state_province ?? null,
+          address_line1: clientLink.address_line1 ?? null,
+          address_line2: clientLink.address_line2 ?? null,
+          city: clientLink.city ?? null,
+          postal_code: clientLink.postal_code ?? null,
+          annual_revenue_range: clientLink.annual_revenue_range ?? null,
+          taxes_up_to_date: clientLink.taxes_up_to_date ?? null,
+          prior_bookkeeper: clientLink.prior_bookkeeper ?? null,
+          accounting_software: clientLink.accounting_software ?? null,
+          payroll_provider: clientLink.payroll_provider ?? null,
+          employee_count_range: clientLink.employee_count_range ?? null,
+          uses_business_cards: clientLink.uses_business_cards ?? null,
+          keeps_receipts: clientLink.keeps_receipts ?? null,
+          bank_connected_to_software: clientLink.bank_connected_to_software ?? null,
+          profile_updated_at: clientLink.profile_updated_at ?? null,
+        }}
+        onboardingAnswers={onboarding?.answers}
+      />
+
       {onboarding && <OnboardingDetailsCard onboarding={onboarding} />}
 
       {/* Outstanding work — top-priority card. If empty we show a positive

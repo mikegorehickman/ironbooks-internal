@@ -22,9 +22,34 @@ export async function PATCH(
   const updates: Record<string, any> = {};
 
   // Whitelist editable fields
-  const allowed = ["status", "assigned_bookkeeper_id", "due_date", "client_name", "notes", "is_active", "state_province", "client_email", "client_phone"];
+  const allowed = [
+    "status", "assigned_bookkeeper_id", "due_date", "client_name", "notes",
+    "is_active", "state_province", "client_email", "client_phone",
+    // Profile detail fields (migration 73)
+    "contact_first_name", "contact_last_name", "legal_business_name",
+    "trade_type", "corporate_type", "fiscal_year_end", "country",
+    "address_line1", "address_line2", "city", "postal_code",
+    "annual_revenue_range", "taxes_up_to_date", "prior_bookkeeper",
+    "accounting_software", "payroll_provider", "employee_count_range",
+    "uses_business_cards", "keeps_receipts", "bank_connected_to_software",
+  ];
   for (const k of allowed) {
     if (k in body) updates[k] = body[k];
+  }
+
+  // Stamp profile_updated_at whenever any profile-detail field is touched,
+  // so the card can show "last edited" without the caller sending it.
+  const profileFields = new Set([
+    "contact_first_name", "contact_last_name", "legal_business_name",
+    "trade_type", "corporate_type", "fiscal_year_end", "country",
+    "address_line1", "address_line2", "city", "postal_code",
+    "annual_revenue_range", "taxes_up_to_date", "prior_bookkeeper",
+    "accounting_software", "payroll_provider", "employee_count_range",
+    "uses_business_cards", "keeps_receipts", "bank_connected_to_software",
+    "client_phone", "client_email", "state_province",
+  ]);
+  if (Object.keys(updates).some((k) => profileFields.has(k))) {
+    updates.profile_updated_at = new Date().toISOString();
   }
 
   // Validate status enum
