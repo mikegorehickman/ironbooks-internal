@@ -6,8 +6,8 @@ import {
   ArrowUpCircle, FileText, AlertTriangle, XCircle, Loader2, Star,
   Download, Calendar,
 } from "lucide-react";
-import type { ServiceTier, TierConfig } from "./page";
-import { TIERS, INCLUDED_FEATURES } from "./page";
+import type { ServiceTier, TierConfig } from "./tiers";
+import { TIERS, INCLUDED_FEATURES } from "./tiers";
 import type { StripeInvoice } from "@/lib/stripe-billing";
 
 interface Props {

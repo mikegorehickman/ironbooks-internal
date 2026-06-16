@@ -15,7 +15,7 @@
  *   > $900     → scale       (custom)
  */
 
-import type { ServiceTier } from "@/app/portal/billing/page";
+import type { ServiceTier } from "@/app/portal/billing/tiers";
 
 const BASE = "https://api.stripe.com/v1";
 
