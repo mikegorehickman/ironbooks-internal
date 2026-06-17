@@ -69,6 +69,12 @@ export function ManagerDashboard({
     return m;
   }, [rows]);
 
+  const groupTotals = useMemo(() => {
+    const g: Record<string, number> = { Pipeline: 0, Review: 0, Live: 0 };
+    for (const r of rows) g[LIFECYCLE_META[r.status].group]++;
+    return g;
+  }, [rows]);
+
   async function reassign(id: string, bkId: string) {
     setBusy(id); setError(null);
     try {
@@ -113,6 +119,16 @@ export function ManagerDashboard({
 
       {open && (
         <div className="p-4">
+          {/* At-a-glance group totals */}
+          <div className="flex items-center gap-3 mb-3">
+            {([["Pipeline", "text-blue-700 bg-blue-50"], ["Review", "text-amber-700 bg-amber-50"], ["Live", "text-teal bg-teal/10"]] as const).map(([g, tone]) => (
+              <div key={g} className={`flex items-baseline gap-1.5 px-3 py-1.5 rounded-lg ${tone}`}>
+                <span className="text-lg font-black tabular-nums">{groupTotals[g]}</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide">{g}</span>
+              </div>
+            ))}
+          </div>
+
           {/* Filters */}
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <div className="relative">
@@ -141,9 +157,9 @@ export function ManagerDashboard({
 
           {error && <div className="mb-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{error}</div>}
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 bg-white z-10">
                 <tr className="text-[10px] uppercase tracking-wider text-ink-light text-left border-b border-gray-100">
                   <th className="py-2 pr-3 font-bold">Client</th>
                   <th className="py-2 pr-3 font-bold">Preparer</th>

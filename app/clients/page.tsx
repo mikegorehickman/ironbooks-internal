@@ -348,10 +348,33 @@ export default async function ClientsPage() {
       (b.cleanup_completed_at || "").localeCompare(a.cleanup_completed_at || "")
     );
 
-  // ── Manager dashboard rows — every client, one unified status. Derived
-  //    from the flags already loaded above (no extra queries). open_ask_client
-  //    uses unread inbound messages as a proxy; month-done (production "done")
-  //    is left to a follow-up that reads monthly_rec_runs.
+  // ── Manager dashboard rows — every client, one unified status. Pipeline
+  //    sub-stage (COA / reclass / BS) comes from coa_jobs + reclass_jobs so
+  //    "In cleanup" isn't an opaque bucket. open_ask_client uses unread inbound
+  //    messages as a proxy; month-done ("done") is a follow-up (monthly_rec_runs).
+  const allIds = enrichedClients.map((c: any) => c.id).filter(Boolean) as string[];
+  const ACTIVE = ["pending", "executing", "in_review", "failed"];
+  const activeCoa = new Set<string>();
+  const completeCoa = new Set<string>();
+  const activeReclass = new Set<string>();
+  const completeReclass = new Set<string>();
+  if (allIds.length) {
+    const [coaJobsAll, reclassJobsAll] = await Promise.all([
+      service.from("coa_jobs").select("client_link_id, status").in("client_link_id", allIds),
+      service.from("reclass_jobs").select("client_link_id, status").in("client_link_id", allIds),
+    ]);
+    for (const j of (coaJobsAll.data as any[]) || []) {
+      if (!j.client_link_id) continue;
+      if (j.status === "complete") completeCoa.add(j.client_link_id);
+      else if (ACTIVE.includes(j.status)) activeCoa.add(j.client_link_id);
+    }
+    for (const j of (reclassJobsAll.data as any[]) || []) {
+      if (!j.client_link_id) continue;
+      if (j.status === "complete") completeReclass.add(j.client_link_id);
+      else if (ACTIVE.includes(j.status)) activeReclass.add(j.client_link_id);
+    }
+  }
+
   const managerRows: ManagerRow[] = enrichedClients
     .filter((c: any) => c.id)
     .map((c: any) => {
@@ -364,7 +387,10 @@ export default async function ClientsPage() {
         cleanup_review_state: reviewState,
         daily_recon_enabled: c.daily_recon_enabled,
         bs_cleanup_skipped_at: bsSkippedById.get(c.id) ?? null,
-        has_active_job: !!c.resumable_job,
+        has_active_coa: activeCoa.has(c.id),
+        has_active_reclass: activeReclass.has(c.id),
+        has_complete_coa: completeCoa.has(c.id),
+        has_complete_reclass: completeReclass.has(c.id),
         open_ask_client: (c.unread_from_client || 0) > 0,
       });
       return {
