@@ -6,6 +6,8 @@ import { Plus } from "lucide-react";
 import { ClientsList } from "./clients-list";
 import { CompletedAccounts } from "./completed-accounts";
 import { InReviewAccounts } from "./in-review-accounts";
+import { ManagerDashboard, type ManagerRow } from "./manager-dashboard";
+import { deriveLifecycleStatus } from "@/lib/client-lifecycle";
 
 export default async function ClientsPage() {
   // Watchdog: auto-fail any job that's been hung in `executing` past its
@@ -43,7 +45,7 @@ export default async function ClientsPage() {
     supabase
       .from("client_links")
       .select(
-        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required, qbo_realm_id, qbo_refresh_token, daily_recon_enabled"
+        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required, qbo_realm_id, qbo_refresh_token, daily_recon_enabled, bs_cleanup_skipped_at"
       ),
     // Bookkeepers dropdown — must use service client (RLS on `users` limits
     // self-reads, which would otherwise return only the current user and
@@ -139,6 +141,12 @@ export default async function ClientsPage() {
   );
   const dueDateById = new Map<string, string | null>(
     linksData.map((l) => [l.id, (l as any).due_date ?? null])
+  );
+  const bsSkippedById = new Map<string, string | null>(
+    linksData.map((l) => [l.id, (l as any).bs_cleanup_skipped_at ?? null])
+  );
+  const reviewStateById = new Map<string, string | null>(
+    linksData.map((l) => [l.id, (l as any).cleanup_review_state ?? null])
   );
   // Completion markers — drives the "active vs Completed Accounts"
   // partition below. A client is "completed" when cleanup_completed_at
@@ -340,6 +348,39 @@ export default async function ClientsPage() {
       (b.cleanup_completed_at || "").localeCompare(a.cleanup_completed_at || "")
     );
 
+  // ── Manager dashboard rows — every client, one unified status. Derived
+  //    from the flags already loaded above (no extra queries). open_ask_client
+  //    uses unread inbound messages as a proxy; month-done (production "done")
+  //    is left to a follow-up that reads monthly_rec_runs.
+  const managerRows: ManagerRow[] = enrichedClients
+    .filter((c: any) => c.id)
+    .map((c: any) => {
+      const cleanupCompleted = !!completionById.get(c.id);
+      const reviewState = reviewStateById.get(c.id) ?? null;
+      const status = deriveLifecycleStatus({
+        status: c.status,
+        qbo_connected: c.qbo_connected,
+        cleanup_completed_at: cleanupCompleted ? "set" : null,
+        cleanup_review_state: reviewState,
+        daily_recon_enabled: c.daily_recon_enabled,
+        bs_cleanup_skipped_at: bsSkippedById.get(c.id) ?? null,
+        has_active_job: !!c.resumable_job,
+        open_ask_client: (c.unread_from_client || 0) > 0,
+      });
+      return {
+        id: c.id,
+        client_name: c.client_name,
+        jurisdiction: c.jurisdiction ?? null,
+        state_province: (c.state_province as string | null) ?? null,
+        assigned_bookkeeper_id: c.assigned_bookkeeper_id ?? null,
+        assigned_bookkeeper_name: c.assigned_bookkeeper_name ?? null,
+        status,
+        bs_cleanup_skipped: !!bsSkippedById.get(c.id),
+        // BS-skip is only meaningful while still in cleanup (not completed/production).
+        in_cleanup_phase: !cleanupCompleted && !c.daily_recon_enabled,
+      };
+    });
+
   return (
     <AppShell>
       <TopBar
@@ -362,6 +403,11 @@ export default async function ClientsPage() {
         }
       />
       <div className="px-8 py-6 space-y-8">
+        <ManagerDashboard
+          rows={managerRows}
+          bookkeepers={(bookkeepersRes.data || []).map((b: any) => ({ id: b.id, full_name: b.full_name }))}
+          canEdit={!!canEdit}
+        />
         <ClientsList
           initialClients={activeClients as any}
           bookkeepers={bookkeepersRes.data || []}

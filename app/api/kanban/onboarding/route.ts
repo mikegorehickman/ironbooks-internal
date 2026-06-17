@@ -267,7 +267,13 @@ export async function GET(request: Request) {
     // active, the client is ready for BS work. Stripe is parallel — a
     // pending stripe link no longer blocks BS Cleanup.
     if (hasCompleteReclass && !latestReclassActive) {
-      columns.bs_cleanup.push(card);
+      // BS-cleanup bypass: a manager can mark a client as not needing BS
+      // cleanup (migration 76). Those drop off the cleanup board entirely —
+      // they're done with cleanup work and await manager sign-off on the
+      // dashboard, rather than nagging in the BS column.
+      if (!(client as any).bs_cleanup_skipped_at) {
+        columns.bs_cleanup.push(card);
+      }
       continue;
     }
 
