@@ -45,7 +45,7 @@ export default async function ClientsPage() {
     supabase
       .from("client_links")
       .select(
-        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required, qbo_realm_id, qbo_refresh_token, daily_recon_enabled, bs_cleanup_skipped_at"
+        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required, qbo_realm_id, qbo_refresh_token, daily_recon_enabled"
       ),
     // Bookkeepers dropdown — must use service client (RLS on `users` limits
     // self-reads, which would otherwise return only the current user and
@@ -142,9 +142,9 @@ export default async function ClientsPage() {
   const dueDateById = new Map<string, string | null>(
     linksData.map((l) => [l.id, (l as any).due_date ?? null])
   );
-  const bsSkippedById = new Map<string, string | null>(
-    linksData.map((l) => [l.id, (l as any).bs_cleanup_skipped_at ?? null])
-  );
+  // bs_cleanup_skipped_at is fetched separately + tolerantly (see below) so a
+  // not-yet-applied migration 76 can't break the whole clients page.
+  const bsSkippedById = new Map<string, string | null>();
   const reviewStateById = new Map<string, string | null>(
     linksData.map((l) => [l.id, (l as any).cleanup_review_state ?? null])
   );
@@ -231,6 +231,23 @@ export default async function ClientsPage() {
     );
     pdfSentById.set(l.id, (l as any).cleanup_pdf_sent_at ?? null);
     stripeNotRequiredById.set(l.id, !!(l as any).stripe_not_required);
+  }
+
+  // Fetch bs_cleanup_skipped_at separately + tolerantly (migration 76). Kept
+  // out of the main client_links select so a not-yet-applied migration can't
+  // error the whole query and blank the page. Same pattern as py_taxes below.
+  const bsSkipQuery = await supabase
+    .from("client_links")
+    .select("id, bs_cleanup_skipped_at");
+  if (bsSkipQuery.error) {
+    console.warn(
+      "[clients page] bs_cleanup_skipped_at not available — apply migration 76. BS-skip shows as off until then. Error:",
+      bsSkipQuery.error.message
+    );
+  } else {
+    for (const r of (bsSkipQuery.data as any[]) || []) {
+      if (r.id) bsSkippedById.set(r.id, r.bs_cleanup_skipped_at ?? null);
+    }
   }
 
   // Fetch py_taxes_* separately and tolerate the "column does not exist"
