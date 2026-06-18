@@ -5,6 +5,27 @@ import { normName, isIronbooks } from "@/lib/grain-matching";
 export const dynamic = "force-dynamic";
 
 /**
+ * Grain's ai_summary comes back as a JSON string like {"text":"## …\n- …"}.
+ * Unwrap it to the inner markdown text so the UI can render it cleanly
+ * instead of showing raw JSON. Tolerant of already-plain strings.
+ */
+function cleanGrainSummary(raw: string | null): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (s.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(s);
+      if (typeof parsed?.text === "string") s = parsed.text;
+      else if (typeof parsed?.summary === "string") s = parsed.summary;
+    } catch {
+      // not valid JSON — fall through with the raw string
+    }
+  }
+  // Collapse escaped newlines that survive when the value was double-encoded.
+  return s.replace(/\\n/g, "\n").trim();
+}
+
+/**
  * GET /api/clients/[id]/grain
  *
  * Returns this client's matched Grain recordings (summary + action items
@@ -59,19 +80,24 @@ export async function GET(
       .map((p) => normName(p.name)).filter(Boolean);
 
     const todos = { client: [] as any[], bookkeeper: [] as any[], unassigned: [] as any[] };
-    for (const a of (r.action_items || []) as any[]) {
+    (r.action_items || []).forEach((a: any, index: number) => {
       const item = {
+        id: `${r.id}#${index}`,        // stable id for completion toggling
+        recording_id: r.id,
+        index,
         text: a.text,
         status: a.status ?? null,
+        completed: a.completed === true || a.status === "completed",
         dueDate: a.due_date ?? a.dueDate ?? null,
         assigneeName: a.assignee_name ?? a.assigneeName ?? null,
         transcriptUrl: a.transcript_url ?? a.transcriptUrl ?? null,
       };
+      if (!item.text) return;
       const an = normName(item.assigneeName);
       if (!an) todos.unassigned.push(item);
       else if (ironbooksNames.some((n) => an.includes(n) || n.includes(an))) todos.bookkeeper.push(item);
       else todos.client.push(item);
-    }
+    });
 
     return {
       id: r.id,
@@ -80,7 +106,7 @@ export async function GET(
       start_datetime: r.start_datetime,
       duration: r.duration,
       host: r.host_name || r.host_email ? { name: r.host_name, email: r.host_email } : null,
-      summary: r.summary,
+      summary: cleanGrainSummary(r.summary),
       participants: participants
         .filter((p) => !isIronbooks(p.email))
         .map((p) => ({ name: p.name, email: p.email })),

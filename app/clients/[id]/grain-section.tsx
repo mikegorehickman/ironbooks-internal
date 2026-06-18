@@ -6,9 +6,13 @@ import {
   CircleUser, Building2,
 } from "lucide-react";
 
-interface ActionItem {
+export interface ActionItem {
+  id: string;
+  recording_id: string;
+  index: number;
   text: string;
   status: string | null;
+  completed: boolean;
   dueDate: string | null;
   assigneeName: string | null;
   transcriptUrl: string | null;
@@ -30,6 +34,95 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleString("en-US", {
     month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
   });
+}
+
+/**
+ * Cross-component sync: when a to-do is toggled anywhere (the Overview
+ * panel or inside a call card), broadcast it so every mounted view of
+ * that same item updates its checkbox without a refetch.
+ */
+export const TODO_EVENT = "grain-todo-toggled";
+export type TodoToggle = { recording_id: string; index: number; completed: boolean };
+export function broadcastToggle(detail: TodoToggle) {
+  window.dispatchEvent(new CustomEvent(TODO_EVENT, { detail }));
+}
+
+/** POST the completion change; returns true on success. */
+export async function persistToggle(clientLinkId: string, t: TodoToggle): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/clients/${clientLinkId}/grain/todo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(t),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tiny markdown renderer for Grain's AI summary: handles `## `/`### `
+ * headings, `- `/`* ` bullets, and blank-line-separated paragraphs.
+ * Inline `**bold**` is honored; everything else renders as plain text.
+ */
+function renderMarkdown(md: string): React.ReactNode {
+  const lines = md.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let bullets: string[] = [];
+  let para: string[] = [];
+
+  const flushPara = (key: string) => {
+    if (para.length === 0) return;
+    blocks.push(
+      <p key={key} className="text-sm text-ink-slate leading-relaxed">
+        {inline(para.join(" "))}
+      </p>
+    );
+    para = [];
+  };
+  const flushBullets = (key: string) => {
+    if (bullets.length === 0) return;
+    blocks.push(
+      <ul key={key} className="list-disc pl-5 space-y-1">
+        {bullets.map((b, i) => (
+          <li key={i} className="text-sm text-ink-slate leading-relaxed">{inline(b)}</li>
+        ))}
+      </ul>
+    );
+    bullets = [];
+  };
+
+  lines.forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) { flushPara(`p${i}`); flushBullets(`b${i}`); return; }
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    if (heading) {
+      flushPara(`p${i}`); flushBullets(`b${i}`);
+      blocks.push(
+        <div key={`h${i}`} className="text-xs font-bold text-navy mt-2 first:mt-0">
+          {inline(heading[2])}
+        </div>
+      );
+      return;
+    }
+    const bullet = line.match(/^[-*]\s+(.*)$/);
+    if (bullet) { flushPara(`p${i}`); bullets.push(bullet[1]); return; }
+    flushBullets(`b${i}`);
+    para.push(line);
+  });
+  flushPara("p-last"); flushBullets("b-last");
+  return <div className="space-y-2">{blocks}</div>;
+}
+
+/** Render inline **bold** spans within a markdown line. */
+function inline(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((p, i) =>
+    p.startsWith("**") && p.endsWith("**")
+      ? <strong key={i} className="font-semibold text-navy">{p.slice(2, -2)}</strong>
+      : <span key={i}>{p}</span>
+  );
 }
 
 /**
@@ -62,6 +155,32 @@ export function GrainSection({ clientLinkId }: { clientLinkId: string }) {
     return () => { cancelled = true; };
   }, [clientLinkId]);
 
+  // Reflect toggles made elsewhere (e.g. the Overview panel) so the call
+  // cards' checkboxes + action-item counts stay in sync without a refetch.
+  useEffect(() => {
+    const onToggle = (e: Event) => {
+      const d = (e as CustomEvent<TodoToggle>).detail;
+      if (!d) return;
+      setRecordings((prev) =>
+        prev.map((rec) => {
+          if (rec.id !== d.recording_id) return rec;
+          const fix = (arr: ActionItem[]) =>
+            arr.map((it) => (it.index === d.index ? { ...it, completed: d.completed } : it));
+          return {
+            ...rec,
+            todos: {
+              client: fix(rec.todos.client),
+              bookkeeper: fix(rec.todos.bookkeeper),
+              unassigned: fix(rec.todos.unassigned),
+            },
+          };
+        })
+      );
+    };
+    window.addEventListener(TODO_EVENT, onToggle);
+    return () => window.removeEventListener(TODO_EVENT, onToggle);
+  }, []);
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
       <div className="flex items-center gap-2 mb-4">
@@ -93,7 +212,7 @@ export function GrainSection({ clientLinkId }: { clientLinkId: string }) {
       ) : (
         <ul className="space-y-3">
           {recordings.map((rec) => (
-            <RecordingCard key={rec.id} rec={rec} />
+            <RecordingCard key={rec.id} rec={rec} clientLinkId={clientLinkId} />
           ))}
         </ul>
       )}
@@ -101,7 +220,7 @@ export function GrainSection({ clientLinkId }: { clientLinkId: string }) {
   );
 }
 
-function RecordingCard({ rec }: { rec: Recording }) {
+function RecordingCard({ rec, clientLinkId }: { rec: Recording; clientLinkId: string }) {
   const [open, setOpen] = useState(false);
   const todoCount =
     rec.todos.client.length + rec.todos.bookkeeper.length + rec.todos.unassigned.length;
@@ -140,7 +259,7 @@ function RecordingCard({ rec }: { rec: Recording }) {
           {rec.summary && (
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light mb-1">Summary</div>
-              <p className="text-sm text-ink-slate leading-relaxed whitespace-pre-wrap">{rec.summary}</p>
+              {renderMarkdown(rec.summary)}
             </div>
           )}
 
@@ -151,12 +270,14 @@ function RecordingCard({ rec }: { rec: Recording }) {
                 label="Client to-dos"
                 tone="text-blue-700"
                 items={[...rec.todos.client, ...rec.todos.unassigned]}
+                clientLinkId={clientLinkId}
               />
               <TodoColumn
                 icon={<Building2 size={12} />}
                 label="Ironbooks to-dos"
                 tone="text-teal"
                 items={rec.todos.bookkeeper}
+                clientLinkId={clientLinkId}
               />
             </div>
           )}
@@ -167,43 +288,85 @@ function RecordingCard({ rec }: { rec: Recording }) {
 }
 
 function TodoColumn({
-  icon, label, tone, items,
+  icon, label, tone, items, clientLinkId,
 }: {
-  icon: React.ReactNode; label: string; tone: string; items: ActionItem[];
+  icon: React.ReactNode; label: string; tone: string; items: ActionItem[]; clientLinkId: string;
 }) {
+  const openCount = items.filter((it) => !it.completed).length;
   return (
     <div>
       <div className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1 ${tone}`}>
-        {icon} {label} <span className="text-ink-light">({items.length})</span>
+        {icon} {label} <span className="text-ink-light">({openCount})</span>
       </div>
       {items.length === 0 ? (
         <p className="text-xs text-ink-light italic">None</p>
       ) : (
         <ul className="space-y-1.5">
-          {items.map((it, i) => {
-            const done = it.status === "completed";
-            const body = (
-              <span className="flex items-start gap-1.5 text-xs text-navy">
-                {done ? <CheckSquare size={13} className="text-emerald-600 flex-shrink-0 mt-0.5" /> : <Square size={13} className="text-ink-light flex-shrink-0 mt-0.5" />}
-                <span className={done ? "line-through text-ink-light" : ""}>
-                  {it.text}
-                  {it.assigneeName && <span className="text-ink-light"> · {it.assigneeName}</span>}
-                  {it.dueDate && <span className="text-amber-700"> · due {it.dueDate}</span>}
-                </span>
-              </span>
-            );
-            return (
-              <li key={i}>
-                {it.transcriptUrl ? (
-                  <a href={it.transcriptUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                    {body}
-                  </a>
-                ) : body}
-              </li>
-            );
-          })}
+          {items.map((it) => (
+            <TodoItem key={it.id} it={it} clientLinkId={clientLinkId} />
+          ))}
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * A single checkable action item. Optimistically flips, persists via the
+ * toggle API, and broadcasts so the same item crosses off in the Overview
+ * panel (and vice-versa). Reverts on failure.
+ */
+function TodoItem({ it, clientLinkId }: { it: ActionItem; clientLinkId: string }) {
+  const [done, setDone] = useState(it.completed);
+  const [busy, setBusy] = useState(false);
+
+  // Stay in sync if the same item is toggled in another view.
+  useEffect(() => { setDone(it.completed); }, [it.completed]);
+  useEffect(() => {
+    const onToggle = (e: Event) => {
+      const d = (e as CustomEvent<TodoToggle>).detail;
+      if (d && d.recording_id === it.recording_id && d.index === it.index) setDone(d.completed);
+    };
+    window.addEventListener(TODO_EVENT, onToggle);
+    return () => window.removeEventListener(TODO_EVENT, onToggle);
+  }, [it.recording_id, it.index]);
+
+  async function toggle() {
+    if (busy) return;
+    const next = !done;
+    setDone(next);
+    setBusy(true);
+    const ok = await persistToggle(clientLinkId, {
+      recording_id: it.recording_id, index: it.index, completed: next,
+    });
+    setBusy(false);
+    if (!ok) { setDone(!next); return; }
+    broadcastToggle({ recording_id: it.recording_id, index: it.index, completed: next });
+  }
+
+  return (
+    <li>
+      <div className="flex items-start gap-1.5 text-xs text-navy">
+        <button
+          onClick={toggle}
+          disabled={busy}
+          className="flex-shrink-0 mt-0.5 disabled:opacity-50"
+          aria-label={done ? "Mark incomplete" : "Mark complete"}
+        >
+          {done
+            ? <CheckSquare size={13} className="text-emerald-600" />
+            : <Square size={13} className="text-ink-light hover:text-teal" />}
+        </button>
+        <span className={done ? "line-through text-ink-light" : ""}>
+          {it.transcriptUrl ? (
+            <a href={it.transcriptUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+              {it.text}
+            </a>
+          ) : it.text}
+          {it.assigneeName && <span className="text-ink-light"> · {it.assigneeName}</span>}
+          {it.dueDate && <span className="text-amber-700"> · due {it.dueDate}</span>}
+        </span>
+      </div>
+    </li>
   );
 }

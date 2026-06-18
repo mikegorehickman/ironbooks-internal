@@ -38,6 +38,7 @@ import type {
 import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
 import { ClientDetailsCard } from "./client-details-card";
 import { GrainSection } from "./grain-section";
+import { CallTodosPanel } from "./call-todos-panel";
 import { MessagesPanel } from "./messages-panel";
 import { BillingTab } from "./billing-tab";
 
@@ -775,6 +776,10 @@ function OverviewTab({
 
       {/* Inline message thread — "text" the client without leaving the profile. */}
       <MessagesPanel clientLinkId={clientLink.id} canSend={canSendMessages !== false} />
+
+      {/* Open action items pulled from every Grain call — check them off
+          here; they cross off in the call card on the Profile tab. */}
+      <CallTodosPanel clientLinkId={clientLink.id} />
 
       {/* Production status — the lever that takes a client from "we
           cleaned them up once" to "the 3am cron pulls their books
