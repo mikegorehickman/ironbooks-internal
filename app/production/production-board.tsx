@@ -9,6 +9,7 @@ import {
   ClientRecCard, EligibleRow, periodLabel, shiftPeriod,
   type EligibleClient, type ProdClient, type Bookkeeper,
 } from "./rec-card";
+import { CoaUpdatesBanner } from "./coa-updates-banner";
 
 /**
  * /production — the month-by-month board for graduated clients.
@@ -249,6 +250,7 @@ export function ProductionBoard() {
                   <X size={15} />
                 </button>
               </div>
+              <CoaUpdatesBanner clientId={selected.id} clientName={selected.client_name} />
               <ClientRecCard
                 client={selected}
                 period={period}
