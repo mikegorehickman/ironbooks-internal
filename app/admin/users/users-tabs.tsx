@@ -28,7 +28,7 @@ export function UsersTabs({
           active={tab === "clients"}
           onClick={() => setTab("clients")}
           icon={<Building2 size={15} />}
-          label="Clients"
+          label="Clients & Portal"
           count={clients.length}
         />
       </div>

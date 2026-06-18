@@ -37,19 +37,24 @@ export default async function AdminUsersPage() {
     .select("*")
     .order("client_name", { ascending: true });
 
-  // Active portal logins per client_link → has-portal + count + last login.
+  // Portal logins per client_link → active count, provisioned-ever, last login.
   // A client_link can have several portal users; "last login" is the most
   // recent sign-in across all of them (client_users.last_login_at is stamped
   // on every magic-link callback — see app/auth/callback/route.ts).
+  // We fetch ALL mappings (not just active) so the UI can tell apart a client
+  // that was never invited from one whose portal access was deactivated.
   const { data: portalRows } = await service
     .from("client_users" as any)
-    .select("client_link_id, active, last_login_at")
-    .eq("active", true);
-  const portalCount = new Map<string, number>();
+    .select("client_link_id, active, last_login_at");
+  const portalCount = new Map<string, number>();   // active mappings
+  const provisioned = new Set<string>();           // any mapping ever
   const lastLogin = new Map<string, string>();
   for (const r of (portalRows || []) as any[]) {
     if (!r.client_link_id) continue;
-    portalCount.set(r.client_link_id, (portalCount.get(r.client_link_id) || 0) + 1);
+    provisioned.add(r.client_link_id);
+    if (r.active) {
+      portalCount.set(r.client_link_id, (portalCount.get(r.client_link_id) || 0) + 1);
+    }
     if (r.last_login_at) {
       const prev = lastLogin.get(r.client_link_id);
       if (!prev || r.last_login_at > prev) lastLogin.set(r.client_link_id, r.last_login_at);
@@ -90,6 +95,7 @@ export default async function AdminUsersPage() {
     assigned_bookkeeper_name: c.assigned_bookkeeper_id ? bkName.get(c.assigned_bookkeeper_id) || null : null,
     has_portal: (portalCount.get(c.id) || 0) > 0,
     portal_user_count: portalCount.get(c.id) || 0,
+    portal_provisioned: provisioned.has(c.id),
     last_login_at: lastLogin.get(c.id) || null,
     created_at: c.created_at,
   }));
