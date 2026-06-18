@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolveFromEmail } from "@/lib/email-sender";
 
 export const dynamic = "force-dynamic";
 
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
 
   // Email via Resend
   const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.SUPPORT_FROM_EMAIL || "Ironbooks Support <onboarding@resend.dev>";
+  const fromEmail = resolveFromEmail(process.env.SUPPORT_FROM_EMAIL);
   const toEmail = process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com";
 
   if (!apiKey) {

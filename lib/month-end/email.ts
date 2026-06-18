@@ -1,4 +1,5 @@
 import type { PeriodBounds } from "./types";
+import { resolveFromEmail } from "@/lib/email-sender";
 
 export interface MonthEndEmailParams {
   clientName: string;
@@ -13,10 +14,10 @@ export async function sendMonthEndEmail(
   params: MonthEndEmailParams
 ): Promise<{ ok: boolean; messageId?: string; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail =
-    process.env.MONTH_END_FROM_EMAIL ||
-    process.env.SUPPORT_FROM_EMAIL ||
-    "Ironbooks <onboarding@resend.dev>";
+  const fromEmail = resolveFromEmail(
+    process.env.MONTH_END_FROM_EMAIL,
+    process.env.SUPPORT_FROM_EMAIL
+  );
 
   if (!apiKey) {
     return { ok: false, error: "RESEND_API_KEY not configured" };

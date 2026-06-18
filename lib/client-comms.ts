@@ -12,6 +12,8 @@
  * like other recently-added tables.
  */
 
+import { resolveFromEmail } from "./email-sender";
+
 export const CLIENT_UPLOADS_BUCKET = "client-uploads";
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // keep in sync with bucket fileSizeLimit
 
@@ -139,8 +141,7 @@ export async function sendResendEmail(params: {
     console.warn(`[client-comms] RESEND_API_KEY not set — skipped email "${params.subject}"`);
     return false;
   }
-  const fromEmail =
-    process.env.SUPPORT_FROM_EMAIL || "Ironbooks Support <onboarding@resend.dev>";
+  const fromEmail = resolveFromEmail(process.env.SUPPORT_FROM_EMAIL);
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
