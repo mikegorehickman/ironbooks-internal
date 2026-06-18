@@ -5,7 +5,7 @@ import {
   extractContactId,
   extractContactFields,
   applyOnboardingFormToProfile,
-  deriveJurisdiction,
+  deriveJurisdictionFromForm,
 } from "@/lib/onboarding";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +41,6 @@ export async function POST(request: Request) {
   const contactId = extractContactId(payload); // usually null for the form
   const email = (cf.email ? String(cf.email) : "").trim();
   const emailLc = email.toLowerCase();
-  const province = payload?.province ?? payload?.customData?.province ?? null;
 
   // Email is the match key for this form; a contact id is a bonus when present.
   if (!emailLc && !contactId) {
@@ -138,7 +137,7 @@ export async function POST(request: Request) {
       status: "onboarding",
       is_active: true,
     };
-    const jur = deriveJurisdiction(province);
+    const jur = deriveJurisdictionFromForm(payload);
     if (jur) insert.jurisdiction = jur;
 
     const { data: createdClient, error: createErr } = await (service as any)

@@ -1,0 +1,21 @@
+-- Migration 78 — allow client_links.qbo_realm_id to be NULL
+-- =========================================================================
+-- The onboarding form now creates a SNAP client (client_links, status=
+-- onboarding) the moment a prospect submits — BEFORE they've connected
+-- QuickBooks. client_links.qbo_realm_id was NOT NULL, so that insert failed
+-- ("null value in column qbo_realm_id ... violates not-null constraint") and
+-- no client was ever created from the form.
+--
+-- A pre-QBO onboarding client legitimately has no realm yet (it's filled when
+-- they connect QBO via the access link). Relax the constraint so these rows
+-- can exist. QBO-dependent flows (daily-recon, reclass, the QBO connection
+-- badge) already gate on having tokens / a realm, so a null realm just reads
+-- as "not connected yet" — which is correct for an onboarding client.
+--
+-- Reversible: re-add with `alter table client_links alter column qbo_realm_id
+-- set not null;` (only after every row has a realm).
+--
+-- Run in Supabase SQL editor:
+-- https://supabase.com/dashboard/project/omzobviyhrgiqywfjzwo/sql/new
+
+alter table client_links alter column qbo_realm_id drop not null;

@@ -193,11 +193,21 @@ export function extractContactFields(payload: any) {
 
 import type { SupabaseClient as _SupabaseClient } from "@supabase/supabase-js";
 
-function readFormField(payload: any, key: string): string | null {
-  const v = payload?.[key] ?? payload?.customData?.[key];
-  if (v === undefined || v === null) return null;
-  const s = String(v).trim();
-  return s === "" ? null : s;
+/**
+ * Read a form field by trying several key aliases, top-level then customData.
+ * GHL's real onboarding webhook sends Title-Case-with-spaces keys ("Business
+ * Type", "Year End", "Province", "Bank Connected", …) plus snake_case identity
+ * (first_name, company_name) — NOT the camelCase a hand-built sample suggested.
+ * We accept all variants so the mapping survives either form configuration.
+ */
+function readFormField(payload: any, keys: string[]): string | null {
+  for (const key of keys) {
+    const v = payload?.[key] ?? payload?.customData?.[key];
+    if (v === undefined || v === null) continue;
+    const s = String(v).trim();
+    if (s !== "") return s;
+  }
+  return null;
 }
 
 function normalizeCountry(v: string): string {
@@ -205,10 +215,6 @@ function normalizeCountry(v: string): string {
   if (["usa", "us", "u.s.", "u.s.a.", "united states"].includes(s)) return "United States";
   if (["canada", "ca", "can"].includes(s)) return "Canada";
   return v;
-}
-
-function titleCase(v: string): string {
-  return v.charAt(0).toUpperCase() + v.slice(1).toLowerCase();
 }
 
 const CA_PROVINCES = new Set([
@@ -219,9 +225,9 @@ const CA_PROVINCES = new Set([
 ]);
 
 /**
- * Derive the SNAP jurisdiction (US/CA tax system) from the onboarding form's
- * province/state field. A recognized Canadian province/territory → "CA";
- * anything else present (i.e. a US state) → "US"; blank → null (leave unset).
+ * Derive the SNAP jurisdiction (US/CA tax system) from a province/state value.
+ * A recognized Canadian province/territory → "CA"; anything else present (a US
+ * state) → "US"; blank → null (leave unset).
  */
 export function deriveJurisdiction(province: string | null | undefined): "US" | "CA" | null {
   if (!province) return null;
@@ -230,28 +236,39 @@ export function deriveJurisdiction(province: string | null | undefined): "US" | 
   return CA_PROVINCES.has(s) ? "CA" : "US";
 }
 
-/** form key → client_links column (+ optional value transform). */
-const FORM_TO_PROFILE: { key: string; col: string; transform?: (v: string) => string }[] = [
-  { key: "firstName", col: "contact_first_name" },
-  { key: "lastName", col: "contact_last_name" },
-  { key: "email", col: "client_email" },
-  { key: "phone", col: "client_phone" },
-  { key: "companyName", col: "legal_business_name" },
-  { key: "businessType", col: "trade_type" },
-  { key: "corporationType", col: "corporate_type" },
-  { key: "yearEnd", col: "fiscal_year_end" },
-  { key: "country", col: "country", transform: normalizeCountry },
-  { key: "province", col: "state_province" },
-  { key: "annualRevenue", col: "annual_revenue_range" },
-  { key: "taxsFiled", col: "taxes_up_to_date", transform: titleCase }, // note: form key is "taxsFiled"
-  { key: "lastBookkeeper", col: "prior_bookkeeper" },
-  { key: "accountingSoftware", col: "accounting_software" },
-  { key: "payrollProvider", col: "payroll_provider" },
-  { key: "numberOfEmployees", col: "employee_count_range" },
-  { key: "keepReceipts", col: "keeps_receipts" },
-  { key: "bankConnected", col: "bank_connected_to_software" },
-  { key: "creditCards", col: "uses_business_cards" },
-  // additionalNotes is intentionally NOT mapped to client_links.notes (that's
+/** Jurisdiction from the onboarding form: country field first, then province. */
+export function deriveJurisdictionFromForm(payload: any): "US" | "CA" | null {
+  const country = readFormField(payload, ["country", "Country"]);
+  if (country) {
+    const c = country.trim().toLowerCase();
+    if (["ca", "can", "canada"].includes(c)) return "CA";
+    if (["us", "usa", "u.s.", "u.s.a.", "united states"].includes(c)) return "US";
+  }
+  return deriveJurisdiction(readFormField(payload, ["Province", "province", "State", "state"]));
+}
+
+/** form column → candidate keys (real GHL key first, then camelCase fallback). */
+const FORM_TO_PROFILE: { keys: string[]; col: string; transform?: (v: string) => string }[] = [
+  { keys: ["first_name", "firstName"], col: "contact_first_name" },
+  { keys: ["last_name", "lastName"], col: "contact_last_name" },
+  { keys: ["email"], col: "client_email" },
+  { keys: ["phone"], col: "client_phone" },
+  { keys: ["company_name", "companyName"], col: "legal_business_name" },
+  { keys: ["Business Type", "businessType"], col: "trade_type" },
+  { keys: ["Corporation Type", "corporationType"], col: "corporate_type" },
+  { keys: ["Year End", "yearEnd"], col: "fiscal_year_end" },
+  { keys: ["country", "Country"], col: "country", transform: normalizeCountry },
+  { keys: ["Province", "province", "State", "state"], col: "state_province" },
+  { keys: ["Annual Revenue", "annualRevenue"], col: "annual_revenue_range" },
+  { keys: ["Taxs Filed", "Taxes Filed", "taxsFiled"], col: "taxes_up_to_date" },
+  { keys: ["Last Bookkeeper", "lastBookkeeper"], col: "prior_bookkeeper" },
+  { keys: ["Accounting Software", "accountingSoftware"], col: "accounting_software" },
+  { keys: ["Payroll Provider", "payrollProvider"], col: "payroll_provider" },
+  { keys: ["Number Of Employees", "numberOfEmployees"], col: "employee_count_range" },
+  { keys: ["Keep Receipts", "keepReceipts"], col: "keeps_receipts" },
+  { keys: ["Bank Connected", "bankConnected"], col: "bank_connected_to_software" },
+  { keys: ["CreditCards", "creditCards", "Credit Cards"], col: "uses_business_cards" },
+  // "Additional Notes" is intentionally NOT mapped to client_links.notes (that's
   // the internal bookkeeper notes field). It stays visible via the onboarding
   // answers card + the raw stored payload.
 ];
@@ -259,8 +276,8 @@ const FORM_TO_PROFILE: { key: string; col: string; transform?: (v: string) => st
 /** Map a form payload to the client_links profile columns it should set. */
 export function mapOnboardingFormToProfile(payload: any): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const { key, col, transform } of FORM_TO_PROFILE) {
-    const raw = readFormField(payload, key);
+  for (const { keys, col, transform } of FORM_TO_PROFILE) {
+    const raw = readFormField(payload, keys);
     if (raw == null) continue;
     out[col] = transform ? transform(raw) : raw;
   }
