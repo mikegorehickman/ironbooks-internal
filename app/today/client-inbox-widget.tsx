@@ -12,23 +12,56 @@ export interface InboundCommRow {
   created_at: string;
 }
 
+interface ClientGroup {
+  client_link_id: string;
+  client_name: string;
+  sender_name: string;
+  latest_at: string;
+  preview: string | null;
+  count: number;
+  files: number;
+}
+
 /**
- * /today widget: unread client→bookkeeper messages + statement uploads
- * across every (visible) client. Rows clear automatically when the
- * bookkeeper opens the client's thread — /clients/[id]/messages marks
- * them read on mount.
+ * /today widget: unread client→bookkeeper messages, NESTED by client. Each
+ * client shows once — most-recent message preview + a red badge with how many
+ * unread messages they sent. Clicking opens the full thread (which marks them
+ * read). Rows arrive most-recent-first.
  *
  * Server component — pure links, no interactivity needed.
  */
 export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
   const totalFiles = rows.reduce((s, r) => s + (r.attachments?.length || 0), 0);
 
+  // Group by client, preserving the incoming most-recent-first order.
+  const order: string[] = [];
+  const byClient = new Map<string, ClientGroup>();
+  for (const r of rows) {
+    let g = byClient.get(r.client_link_id);
+    if (!g) {
+      g = {
+        client_link_id: r.client_link_id,
+        client_name: r.client_name,
+        sender_name: r.sender_name,
+        latest_at: r.created_at,
+        preview: r.body, // first seen = most recent
+        count: 0,
+        files: 0,
+      };
+      byClient.set(r.client_link_id, g);
+      order.push(r.client_link_id);
+    }
+    g.count += 1;
+    g.files += r.attachments?.length || 0;
+  }
+  const groups = order.map((id) => byClient.get(id)!);
+
   return (
     <div className="bg-white rounded-2xl border border-teal/20 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-100 bg-teal-lighter/30 flex items-center justify-between">
         <h2 className="text-sm font-bold text-navy uppercase tracking-wider flex items-center gap-2">
           <Inbox size={15} className="text-teal" />
-          Inbound from clients ({rows.length})
+          Inbound from clients ({groups.length})
         </h2>
         {totalFiles > 0 && (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-teal-dark">
@@ -38,39 +71,40 @@ export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
         )}
       </div>
       <ul className="divide-y divide-gray-50">
-        {rows.map((r) => (
-          <li key={r.id}>
+        {groups.map((g) => (
+          <li key={g.client_link_id}>
             <Link
-              href={`/clients/${r.client_link_id}/messages`}
+              href={`/clients/${g.client_link_id}/messages`}
               className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors"
             >
+              {/* Red count badge — how many unread messages from this client */}
+              <span className="relative flex-shrink-0">
+                <span
+                  className={`inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full text-xs font-bold ${
+                    g.count > 1 ? "bg-red-500 text-white" : "bg-teal-lighter text-teal-dark"
+                  }`}
+                  title={`${g.count} unread message${g.count === 1 ? "" : "s"}`}
+                >
+                  {g.count}
+                </span>
+              </span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-navy text-sm">{r.client_name}</span>
-                  {r.sender_name && (
-                    <span className="text-xs text-ink-light">from {r.sender_name}</span>
+                  <span className="font-semibold text-navy text-sm">{g.client_name}</span>
+                  {g.sender_name && (
+                    <span className="text-xs text-ink-light">from {g.sender_name}</span>
                   )}
-                  <span className="text-xs text-ink-light">· {formatAgo(r.created_at)}</span>
+                  <span className="text-xs text-ink-light">· {formatAgo(g.latest_at)}</span>
+                  {g.count > 1 && (
+                    <span className="text-[11px] text-red-600 font-semibold">{g.count} messages</span>
+                  )}
                 </div>
-                {r.body && (
-                  <div className="text-xs text-ink-slate mt-0.5 truncate">{r.body}</div>
+                {g.preview && (
+                  <div className="text-xs text-ink-slate mt-0.5 truncate">{g.preview}</div>
                 )}
-                {r.attachments?.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    {r.attachments.slice(0, 4).map((a) => (
-                      <span
-                        key={a.path}
-                        className="inline-flex items-center gap-1 bg-teal-lighter/50 border border-teal/15 rounded-full px-2 py-0.5 text-[11px] text-teal-dark"
-                      >
-                        <FileText size={10} />
-                        <span className="max-w-[160px] truncate">{a.name}</span>
-                      </span>
-                    ))}
-                    {r.attachments.length > 4 && (
-                      <span className="text-[11px] text-ink-light self-center">
-                        +{r.attachments.length - 4} more
-                      </span>
-                    )}
+                {g.files > 0 && (
+                  <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-teal-dark">
+                    <FileText size={10} /> {g.files} file{g.files === 1 ? "" : "s"}
                   </div>
                 )}
               </div>

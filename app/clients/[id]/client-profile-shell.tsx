@@ -26,6 +26,7 @@ import {
   Mail,
   Building2,
   AlertTriangle,
+  CreditCard,
 } from "lucide-react";
 import type {
   OutstandingWork,
@@ -37,6 +38,8 @@ import type {
 import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
 import { ClientDetailsCard } from "./client-details-card";
 import { GrainSection } from "./grain-section";
+import { MessagesPanel } from "./messages-panel";
+import { BillingTab } from "./billing-tab";
 
 type ClientLink = {
   id: string;
@@ -150,11 +153,12 @@ interface Props {
   bsCleanupOwed?: boolean;
 }
 
-type TabId = "overview" | "profile" | "pl" | "bs" | "bank" | "activity";
+type TabId = "overview" | "profile" | "billing" | "pl" | "bs" | "bank" | "activity";
 
 const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: "overview", label: "Overview", icon: Activity },
   { id: "profile", label: "Profile", icon: Building2 },
+  { id: "billing", label: "Billing", icon: CreditCard },
   { id: "pl", label: "P&L", icon: FileText },
   { id: "bs", label: "Balance Sheet", icon: Scale },
   { id: "bank", label: "Bank Balances", icon: Banknote },
@@ -239,11 +243,13 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           qboStatus={financials.qboStatus}
           onboarding={onboarding}
           bsCleanupOwed={bsCleanupOwed}
+          canSendMessages={actorRole !== "viewer"}
         />
       )}
       {activeTab === "profile" && (
         <ProfileTab clientLink={clientLink} onboarding={onboarding} />
       )}
+      {activeTab === "billing" && <BillingTab clientLinkId={clientLink.id} />}
       {activeTab === "pl" && (
         <PLTab
           financials={financials}
@@ -725,12 +731,14 @@ function OverviewTab({
   qboStatus,
   onboarding,
   bsCleanupOwed,
+  canSendMessages,
 }: {
   clientLink: ClientLink;
   overview: OverviewBundle;
   qboStatus: "connected" | "token_expired" | "never_connected";
   onboarding?: OnboardingProfile | null;
   bsCleanupOwed?: boolean;
+  canSendMessages?: boolean;
 }) {
   const { outstanding, summary, activity, progress } = overview;
 
@@ -764,6 +772,9 @@ function OverviewTab({
           <span><strong>Balance-sheet cleanup deferred</strong> — this client still owes a BS cleanup. Mark it done from the Clients manager dashboard once complete.</span>
         </div>
       )}
+
+      {/* Inline message thread — "text" the client without leaving the profile. */}
+      <MessagesPanel clientLinkId={clientLink.id} canSend={canSendMessages !== false} />
 
       {/* Production status — the lever that takes a client from "we
           cleaned them up once" to "the 3am cron pulls their books
