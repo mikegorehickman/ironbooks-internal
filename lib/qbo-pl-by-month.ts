@@ -10,6 +10,8 @@
  * lib/qbo-reports.ts.
  */
 
+import { isDemoRealm, demoProfitAndLossByMonth } from "./demo-data";
+
 const QBO_BASE =
   process.env.QBO_ENVIRONMENT === "production"
     ? "https://quickbooks.api.intuit.com"
@@ -68,6 +70,7 @@ export async function fetchProfitAndLossByMonth(
   startDate: string,
   endDate: string
 ): Promise<ProfitLossByMonth> {
+  if (isDemoRealm(realmId)) return demoProfitAndLossByMonth();
   const report = await fetchReport(realmId, accessToken, "ProfitAndLoss", {
     start_date: startDate,
     end_date: endDate,

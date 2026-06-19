@@ -5,6 +5,8 @@
  * build a label→value map, then look up keys by common name variants.
  */
 
+import { isDemoRealm, demoProfitAndLoss } from "./demo-data";
+
 const QBO_BASE =
   process.env.QBO_ENVIRONMENT === "production"
     ? "https://quickbooks.api.intuit.com"
@@ -236,6 +238,7 @@ export async function fetchProfitAndLoss(
   startDate: string,
   endDate: string
 ): Promise<ProfitLossData> {
+  if (isDemoRealm(realmId)) return demoProfitAndLoss(startDate);
   const report = await fetchQBOReport(realmId, accessToken, "ProfitAndLoss", {
     start_date: startDate,
     end_date: endDate,

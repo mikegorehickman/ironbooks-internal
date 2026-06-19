@@ -22,6 +22,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
 import type { Database } from './database.types';
+import { isDemoRealm, demoAccounts } from './demo-data';
 
 const QBO_BASE = process.env.QBO_ENVIRONMENT === 'production'
   ? 'https://quickbooks.api.intuit.com'
@@ -400,10 +401,13 @@ export async function getValidToken(
   // ── Fast path: no refresh needed ──
   const { data: cached, error } = await supabase
     .from('client_links')
-    .select('qbo_access_token, qbo_refresh_token, qbo_token_expires_at')
+    .select('qbo_access_token, qbo_refresh_token, qbo_token_expires_at, qbo_realm_id')
     .eq('id', clientLinkId)
     .single();
   if (error || !cached) throw new Error('Client not found');
+  // Demo client — no real QBO connection; hand back a sentinel token so the
+  // fetchers (which detect the DEMO realm) serve synthetic data.
+  if (isDemoRealm((cached as any).qbo_realm_id)) return 'DEMO';
 
   const cachedExpiresAt = new Date(cached.qbo_token_expires_at!).getTime();
   if (cachedExpiresAt > Date.now() + REFRESH_BUFFER_MS) {
@@ -683,6 +687,9 @@ export async function qboRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  // Demo client has no real QBO — fast-fail so callers fall back to their
+  // empty/handled states (the synthesized fetchers branch before reaching here).
+  if (isDemoRealm(realmId)) throw new Error('demo client — no live QuickBooks');
   const url = `${QBO_BASE}/v3/company/${realmId}${endpoint}`;
   let res: Response;
   try {
@@ -745,6 +752,7 @@ export async function qboRequest<T>(
  * Pull the entire Chart of Accounts for a client.
  */
 export async function fetchAllAccounts(realmId: string, accessToken: string): Promise<QBOAccount[]> {
+  if (isDemoRealm(realmId)) return demoAccounts();
   const query = encodeURIComponent('SELECT * FROM Account MAXRESULTS 1000');
   const data = await qboRequest<{ QueryResponse: { Account?: QBOAccount[] } }>(
     realmId,

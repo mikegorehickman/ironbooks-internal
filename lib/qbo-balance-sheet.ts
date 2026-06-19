@@ -11,6 +11,7 @@
  */
 
 import { qboRateLimiter } from "./qbo";
+import { isDemoRealm, demoBalancesAsOf } from "./demo-data";
 
 const QBO_BASE = "https://quickbooks.api.intuit.com/v3/company";
 
@@ -180,6 +181,7 @@ export async function fetchBalancesAsOf(
   accessToken: string,
   asOfDate: string
 ): Promise<Map<string, number>> {
+  if (isDemoRealm(realmId)) return demoBalancesAsOf();
   const url = `/reports/BalanceSheet?date=${encodeURIComponent(asOfDate)}&accounting_method=Accrual`;
   let data: any;
   try {
