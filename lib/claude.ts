@@ -79,8 +79,14 @@ Common mappings you must apply:
   "Bank Charges & Fees", "Bank Service Charges"  → "Accounting & Bookkeeping"
   "Coaching & Development", "Training"            → "Continuing Education / Professional Development"
   "Meals and Entertainment", "Entertainment"      → "Meals (50% deductible)"
-  "Auto - Repairs", "Car Maintenance", "Vehicle Maint" → "Vehicle Repairs – Admin/Sales"
-  "Gas", "Gasoline", "Fuel", "Gas & Oil"          → "Fuel – Admin & Sales Vehicles"
+  "Auto - Repairs", "Car Maintenance", "Vehicle Maint" → "Vehicle Repairs"
+  "Gas", "Gasoline", "Fuel", "Gas & Oil"          → "Fuel – Overhead"
+  "Vehicle Lease", "Auto Lease", "Truck Lease"    → "Vehicle Lease"
+  "Vehicle Loan Interest", "Auto Loan Interest", "Car Loan Interest" → "Vehicle Loan Interest"
+  "Gifts", "Client Gifts", "Employee Gifts"       → "Gifts"
+  "Business Taxes", "Taxes"                       → "Taxes"
+  "Business License", "Licenses", "License & Fees" → "Licenses"
+  "Workers Comp Insurance", "Workman's Comp", "WCB Insurance" → "Workman's Comp Insurance"
   "Direct Fuel", "Field Fuel"                     → "Direct Fuel Allocation"
   "Commissions", "Sales Commission"               → "Sales Team Payroll/Commission"
   "Advertising", "Google Ads", "Facebook Ads"     → "Online Advertising – Google Ads / Social Media Marketing"
@@ -148,6 +154,7 @@ Only FLAG these specific situations:
   2. Account type is Equity or Liability AND CurrentBalance is not zero
   3. Account has transactions AND you genuinely cannot determine any master account mapping
   4. Account appears to be a duplicate of another client account mapping to the same master (rare — system handles this)
+  5. A combined "Taxes & Licenses" account → flag to split into "Taxes" and "Licenses" and reclassify
 
 DO NOT flag for: type/subtype mismatches, missing master equivalents, name ambiguity you can resolve with reasonable judgment.
 
