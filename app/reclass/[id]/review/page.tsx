@@ -90,7 +90,7 @@ export default async function ReclassReviewPage({
   // Fetch the client's industry (the view may not expose it)
   const { data: clientLink } = await service
     .from("client_links")
-    .select("industry")
+    .select("industry, qbo_realm_id")
     .eq("id", (job as any).client_link_id)
     .maybeSingle();
   // Industry is REQUIRED — silent default to "painters" caused chimney
@@ -100,102 +100,88 @@ export default async function ReclassReviewPage({
   const industry = (clientLink as any)?.industry as string | null;
   const industryWarnings: string[] = [];
 
+  // Build the target-account dropdown from the client's CURRENT (live) QBO
+  // chart of accounts — the accounts a transaction can ACTUALLY be posted to
+  // in QBO. Previously this used the master_coa TEMPLATE, which could list
+  // accounts the client doesn't have, or miss ones they renamed/added (the
+  // "wrong / outdated category list" bug). The separate Bank-Rules dropdown
+  // still uses the master COA by design; here the bookkeeper needs the
+  // client's real accounts. P&L accounts (leaves) drive categorization;
+  // Bank/Credit Card accounts cover transfers / CC payments.
   let masterAccounts: any[] = [];
-  if (industry) {
-    const res = await service
-      .from("master_coa")
-      .select("account_name, parent_account_name, is_parent, section, sort_order")
-      .eq("jurisdiction", jurisdiction)
-      .eq("industry", industry)
-      .eq("is_parent", false)
-      .order("sort_order");
-    masterAccounts = res.data || [];
-
-    // Soft fallback ONLY when the requested industry has zero seeded rows.
-    // Always surface the fallback so the bookkeeper sees why painter
-    // account names are appearing for a chimney sweep client.
-    if (masterAccounts.length === 0) {
-      industryWarnings.push(
-        `No master COA seeded for industry="${industry}" / jurisdiction="${jurisdiction}". ` +
-        `Showing painters baseline — customize the ${industry} template in /templates to make targets industry-specific.`
-      );
-      const painters = await service
-        .from("master_coa")
-        .select("account_name, parent_account_name, is_parent, section, sort_order")
-        .eq("jurisdiction", jurisdiction)
-        .eq("industry", "painters")
-        .eq("is_parent", false)
-        .order("sort_order");
-      masterAccounts = painters.data || [];
-    }
-    if (masterAccounts.length === 0) {
-      industryWarnings.push(
-        `Painters baseline ALSO empty for ${jurisdiction}. Showing all master COA accounts for this jurisdiction.`
-      );
-      const noFilter = await service
-        .from("master_coa")
-        .select("account_name, parent_account_name, is_parent, section, sort_order")
-        .eq("jurisdiction", jurisdiction)
-        .eq("is_parent", false)
-        .order("sort_order");
-      masterAccounts = noFilter.data || [];
-    }
-  } else {
-    industryWarnings.push(
-      "This client has no industry set. Set the industry on the client record so target categories load correctly."
-    );
-  }
-
-  // Also load live QBO accounts so we can resolve target_account_id when the
-  // bookkeeper picks a master account by name. The qbo-accounts endpoint already
-  // exists but is async-only; we'll let the client-side fetch it on demand.
-
-  // ─── Append the client's live Bank + Credit Card accounts to the
-  // target dropdown. These are needed when the bookkeeper hits an
-  // "Unknown vendor" transaction that's actually a transfer or CC payment
-  // (money moving between BS accounts, not a P&L expense). The AI's
-  // available-accounts list stays unchanged — we don't want Claude
-  // suggesting a Visa account for regular office-supply purchases.
-  //
-  // Failure-tolerant: if QBO token resolution or fetchAllAccounts errors,
-  // we just show the P&L list as before. The bookkeeper can re-run the
-  // page if needed.
+  let usedLiveCoa = false;
   try {
     const clientLinkId = (job as any).client_link_id;
-    if (clientLinkId) {
+    const realmId = ((job as any).qbo_realm_id || (clientLink as any)?.qbo_realm_id) as string;
+    if (clientLinkId && realmId) {
       const accessToken = await getValidToken(clientLinkId, service as any);
-      const allQboAccounts = await fetchAllAccounts(
-        ((job as any).qbo_realm_id || (clientLink as any)?.qbo_realm_id) as string,
-        accessToken
+      const allQboAccounts = await fetchAllAccounts(realmId, accessToken);
+      const active = allQboAccounts.filter((a) => a.Active !== false);
+      // Leaf accounts only — you post to leaves, not roll-up parents.
+      const parentIds = new Set(active.map((a) => a.ParentRef?.value).filter(Boolean));
+      const sectionFor = (a: any) =>
+        a.AccountType === "Bank" || a.AccountType === "Credit Card"
+          ? "Balance Sheet — Transfers / CC Payments"
+          : a.Classification === "Revenue"
+          ? "Income"
+          : /cost of goods sold/i.test(a.AccountType)
+          ? "Cost of Goods Sold"
+          : "Expenses";
+      const pnl = active.filter(
+        (a) =>
+          (a.Classification === "Revenue" || a.Classification === "Expense") &&
+          !parentIds.has(a.Id)
       );
-      const transferAccounts = allQboAccounts
-        .filter(
-          (a) =>
-            a.Active !== false &&
-            (a.AccountType === "Bank" || a.AccountType === "Credit Card")
-        )
-        // Synthesize MasterAccount-shaped rows so the existing dropdown
-        // renders them without code changes. parent_account_name shows
-        // as a "· Credit Card" / "· Bank" hint next to the name; section
-        // is searchable so typing "transfer" finds them.
-        .map((a, i) => ({
-          account_name: a.Name,
-          parent_account_name: a.AccountType, // shows as "· Bank" or "· Credit Card"
-          is_parent: false,
-          section: "Balance Sheet — Transfers / CC Payments",
-          // Push to the bottom of the dropdown by giving these the highest
-          // sort_order. Stable per-account ordering via index.
-          sort_order: 90000 + i,
-        }));
-      if (transferAccounts.length > 0) {
-        masterAccounts = [...masterAccounts, ...transferAccounts];
-      }
+      const transfers = active.filter(
+        (a) => a.AccountType === "Bank" || a.AccountType === "Credit Card"
+      );
+      masterAccounts = [...pnl, ...transfers].map((a, i) => ({
+        account_name: a.FullyQualifiedName || a.Name,
+        parent_account_name: a.AccountType, // "· Expense" / "· Bank" hint
+        is_parent: false,
+        section: sectionFor(a),
+        sort_order:
+          (a.AccountType === "Bank" || a.AccountType === "Credit Card"
+            ? 90000
+            : a.Classification === "Revenue"
+            ? 0
+            : 1000) + i,
+      }));
+      usedLiveCoa = masterAccounts.length > 0;
     }
   } catch (err: any) {
     if (err instanceof QBOReauthRequiredError) redirect(err.reconnectUrl);
     console.warn(
-      `[reclass review] couldn't load QBO Bank/CC accounts (transfers unavailable in dropdown): ${err?.message}`
+      `[reclass review] couldn't load live QBO COA, falling back to master template: ${err?.message}`
     );
+  }
+
+  // Fallback only when the live COA couldn't load — use the master_coa
+  // template so the dropdown is never empty (the old behavior).
+  if (!usedLiveCoa) {
+    industryWarnings.push(
+      "Couldn't load this client's live QuickBooks accounts — showing the master COA template instead. Re-open the page to retry."
+    );
+    if (industry) {
+      const res = await service
+        .from("master_coa")
+        .select("account_name, parent_account_name, is_parent, section, sort_order")
+        .eq("jurisdiction", jurisdiction)
+        .eq("industry", industry)
+        .eq("is_parent", false)
+        .order("sort_order");
+      masterAccounts = res.data || [];
+      if (masterAccounts.length === 0) {
+        const painters = await service
+          .from("master_coa")
+          .select("account_name, parent_account_name, is_parent, section, sort_order")
+          .eq("jurisdiction", jurisdiction)
+          .eq("industry", "painters")
+          .eq("is_parent", false)
+          .order("sort_order");
+        masterAccounts = painters.data || [];
+      }
+    }
   }
 
   return (

@@ -468,6 +468,12 @@ export async function fetchOpenInvoices(
     }
     const rows: any[] = data?.QueryResponse?.Invoice || [];
     for (const inv of rows) {
+      // Defensive: the `WHERE Balance > '0'` filter above is the primary gate,
+      // but QBO's Balance is a calculated field and the query filter can be
+      // unreliable (returns fully-paid invoices in some realms). Enforce
+      // open-only in code so a PAID invoice (Balance 0) can never show in
+      // "Who Owes You". Use an epsilon to dodge float dust.
+      if (Number(inv.Balance || 0) <= 0.005) continue;
       results.push({
         qbo_invoice_id: inv.Id,
         doc_number: inv.DocNumber || null,

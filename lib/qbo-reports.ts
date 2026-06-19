@@ -176,7 +176,16 @@ function flattenRows(
       const value = parseFloat(row.ColData[1]?.value || "0") || 0;
       if (label) {
         flat.set(label.toLowerCase(), value);
-        items.push({ label, amount: value, group, account_id: accountId ? String(accountId) : null });
+        // A Data row that ALSO has child rows is a parent ROLLUP — its value
+        // already equals the sum of its sub-account children. Adding it to
+        // `items` (the line-level display + per-line sum source) on top of
+        // those children double-counts the section (the "double expenses"
+        // bug for clients whose parent accounts carry their own postings).
+        // Keep it in `flat` for total lookups, but exclude it from `items`.
+        const isRollupParent = !!(row.Rows?.Row && row.Rows.Row.length > 0);
+        if (!isRollupParent) {
+          items.push({ label, amount: value, group, account_id: accountId ? String(accountId) : null });
+        }
       }
     }
 
