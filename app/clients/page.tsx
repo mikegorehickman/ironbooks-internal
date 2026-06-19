@@ -478,6 +478,7 @@ export default async function ClientsPage() {
         is_production: !!c.daily_recon_enabled && cleanupCompleted,
         // Month-end columns: current close status + last closed period (YYYY-MM).
         current_month_end: c.daily_recon_enabled ? (currentMEById.get(c.id) ?? "not_started") : null,
+        current_month_end_period: c.daily_recon_enabled ? currentPeriod : null,
         last_month_end_closed: lastClosedById.get(c.id) ?? null,
         // Lifecycle checklist (row-expand drawer).
         steps: {

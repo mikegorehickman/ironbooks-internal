@@ -25,6 +25,8 @@ export interface ManagerRow {
   is_production: boolean;
   /** status of the current close period; null when not in production */
   current_month_end: "done" | "in_review" | "waiting" | "in_progress" | "not_started" | null;
+  /** the period being closed, "YYYY-MM"; null when not in production */
+  current_month_end_period: string | null;
   /** latest fully-closed period, "YYYY-MM", or null if none closed yet */
   last_month_end_closed: string | null;
   /** lifecycle checklist for the row-expand drawer */
@@ -274,11 +276,16 @@ export function ManagerDashboard({
                         </span>
                       )}
                     </td>
-                    <td className="py-2.5 pr-3">
+                    <td className="py-2.5 pr-3 whitespace-nowrap">
                       {r.current_month_end ? (
-                        <span className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full ${ME_META[r.current_month_end].tone}`}>
-                          {ME_META[r.current_month_end].label}
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          {r.current_month_end_period && (
+                            <span className="text-[10px] text-ink-light leading-none">{fmtPeriod(r.current_month_end_period)}</span>
+                          )}
+                          <span className={`inline-flex items-center w-fit text-[11px] font-semibold px-2 py-0.5 rounded-full ${ME_META[r.current_month_end].tone}`}>
+                            {ME_META[r.current_month_end].label}
+                          </span>
+                        </div>
                       ) : (
                         <span className="text-ink-light text-xs">—</span>
                       )}
