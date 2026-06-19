@@ -402,21 +402,38 @@ export default async function ClientsPage() {
   const monthDone = new Set<string>();
   const monthReview = new Set<string>();
   const monthWaiting = new Set<string>();
+  // Two month-end dashboard columns: status of the CURRENT close period, and
+  // the most recent period that's been fully closed for each production client.
+  const currentMEById = new Map<string, "done" | "in_review" | "waiting" | "in_progress" | "not_started">();
+  const lastClosedById = new Map<string, string>(); // latest closed period, "YYYY-MM"
   const prodIds = enrichedClients.filter((c: any) => c.daily_recon_enabled).map((c: any) => c.id);
+  const currentPeriod = previousMonthPeriod().period;
   if (prodIds.length) {
     try {
-      const period = previousMonthPeriod().period;
+      // Pull ALL production_me runs (every period) so we can derive both the
+      // current-close status and the last-closed period in one query.
       const { data: runs } = await (service as any)
         .from("monthly_rec_runs")
-        .select("client_link_id, status, board_status")
-        .eq("period", period)
+        .select("client_link_id, period, status, board_status")
         .eq("kind", "production_me")
         .in("client_link_id", prodIds);
+      const byClient = new Map<string, any[]>();
       for (const r of (runs as any[]) || []) {
         if (!r.client_link_id) continue;
-        if (r.status === "complete") monthDone.add(r.client_link_id);
-        else if (r.status === "pending_review") monthReview.add(r.client_link_id);
-        else if (r.board_status === "waiting_client") monthWaiting.add(r.client_link_id);
+        const arr = byClient.get(r.client_link_id) || [];
+        arr.push(r);
+        byClient.set(r.client_link_id, arr);
+      }
+      for (const cid of prodIds) {
+        const arr = byClient.get(cid) || [];
+        const cur = arr.find((r) => r.period === currentPeriod);
+        if (cur?.status === "complete") { monthDone.add(cid); currentMEById.set(cid, "done"); }
+        else if (cur?.status === "pending_review") { monthReview.add(cid); currentMEById.set(cid, "in_review"); }
+        else if (cur?.board_status === "waiting_client") { monthWaiting.add(cid); currentMEById.set(cid, "waiting"); }
+        else if (cur) currentMEById.set(cid, "in_progress");
+        else currentMEById.set(cid, "not_started");
+        const closed = arr.filter((r) => r.status === "complete").map((r) => r.period as string).sort();
+        if (closed.length) lastClosedById.set(cid, closed[closed.length - 1]);
       }
     } catch (e: any) {
       console.warn("[clients] monthly_rec_runs fetch failed:", e?.message);
@@ -459,6 +476,9 @@ export default async function ClientsPage() {
         in_cleanup_phase: !cleanupCompleted && !c.daily_recon_enabled,
         // Production clients get a Month-end deep link to finish the close.
         is_production: !!c.daily_recon_enabled && cleanupCompleted,
+        // Month-end columns: current close status + last closed period (YYYY-MM).
+        current_month_end: c.daily_recon_enabled ? (currentMEById.get(c.id) ?? "not_started") : null,
+        last_month_end_closed: lastClosedById.get(c.id) ?? null,
         // Lifecycle checklist (row-expand drawer).
         steps: {
           qbo: !!c.qbo_connected,

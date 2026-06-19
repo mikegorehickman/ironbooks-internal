@@ -23,6 +23,10 @@ export interface ManagerRow {
   in_cleanup_phase: boolean;
   /** true once promoted to production — gets a Month-end deep link */
   is_production: boolean;
+  /** status of the current close period; null when not in production */
+  current_month_end: "done" | "in_review" | "waiting" | "in_progress" | "not_started" | null;
+  /** latest fully-closed period, "YYYY-MM", or null if none closed yet */
+  last_month_end_closed: string | null;
   /** lifecycle checklist for the row-expand drawer */
   steps: {
     qbo: boolean; coa: boolean; reclass: boolean; rules: boolean;
@@ -35,6 +39,22 @@ interface Bk { id: string; full_name: string }
 const STATUS_ORDER = (Object.keys(LIFECYCLE_META) as LifecycleStatus[]).sort(
   (a, b) => LIFECYCLE_META[a].order - LIFECYCLE_META[b].order
 );
+
+/** Month-end close status → badge label + tone. */
+const ME_META: Record<NonNullable<ManagerRow["current_month_end"]>, { label: string; tone: string }> = {
+  done:        { label: "Done",            tone: "bg-emerald-50 text-emerald-700" },
+  in_review:   { label: "In review",      tone: "bg-violet-50 text-violet-700" },
+  waiting:     { label: "Waiting on client", tone: "bg-amber-50 text-amber-700" },
+  in_progress: { label: "In progress",    tone: "bg-blue-50 text-blue-700" },
+  not_started: { label: "Not started",    tone: "bg-slate-100 text-slate-600" },
+};
+
+/** "YYYY-MM" → "MMM YYYY" (e.g. 2026-05 → May 2026). */
+function fmtPeriod(p: string): string {
+  const [y, m] = p.split("-").map(Number);
+  if (!y || !m) return p;
+  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
 
 /**
  * Manager dashboard — the Double-style "every client, preparer, status" view
@@ -199,6 +219,8 @@ export function ManagerDashboard({
                   <th className="py-2 pr-3 font-bold">Client</th>
                   <th className="py-2 pr-3 font-bold">Preparer</th>
                   <th className="py-2 pr-3 font-bold">Status</th>
+                  <th className="py-2 pr-3 font-bold">Month-end</th>
+                  <th className="py-2 pr-3 font-bold">Last closed</th>
                   <th className="py-2 pr-3 font-bold text-right">Actions</th>
                 </tr>
               </thead>
@@ -252,6 +274,22 @@ export function ManagerDashboard({
                         </span>
                       )}
                     </td>
+                    <td className="py-2.5 pr-3">
+                      {r.current_month_end ? (
+                        <span className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full ${ME_META[r.current_month_end].tone}`}>
+                          {ME_META[r.current_month_end].label}
+                        </span>
+                      ) : (
+                        <span className="text-ink-light text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 pr-3 whitespace-nowrap">
+                      {r.last_month_end_closed ? (
+                        <span className="text-xs text-ink-slate">{fmtPeriod(r.last_month_end_closed)}</span>
+                      ) : (
+                        <span className="text-ink-light text-xs">—</span>
+                      )}
+                    </td>
                     <td className="py-2.5 pr-1 text-right whitespace-nowrap">
                       {busy === r.id && <Loader2 size={13} className="animate-spin text-teal inline mr-2" />}
                       {/* Defer BS — while in the cleanup phase and not already deferred */}
@@ -291,7 +329,7 @@ export function ManagerDashboard({
                   </tr>
                   {expanded.has(r.id) && (
                     <tr className="bg-slate-50/60">
-                      <td colSpan={4} className="px-4 py-3">
+                      <td colSpan={6} className="px-4 py-3">
                         <Checklist steps={r.steps} />
                       </td>
                     </tr>
@@ -299,7 +337,7 @@ export function ManagerDashboard({
                   </Fragment>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={4} className="py-8 text-center text-ink-light text-sm italic">No clients match.</td></tr>
+                  <tr><td colSpan={6} className="py-8 text-center text-ink-light text-sm italic">No clients match.</td></tr>
                 )}
               </tbody>
             </table>
