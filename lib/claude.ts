@@ -110,6 +110,23 @@ Common mappings you must apply:
   "Retirement", "401k", "RRSP", "SEP IRA"         → "Retirement Contributions – Owner"
   "Income", "Revenue", "Sales" (painting)         → "Painting Revenue"
   "Remodel", "Renovation Revenue"                 → "Remodeling Revenue"
+  "Owner Salary", "Owner Wages", "Owner Pay", "Officer Salary", "Officer Compensation" → "Owner's Salary / Wages"
+  "Owner Draw", "Owner's Draw", "Owner Distribution", "Distributions", "Member Draw", "Shareholder Distribution" → "Owner's Draw"
+
+═══ OWNER PAY — SPLIT DRAW FROM SALARY (CRITICAL) ═══
+Owner compensation has two completely different treatments. NEVER conflate them:
+  • Owner SALARY / WAGES (owner is on payroll) = operating EXPENSE, above the
+    net-profit line (a fixed cost). Map to "Owner's Salary / Wages".
+  • Owner DRAW / DISTRIBUTION (owner taking profit out) = EQUITY, below the
+    net-profit line. It is NOT an expense. Map to "Owner's Draw".
+Hard rules:
+  - NEVER map a draw / distribution to an expense account.
+  - NEVER map salary / wages to equity.
+  - If an account COMBINES them (e.g. "Owner Draw / Salary", a generic "Owner Pay"),
+    OR you can see both kinds of activity in one account, OR a draw is sitting in
+    expenses / salary is sitting in equity → set action "flag" with flag_reason:
+    "Split owner draw (equity) from owner salary (expense) and reclassify the transactions."
+    This must be flagged on every cleanup so it gets reclassified going forward.
 
 ═══ DELETE — ZERO TRANSACTIONS ONLY ═══
 DELETE if ALL of these are true:
@@ -125,7 +142,9 @@ Known QBO defaults to DELETE (when 0 transactions):
 
 ═══ FLAG — NARROW LIST ONLY ═══
 Only FLAG these specific situations:
-  1. Account name contains: "Owner", "Draw", "Distribution", "Personal", "Note Payable", "Shareholder Loan"
+  1. Account name contains: "Personal", "Note Payable", "Shareholder Loan" (genuine
+     equity / related-party items). For "Owner"/"Draw"/"Distribution"/salary, apply the
+     OWNER PAY rule above (map salary→expense, draw→equity; flag only the mixed case).
   2. Account type is Equity or Liability AND CurrentBalance is not zero
   3. Account has transactions AND you genuinely cannot determine any master account mapping
   4. Account appears to be a duplicate of another client account mapping to the same master (rare — system handles this)
@@ -551,6 +570,8 @@ ${JSON.stringify(params.recentTransactions.slice(0, 20), null, 2)}
 
 AVAILABLE MASTER ACCOUNTS:
 ${params.masterCOA.filter(m => !m.is_parent).map(m => m.account_name).join(', ')}
+
+OWNER-PAY RULE (critical): Owner salary/wages = operating EXPENSE (above net profit) → "Owner's Salary / Wages". Owner draw/distribution = EQUITY (below net profit, NOT an expense) → "Owner's Draw". If the transactions mix both, recommend "manual_split" and note the draws must be reclassified to equity and the salary to expense.
 
 Provide your recommendation as JSON:
 {
