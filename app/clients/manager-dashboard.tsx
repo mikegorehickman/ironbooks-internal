@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   LayoutGrid, ChevronDown, ChevronRight, ExternalLink, Loader2, Search, SkipForward, CalendarCheck,
-  CheckCircle2, Circle, AlertTriangle,
+  CheckCircle2, Circle, AlertTriangle, PlayCircle,
 } from "lucide-react";
 import { LIFECYCLE_META, type LifecycleStatus } from "@/lib/client-lifecycle";
 
@@ -29,6 +29,8 @@ export interface ManagerRow {
   current_month_end_period: string | null;
   /** latest fully-closed period, "YYYY-MM", or null if none closed yet */
   last_month_end_closed: string | null;
+  /** id of a reclass job paused on a human Continue gate, or null */
+  paused_job_id: string | null;
   /** lifecycle checklist for the row-expand drawer */
   steps: {
     qbo: boolean; coa: boolean; reclass: boolean; rules: boolean;
@@ -274,6 +276,15 @@ export function ManagerDashboard({
                         >
                           <AlertTriangle size={9} /> BS owed
                         </span>
+                      )}
+                      {r.paused_job_id && (
+                        <Link
+                          href={`/reclass/${r.paused_job_id}/review`}
+                          className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 hover:bg-purple-200"
+                          title="A reclass job is paused waiting for a Continue click — click to resume"
+                        >
+                          <PlayCircle size={9} /> Needs Continue
+                        </Link>
                       )}
                     </td>
                     <td className="py-2.5 pr-3 whitespace-nowrap">

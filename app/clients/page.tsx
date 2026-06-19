@@ -374,10 +374,14 @@ export default async function ClientsPage() {
   const activeReclass = new Set<string>();
   const completeReclass = new Set<string>();
   const hasBankRules = new Set<string>();
+  // Reclass jobs sitting on a human-gated pause (web-search / chunked-AI
+  // Continue) → surface a "Needs Continue" flag so they don't sit unnoticed.
+  const PAUSED = ["web_search_paused", "ai_paused"];
+  const pausedReclassJobByClient = new Map<string, string>(); // client → newest paused job id
   if (allIds.length) {
     const [coaJobsAll, reclassJobsAll, bankRulesAll] = await Promise.all([
       service.from("coa_jobs").select("client_link_id, status").in("client_link_id", allIds),
-      service.from("reclass_jobs").select("client_link_id, status").in("client_link_id", allIds),
+      service.from("reclass_jobs").select("id, client_link_id, status, updated_at").in("client_link_id", allIds).order("updated_at", { ascending: false }),
       service.from("bank_rules").select("client_link_id").in("client_link_id", allIds),
     ]);
     for (const r of (bankRulesAll.data as any[]) || []) {
@@ -392,6 +396,11 @@ export default async function ClientsPage() {
       if (!j.client_link_id) continue;
       if (j.status === "complete") completeReclass.add(j.client_link_id);
       else if (ACTIVE.includes(j.status)) activeReclass.add(j.client_link_id);
+      // Rows are ordered newest-first, so the first paused job we see per
+      // client is the most recent one to resume.
+      if (PAUSED.includes(j.status) && !pausedReclassJobByClient.has(j.client_link_id)) {
+        pausedReclassJobByClient.set(j.client_link_id, j.id);
+      }
     }
   }
 
@@ -480,6 +489,8 @@ export default async function ClientsPage() {
         current_month_end: c.daily_recon_enabled ? (currentMEById.get(c.id) ?? "not_started") : null,
         current_month_end_period: c.daily_recon_enabled ? currentPeriod : null,
         last_month_end_closed: lastClosedById.get(c.id) ?? null,
+        // A reclass job paused on a human-gated Continue (web-search / chunked AI).
+        paused_job_id: pausedReclassJobByClient.get(c.id) ?? null,
         // Lifecycle checklist (row-expand drawer).
         steps: {
           qbo: !!c.qbo_connected,
