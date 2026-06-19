@@ -252,11 +252,25 @@ export async function fetchProfitAndLoss(
     0;
   const totalExpenses =
     flat.get("total expenses") ?? flat.get("total expense") ?? 0;
-  const netIncome =
-    flat.get("net income") ??
-    flat.get("net loss") ??
-    flat.get("net earnings") ??
-    0;
+  // Net income — compute it from the leaf accounts rather than trusting QBO's
+  // "Net Income" summary row. On a P&L that has Cost of Goods Sold / Other
+  // Income / Other Expense sections, QBO's report doesn't always emit the
+  // bottom-line row our matcher expected, so net income silently fell back to
+  // 0 (showed $0 even with real income + expenses — BMD Painting: $228k income,
+  // $155k COGS, $79k expenses, net "$0"). Summing the leaves we already display
+  // (revenue groups add, COGS/Expenses/Other Expense subtract) guarantees the
+  // bottom line reconciles with the sections on screen. Prefer QBO's own row
+  // only when it's actually present and non-zero.
+  let revenueSum = 0;
+  let expenseSum = 0;
+  for (const it of items) {
+    if (/income|revenue/i.test(it.group)) revenueSum += it.amount;
+    else expenseSum += it.amount;
+  }
+  const computedNet = revenueSum - expenseSum;
+  const reportedNet =
+    flat.get("net income") ?? flat.get("net loss") ?? flat.get("net earnings") ?? null;
+  const netIncome = reportedNet != null && Math.abs(reportedNet) > 0.005 ? reportedNet : computedNet;
 
   // Match meal/entertainment accounts by common name variants
   const mealPatterns = [
