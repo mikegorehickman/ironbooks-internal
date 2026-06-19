@@ -169,6 +169,94 @@ export async function sendResendEmail(params: {
   }
 }
 
+/**
+ * Branded portal-invite / magic-link email.
+ *
+ * The portal invite used to ride Supabase's built-in auth email (the bare
+ * default "Invite user" / "Magic Link" template configured in the Supabase
+ * dashboard). That's the first thing a brand-new client ever sees from us, and
+ * it looked nothing like SNAP. Instead, the invite route now GENERATES the
+ * sign-in link (admin.generateLink, which returns the link WITHOUT sending an
+ * email) and hands it here so we wrap it in the SNAP brand and send it
+ * ourselves via Resend — the same branded sender every other client email
+ * already uses. Best-effort: returns sendResendEmail's boolean so the caller
+ * can warn the admin if the link was generated but the email didn't go out.
+ */
+export async function sendPortalInviteEmail(params: {
+  to: string;
+  fullName: string;
+  clientName: string;
+  /** The Supabase action_link from admin.generateLink — clicking it signs the
+   *  client in via /auth/callback. */
+  actionLink: string;
+  /** Resend of an existing client's link vs. a first-time invite — only changes
+   *  the wording. */
+  isResend?: boolean;
+}): Promise<boolean> {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const firstName = (params.fullName || "").trim().split(/\s+/)[0] || "there";
+  const heading = params.isResend
+    ? "Here's your new sign-in link"
+    : "You're invited to your Ironbooks portal";
+  const introHtml = params.isResend
+    ? `Here's a fresh, secure link to sign in to your Ironbooks portal for <strong>${esc(
+        params.clientName
+      )}</strong>.`
+    : `Your Ironbooks bookkeeping team has set up a secure online portal for <strong>${esc(
+        params.clientName
+      )}</strong> — your books, live. Set up your access and take a look whenever you like.`;
+  const cta = params.isResend ? "Sign in to your portal" : "Set up your access";
+
+  const text = [
+    `Hi ${firstName},`,
+    ``,
+    params.isResend
+      ? `Here's a fresh link to sign in to your Ironbooks portal for ${params.clientName}.`
+      : `Your Ironbooks bookkeeping team has set up a secure online portal for ${params.clientName} — your books, live.`,
+    ``,
+    `${cta}: ${params.actionLink}`,
+    ``,
+    `This link is personal to you — please don't forward it, and it expires after a little while for your security. If it stops working, ask your bookkeeper to re-send it.`,
+  ].join("\n");
+
+  const html = `
+<div style="background:#F4F5F7;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;">
+    <div style="background:#0F1F2E;padding:22px 28px;">
+      <div style="color:#ffffff;font-size:18px;font-weight:700;">Ironbooks</div>
+      <div style="color:#8CD3CC;font-size:12px;margin-top:2px;">SNAP — your books, live</div>
+    </div>
+    <div style="padding:28px;">
+      <h2 style="margin:0 0 14px;color:#0F1F2E;font-size:18px;">${heading}</h2>
+      <p style="color:#33414E;font-size:14px;line-height:1.6;margin:0 0 8px;">Hi ${esc(
+        firstName
+      )},</p>
+      <p style="color:#33414E;font-size:14px;line-height:1.6;margin:0 0 22px;">${introHtml}</p>
+      <a href="${params.actionLink}" style="display:inline-block;background:#1A9B8F;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:12px 26px;border-radius:8px;">${cta}</a>
+      <p style="color:#8A94A0;font-size:12px;margin:24px 0 0;line-height:1.55;">
+        This link is personal to you — please don't forward it, and it expires after a little while for your security.<br/>
+        If the button doesn't work, copy and paste this into your browser:<br/>
+        <a href="${params.actionLink}" style="color:#1A9B8F;word-break:break-all;">${params.actionLink}</a>
+      </p>
+    </div>
+  </div>
+  <div style="max-width:560px;margin:12px auto 0;text-align:center;color:#9AA3AD;font-size:11px;">
+    Sent by your Ironbooks bookkeeping team for ${esc(params.clientName)}.
+  </div>
+</div>`;
+
+  return sendResendEmail({
+    to: [params.to],
+    replyTo: process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com",
+    subject: params.isResend
+      ? "Your Ironbooks portal sign-in link"
+      : "You're invited to your Ironbooks portal",
+    text,
+    html,
+  });
+}
+
 export type MessageEmailDelivery =
   | { sent: true; recipients: number }
   | { sent: false; reason: "no_portal_user" | "no_active_email" | "send_failed" | "error" };

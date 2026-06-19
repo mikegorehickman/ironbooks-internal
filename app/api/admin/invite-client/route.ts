@@ -1,4 +1,5 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { sendPortalInviteEmail } from "@/lib/client-comms";
 import { NextResponse } from "next/server";
 
 /**
@@ -83,6 +84,28 @@ export async function POST(request: Request) {
   let userId: string;
   let isResend = false;
 
+  const clientName = (client as any).client_name || "your business";
+  const redirectTo = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`;
+
+  // Generate a sign-in link for an auth user we know already exists (resend /
+  // ghost recovery). magiclink covers confirmed users; invite is the fallback
+  // for a not-yet-confirmed account. Returns the action_link or null. NOTE:
+  // generateLink does NOT send an email — we send our own branded one.
+  const linkForExistingUser = async (): Promise<string | null> => {
+    const ml = await (service as any).auth.admin.generateLink({
+      type: "magiclink",
+      email,
+      options: { redirectTo },
+    });
+    if (ml?.data?.properties?.action_link) return ml.data.properties.action_link;
+    const inv = await (service as any).auth.admin.generateLink({
+      type: "invite",
+      email,
+      options: { data: { full_name: fullName, role: "client" }, redirectTo },
+    });
+    return inv?.data?.properties?.action_link || null;
+  };
+
   if (existing) {
     const existingRole = (existing as any).role;
 
@@ -116,26 +139,20 @@ export async function POST(request: Request) {
 
           // If this is a silent-create, we're done with the auth side —
           // the auth.users row already exists. Skip to the mapping insert.
-          // For invite path, we still need to send the magic link.
+          // For invite path, generate a sign-in link and send our own branded
+          // email (generateLink does not send one).
           if (sendInvite) {
-            const { error: inviteErr } = await (service as any).auth.admin.inviteUserByEmail(
-              email,
-              {
-                data: { full_name: fullName, role: "client" },
-                redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`,
-              }
-            );
-            if (inviteErr) {
-              // Best-effort fallback — generateLink works on already-confirmed users
-              await (service as any).auth.admin.generateLink({
-                type: "magiclink",
-                email,
-                options: {
-                  redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`,
-                },
+            const link = await linkForExistingUser();
+            if (link) {
+              await sendPortalInviteEmail({
+                to: email,
+                fullName,
+                clientName,
+                actionLink: link,
+                isResend: false, // it's a fresh-from-the-user's-POV invite
               });
             }
-            isResend = false; // it's a fresh-from-the-user's-POV invite
+            isResend = false;
           }
           // Fall through to the mapping upsert below
         } else {
@@ -166,33 +183,23 @@ export async function POST(request: Request) {
       }
 
       // For silent re-creates, we just want to re-ensure their client_users
-      // mapping is active — no email. Skip the inviteUserByEmail entirely.
+      // mapping is active — no email. Skip the link generation entirely.
       if (sendInvite) {
-        // Send a fresh magic link. inviteUserByEmail on an already-confirmed
-        // auth user fails with "already registered" — fall back to
-        // generateLink which works on confirmed users.
-        const { error: inviteErr } = await (service as any).auth.admin.inviteUserByEmail(
-          email,
-          {
-            data: { full_name: fullName, role: "client" },
-            redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`,
-          }
-        );
-        if (inviteErr) {
-          const { error: linkErr } = await (service as any).auth.admin.generateLink({
-            type: "magiclink",
-            email,
-            options: {
-              redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`,
-            },
-          });
-          if (linkErr) {
-            return NextResponse.json(
-              { error: `Resend failed: ${inviteErr.message}` },
-              { status: 500 }
-            );
-          }
+        // Generate a fresh sign-in link and send our own branded email.
+        const link = await linkForExistingUser();
+        if (!link) {
+          return NextResponse.json(
+            { error: "Resend failed: could not generate a sign-in link" },
+            { status: 500 }
+          );
         }
+        await sendPortalInviteEmail({
+          to: email,
+          fullName,
+          clientName,
+          actionLink: link,
+          isResend: true,
+        });
       }
     } // close the "existing user IS already a client" else branch
   } else {
@@ -224,11 +231,15 @@ export async function POST(request: Request) {
       /already.*registered|already.*been.*registered|user.*already.*exists/i.test(msg);
 
     if (sendInvite) {
-      const { data, error: inviteErr } = await (service as any).auth.admin
-        .inviteUserByEmail(email, {
-          data: { full_name: fullName, role: "client" },
-          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`,
-        });
+      // generateLink type:"invite" CREATES the auth user and returns the
+      // sign-in link WITHOUT sending Supabase's bare default email — we send
+      // our own branded one below.
+      const { data, error: inviteErr } = await (service as any).auth.admin.generateLink({
+        type: "invite",
+        email,
+        options: { data: { full_name: fullName, role: "client" }, redirectTo },
+      });
+      let inviteLink: string | null = data?.properties?.action_link || null;
       if (inviteErr || !data?.user) {
         if (inviteErr && isAlreadyRegistered(inviteErr.message)) {
           // Recover — auth user exists, just couldn't re-invite
@@ -240,14 +251,8 @@ export async function POST(request: Request) {
             );
           }
           authResponse = recovered;
-          // Best-effort: re-send the magic link via generateLink (works on confirmed users)
-          await (service as any).auth.admin.generateLink({
-            type: "magiclink",
-            email,
-            options: {
-              redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`,
-            },
-          });
+          // Re-issue a magic link for the branded email (works on confirmed users)
+          inviteLink = await linkForExistingUser();
         } else {
           return NextResponse.json(
             { error: inviteErr?.message || "Invite failed" },
@@ -256,6 +261,15 @@ export async function POST(request: Request) {
         }
       } else {
         authResponse = data;
+      }
+      if (inviteLink) {
+        await sendPortalInviteEmail({
+          to: email,
+          fullName,
+          clientName,
+          actionLink: inviteLink,
+          isResend: false,
+        });
       }
     } else {
       const { data, error: createErr } = await (service as any).auth.admin.createUser({
