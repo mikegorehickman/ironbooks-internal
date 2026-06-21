@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   Home, Wallet, Receipt, MessageSquare,
-  GraduationCap, Settings, FileCheck2, Mail, BookOpen, Tags, CreditCard,
+  GraduationCap, Settings, FileCheck2, Mail, BookOpen, Tags, CreditCard, Briefcase,
 } from "lucide-react";
 import { MessagesNavLink } from "./messages-nav-link";
 import { FinancialStatementsNav } from "./financial-statements-nav";
@@ -140,6 +140,7 @@ export default async function PortalLayout({ children }: { children: React.React
             <FinancialStatementsNav />
             <NavLink href="/portal/whos-paying" icon={Wallet} label="Who owes you" />
             <NavLink href="/portal/whats-due" icon={Receipt} label="What you owe" />
+            <NavLink href="/portal/job-costing" icon={Briefcase} label="Job Costing" badge="NEW" />
             <NavLink href="/portal/cleanup-reports" icon={FileCheck2} label="Cleanup Reports" />
             {/* Live: polls unread count, red pill + chime on new messages */}
             <MessagesNavLink initialCount={unreadMessages} />
