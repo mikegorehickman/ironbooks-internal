@@ -54,6 +54,34 @@ export function MarkdownText({ children }: { children: string }) {
             </ul>
           );
         }
+        if (block.type === "table") {
+          return (
+            <div key={i} className="my-2 overflow-x-auto">
+              <table className="w-full border-collapse text-[13px] text-left">
+                <thead>
+                  <tr>
+                    {block.headers.map((h, j) => (
+                      <th key={j} className="border-b border-slate-300 px-2.5 py-1.5 font-semibold text-navy whitespace-nowrap">
+                        <Inline>{h}</Inline>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, r) => (
+                    <tr key={r} className="border-b border-slate-100">
+                      {row.map((cell, j) => (
+                        <td key={j} className="px-2.5 py-1.5 align-top">
+                          <Inline>{cell}</Inline>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
         // Paragraph — preserve internal newlines
         return (
           <p key={i} className="my-1 whitespace-pre-wrap">
@@ -70,7 +98,23 @@ export function MarkdownText({ children }: { children: string }) {
 type Block =
   | { type: "p"; text: string }
   | { type: "ol"; items: string[] }
-  | { type: "ul"; items: string[] };
+  | { type: "ul"; items: string[] }
+  | { type: "table"; headers: string[]; rows: string[][] };
+
+/** Split a "| a | b |" row into trimmed cells (drop the leading/trailing empties). */
+function splitRow(line: string): string[] {
+  const cells = line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  return cells;
+}
+/** A GFM separator row: |---|:--:|---| (dashes/colons/pipes only, at least one dash). */
+function isTableSeparator(line: string): boolean {
+  const t = line.trim();
+  return /\|/.test(t) && /-/.test(t) && /^\|?[\s:|-]+\|?$/.test(t);
+}
+/** A table-ish row: starts/ends with a pipe or contains one. */
+function isTableRow(line: string): boolean {
+  return line.trim().includes("|");
+}
 
 function parseBlocks(input: string): Block[] {
   const lines = input.split("\n");
@@ -92,7 +136,28 @@ function parseBlocks(input: string): Block[] {
     }
   };
 
-  for (const line of lines) {
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+
+    // Table: a row immediately followed by a |---|---| separator. Consume the
+    // header, the separator, and every following pipe row.
+    if (isTableRow(line) && li + 1 < lines.length && isTableSeparator(lines[li + 1])) {
+      flushParagraph();
+      flushList();
+      const headers = splitRow(line);
+      const rows: string[][] = [];
+      let r = li + 2;
+      for (; r < lines.length && isTableRow(lines[r]) && lines[r].trim() !== ""; r++) {
+        const cells = splitRow(lines[r]);
+        // Pad/truncate to the header width so the grid stays rectangular.
+        while (cells.length < headers.length) cells.push("");
+        rows.push(cells.slice(0, headers.length));
+      }
+      blocks.push({ type: "table", headers, rows });
+      li = r - 1;
+      continue;
+    }
+
     const olMatch = line.match(/^\s*(\d+)\.\s+(.*)$/);
     const ulMatch = line.match(/^\s*[-*]\s+(.*)$/);
 
