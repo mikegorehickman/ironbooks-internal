@@ -133,6 +133,38 @@ export function ReclassDiscoveryPending({
     return () => { cancelled = true; };
   }, [jobId, router]);
 
+  // While parked at a Continue gate (ai_paused / web_search_paused), the main
+  // poll loop stops — so if the job is finished elsewhere (another session, a
+  // background run, the manager's "Get unstuck"), this page can sit on a stale
+  // "Start categorization" gate. Keep a slow heartbeat + a focus/visibility
+  // re-check so it auto-advances to review (or execute) once the job moves on.
+  useEffect(() => {
+    if (status !== "ai_paused" && status !== "web_search_paused") return;
+    let stop = false;
+    async function recheck() {
+      if (stop) return;
+      try {
+        const r = await fetch(`/api/reclass/${jobId}/status`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (stop) return;
+        if (d.status === "in_review") { window.location.reload(); return; }
+        if (d.status === "complete") { window.location.href = `/reclass/${jobId}/execute`; return; }
+        if (d.status !== status) setStatus(d.status); // moved on elsewhere (e.g. executing) — re-render
+      } catch { /* transient — next tick retries */ }
+    }
+    const iv = setInterval(recheck, 15000);
+    const onWake = () => recheck();
+    window.addEventListener("focus", onWake);
+    document.addEventListener("visibilitychange", onWake);
+    return () => {
+      stop = true;
+      clearInterval(iv);
+      window.removeEventListener("focus", onWake);
+      document.removeEventListener("visibilitychange", onWake);
+    };
+  }, [status, jobId]);
+
   async function cancelJob() {
     if (!confirm("Cancel this job? It will be marked as failed and you can start a new one.")) return;
     setCancelling(true);
