@@ -13,6 +13,10 @@
       "schedule": "0 7 * * *"
     },
     {
+      "path": "/api/cron/backfill-profiles",
+      "schedule": "0 8 * * *"
+    },
+    {
       "path": "/api/cron/month-end-reminder",
       "schedule": "0 14 1 * *"
     }
