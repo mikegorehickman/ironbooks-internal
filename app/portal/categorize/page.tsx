@@ -62,22 +62,38 @@ export default async function CategorizePage() {
     }
   }
 
-  // Dropdown options from the client's LIVE chart of accounts.
+  // TRANSFER options stay from the client's LIVE QBO accounts — their actual
+  // bank / credit-card accounts (you can't standardize someone's bank list).
   let transferOptions: AccountOption[] = [];
-  let categoryOptions: AccountOption[] = [];
   let accountsError = false;
   try {
     const accounts = await fetchAllAccounts(ctx.qboRealmId, ctx.accessToken);
-    const active = accounts.filter((a) => a.Active !== false);
-    transferOptions = active
-      .filter((a) => a.AccountType === "Bank" || a.AccountType === "Credit Card")
-      .map((a) => ({ name: a.Name, fqn: a.FullyQualifiedName || a.Name }));
-    categoryOptions = active
-      .filter((a) => a.Classification === "Expense" || a.Classification === "Revenue")
-      .sort((a, b) => (a.FullyQualifiedName || a.Name).localeCompare(b.FullyQualifiedName || b.Name))
+    transferOptions = accounts
+      .filter((a) => a.Active !== false && (a.AccountType === "Bank" || a.AccountType === "Credit Card"))
       .map((a) => ({ name: a.Name, fqn: a.FullyQualifiedName || a.Name }));
   } catch {
-    accountsError = true; // dropdowns degrade to "Other + note" only
+    accountsError = true; // transfer dropdown degrades to "Other + note" only
+  }
+
+  // BUSINESS CATEGORIES come from the IronBooks STANDARDIZED master COA — NOT
+  // the client's raw QuickBooks accounts. Clients only ever pick from our
+  // approved P&L categories for their jurisdiction.
+  let categoryOptions: AccountOption[] = [];
+  try {
+    const { data: cl } = await service.from("client_links").select("jurisdiction").eq("id", ctx.clientLinkId).single();
+    const jur = (cl as any)?.jurisdiction || null;
+    let mq = service.from("master_coa").select("account_name, qbo_account_type, section, is_parent").eq("is_parent", false);
+    if (jur) mq = mq.eq("jurisdiction", jur);
+    const { data: mc } = await mq;
+    const PL = new Set(["revenue", "cogs", "operating_expense", "other_income", "other_expense"]);
+    const seen = new Set<string>();
+    categoryOptions = ((mc as any[]) || [])
+      .filter((a) => PL.has(a.section) || ["Expense", "Income", "Revenue", "Cost of Goods Sold", "Other Income", "Other Expense"].includes(a.qbo_account_type))
+      .map((a) => ({ name: a.account_name as string, fqn: a.account_name as string }))
+      .filter((o) => (seen.has(o.name) ? false : (seen.add(o.name), true)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    // leave categoryOptions empty — UI degrades to "Other + note"
   }
 
   return (
