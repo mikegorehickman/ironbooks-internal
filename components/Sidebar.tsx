@@ -6,7 +6,7 @@ import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
   FileSpreadsheet, Wallet, Volume2, VolumeX, HeartPulse, Gauge, CalendarCheck,
-  ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap, Settings as SettingsIcon, Mail, Inbox,
+  ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap, Settings as SettingsIcon, Mail, Inbox, ListTodo,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -18,6 +18,7 @@ import { isMuted, setMuted, onMutedChange, playSound } from "@/lib/sounds";
 const dailyNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
   { href: "/today", label: "Today", icon: Sun },
   { href: "/inbox", label: "Inbox", icon: Inbox },
+  { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/onboarding", label: "Onboarding", icon: UserPlus, senior: true },
   { href: "/cleanup", label: "Cleanup", icon: ClipboardCheck },
   { href: "/production", label: "Production", icon: ListChecks },
