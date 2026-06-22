@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { wrapBrandedEmail } from "@/lib/bulk-email";
+import { renderUserSignature, type SignatureUser } from "@/lib/user-signature";
 import {
   Mail, Send, Loader2, Search, Users, AlertTriangle, CheckCircle2, Save, FileText, Clock,
 } from "lucide-react";
@@ -31,7 +32,7 @@ function textToHtml(t: string): string {
   ).join("");
 }
 
-export function BulkEmailClient({ senderEmail, senderName }: { senderEmail: string; senderName: string }) {
+export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { senderEmail: string; senderName: string; senderSignature: SignatureUser }) {
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [loading, setLoading] = useState(true);
   const [kind, setKind] = useState<Kind>("normal");
@@ -44,6 +45,7 @@ export function BulkEmailClient({ senderEmail, senderName }: { senderEmail: stri
   const [bodyText, setBodyText] = useState("");
   const [replyMode, setReplyMode] = useState<"bookkeeper" | "support">("bookkeeper");
   const [alsoPortal, setAlsoPortal] = useState(true);
+  const [includeSignature, setIncludeSignature] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -117,7 +119,7 @@ export function BulkEmailClient({ senderEmail, senderName }: { senderEmail: stri
     setBusy("test"); setMsg(null);
     const res = await fetch("/api/admin/bulk-email/send", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, body_html: textToHtml(bodyText), kind, test_email: senderEmail }),
+      body: JSON.stringify({ subject, body_html: textToHtml(bodyText), kind, test_email: senderEmail, include_signature: includeSignature }),
     });
     setBusy(null);
     setMsg(res.ok ? { tone: "ok", text: `Test sent to ${senderEmail}.` } : { tone: "err", text: "Test send failed." });
@@ -131,7 +133,7 @@ export function BulkEmailClient({ senderEmail, senderName }: { senderEmail: stri
     setBusy("send"); setMsg(null);
     const res = await fetch("/api/admin/bulk-email/send", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, body_html: textToHtml(bodyText), kind, client_ids: selectedEligible, also_portal: alsoPortal, reply_to_mode: replyMode }),
+      body: JSON.stringify({ subject, body_html: textToHtml(bodyText), kind, client_ids: selectedEligible, also_portal: alsoPortal, reply_to_mode: replyMode, include_signature: includeSignature }),
     });
     const d = await res.json();
     setBusy(null);
@@ -215,6 +217,7 @@ export function BulkEmailClient({ senderEmail, senderName }: { senderEmail: stri
           <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={9} placeholder={"Write your message…\n\nBlank line = new paragraph. **bold** for emphasis.\nMerge fields: {{first_name}}, {{business_name}}"} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-y font-mono" />
           <div className="flex items-center gap-3 flex-wrap text-xs text-ink-slate">
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={alsoPortal} onChange={(e) => setAlsoPortal(e.target.checked)} className="rounded border-gray-300 text-teal" /> Also post to portal inbox</label>
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={includeSignature} onChange={(e) => setIncludeSignature(e.target.checked)} className="rounded border-gray-300 text-teal" /> Include my signature</label>
             <label className="inline-flex items-center gap-1.5">Replies to:
               <select value={replyMode} onChange={(e) => setReplyMode(e.target.value as any)} className="rounded-md border border-gray-200 px-1.5 py-0.5"><option value="bookkeeper">Assigned preparer</option><option value="support">admin@ironbooks.com</option></select>
             </label>
@@ -226,7 +229,8 @@ export function BulkEmailClient({ senderEmail, senderName }: { senderEmail: stri
                 __html: wrapBrandedEmail({
                   bodyHtml: textToHtml(bodyText || "Your message goes here. The Ironbooks header, logo, and footer are added automatically.")
                     .replace(/\{\{\s*(contact\.)?first_?name\s*\}\}/gi, "Daniel")
-                    .replace(/\{\{\s*(client_?name|business_?name|company_?name)\s*\}\}/gi, "Acme Painting"),
+                    .replace(/\{\{\s*(client_?name|business_?name|company_?name)\s*\}\}/gi, "Acme Painting")
+                    + (includeSignature ? renderUserSignature({ ...senderSignature, signature_enabled: true }) : ""),
                   footerHtml: kind === "normal"
                     ? "You're receiving this because you're an Ironbooks client. <span style=\"color:#1F5D58;font-weight:600;\">Unsubscribe</span> from updates like this."
                     : kind === "resubscribe"

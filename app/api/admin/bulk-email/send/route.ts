@@ -6,6 +6,7 @@ import {
   type EmailKind, type BulkRecipient,
 } from "@/lib/bulk-email";
 import { sendResendEmail } from "@/lib/client-comms";
+import { renderUserSignature } from "@/lib/user-signature";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -29,21 +30,31 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const service = createServiceSupabase();
-  const { data: actor } = await service.from("users").select("role, full_name").eq("id", user.id).single();
+  const { data: actor } = await service.from("users")
+    .select("role, full_name, email, title, phone, booking_url, avatar_url")
+    .eq("id", user.id).single();
   if (!["admin", "lead"].includes((actor as any)?.role || "")) {
     return NextResponse.json({ error: "Senior access required" }, { status: 403 });
   }
 
   const body = await request.json().catch(() => ({} as any));
   const subject = (body.subject || "").trim();
-  const bodyHtml = (body.body_html || "").trim();
+  const rawBody = (body.body_html || "").trim();
   const kind = (body.kind || "normal") as EmailKind;
   const replyMode = body.reply_to_mode === "support" ? "support" : "bookkeeper";
   const alsoPortal = body.also_portal === true;
-  if (!subject || !bodyHtml) {
+  if (!subject || !rawBody) {
     return NextResponse.json({ error: "Subject and body are required" }, { status: 400 });
   }
   const appBaseUrl = new URL(request.url).origin;
+
+  // Append the sender's branded signature when requested. The composer toggle
+  // is authoritative for this send, so render even if their default is off.
+  const a = (actor as any) || {};
+  const signature = body.include_signature
+    ? renderUserSignature({ full_name: a.full_name, email: a.email, title: a.title, phone: a.phone, booking_url: a.booking_url, avatar_url: a.avatar_url, signature_enabled: true })
+    : "";
+  const bodyHtml = rawBody + signature;
 
   // Test send — single email, no campaign, no consent logic.
   if (body.test_email) {
@@ -85,7 +96,7 @@ export async function POST(request: Request) {
   const { data: campaign, error: cErr } = await service
     .from("bulk_email_campaigns")
     .insert({
-      subject, body_html: bodyHtml, kind, reply_to_mode: replyMode,
+      subject, body_html: rawBody, kind, reply_to_mode: replyMode,
       created_by: user.id, status: "sending", recipient_count: recips.length,
     } as any)
     .select("id")
@@ -123,7 +134,7 @@ export async function POST(request: Request) {
             try {
               await (svc as any).from("client_communications").insert({
                 client_link_id: clientLinkId, direction: "to_client", kind: "notification",
-                subject, body: htmlToText(applyMergeFields(bodyHtml, { firstName: null, businessName: null })),
+                subject, body: htmlToText(applyMergeFields(rawBody, { firstName: null, businessName: null })),
                 sender_user_id: user.id,
               });
             } catch { /* portal mirror best-effort */ }
