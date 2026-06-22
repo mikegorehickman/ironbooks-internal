@@ -69,7 +69,7 @@ export function WhosPayingClient({
   ) {
     if (
       !confirm(
-        `Hide invoice ${inv.num} ($${inv.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) from your A/R?\n\nUse this when it isn't actually owed (duplicate, already paid, not yours). Your bookkeeper is notified and will clear it in QuickBooks properly. You can restore it anytime from the "Dismissed" list at the bottom of this page.`
+        `Dismiss invoice ${inv.num} ($${inv.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) from your A/R?\n\nUse this when it isn't actually owed (duplicate, already paid, not yours). Your bookkeeper is notified and will clear it in QuickBooks properly. You can restore it anytime from the "Dismissed" list at the bottom of this page.`
       )
     )
       return;
@@ -449,12 +449,14 @@ function CustomerCardView({
                 onClick={() => onDismissInvoice(inv)}
                 disabled={busyInvoice !== null}
                 title="Not actually owed? Dismiss it — your bookkeeper is notified and it stays hidden from your A/R"
-                className="ml-1.5 p-0.5 rounded text-ink-light opacity-40 group-hover:opacity-100 hover:text-red-700 hover:bg-red-50 transition-all disabled:opacity-30"
+                className="ml-2 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border border-slate-200 text-ink-slate hover:text-red-700 hover:border-red-300 hover:bg-red-50 transition-all disabled:opacity-40"
               >
                 {busyInvoice === inv.doc_id ? (
                   <Loader2 size={11} className="animate-spin" />
                 ) : (
-                  <EyeOff size={11} />
+                  <>
+                    <EyeOff size={11} /> Dismiss
+                  </>
                 )}
               </button>
             </span>

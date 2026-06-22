@@ -27,6 +27,45 @@ const CATEGORY_LABELS: Record<string, { label: string; subtitle: string }> = {
   general: { label: "Other", subtitle: "" },
 };
 
+// Per-category accent glow for the branded thumbnail. Base is always the SNAP
+// navy→teal gradient; the glow tints each category differently for variety.
+const CATEGORY_ACCENT: Record<string, string> = {
+  fundamentals: "rgba(26,155,143,0.55)",
+  quickstart: "rgba(245,158,11,0.45)",
+  statements: "rgba(59,130,246,0.45)",
+  cashflow: "rgba(16,185,129,0.45)",
+  taxes: "rgba(139,92,246,0.45)",
+  growth: "rgba(244,63,94,0.42)",
+  general: "rgba(26,155,143,0.45)",
+};
+
+/**
+ * IronBooks-branded thumbnail shown when a Learn video has no custom image —
+ * a navy→teal gradient poster with the wordmark + category, so every tile looks
+ * intentional and on-brand instead of a flat box. The play button overlays this
+ * (rendered by VideoTile above it).
+ */
+function BrandedThumb({ category }: { category: string }) {
+  const glow = CATEGORY_ACCENT[category] || CATEGORY_ACCENT.general;
+  const catLabel = CATEGORY_LABELS[category]?.label || "Training";
+  return (
+    <div className="absolute inset-0 bg-gradient-to-br from-[#0B1722] via-[#11283b] to-teal-dark">
+      <div className="absolute -right-8 -top-10 w-36 h-36 rounded-full blur-2xl" style={{ background: glow }} />
+      <div
+        className="absolute inset-0 opacity-[0.10]"
+        style={{ backgroundImage: "radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)", backgroundSize: "16px 16px" }}
+      />
+      <div className="absolute top-2.5 left-3 flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 rounded-full bg-teal" />
+        <span className="text-[10px] font-extrabold tracking-[0.2em] text-white/85">IRONBOOKS</span>
+      </div>
+      <div className="absolute top-2.5 right-3 text-[9px] font-semibold uppercase tracking-wider text-white/55">
+        {catLabel}
+      </div>
+    </div>
+  );
+}
+
 export function LearnClient({ resources }: { resources: Resource[] }) {
   const [active, setActive] = useState<Resource | null>(null);
 
@@ -100,16 +139,20 @@ function VideoTile({ resource, onPlay }: { resource: Resource; onPlay: () => voi
       }`}
       onClick={hasEmbed ? onPlay : undefined}
     >
-      <div className="aspect-video bg-navy/80 flex items-center justify-center relative overflow-hidden">
+      <div className="aspect-video bg-navy flex items-center justify-center relative overflow-hidden">
         {resource.thumbnail_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={resource.thumbnail_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
-        ) : null}
-        <div className={`relative z-10 ${hasEmbed ? "" : "opacity-50"}`}>
+        ) : (
+          <BrandedThumb category={resource.category} />
+        )}
+        <div className={`relative z-10 ${hasEmbed ? "" : "opacity-60"}`}>
           {hasEmbed ? (
-            <Play size={28} className="text-white drop-shadow" />
+            <div className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-sm border border-white/30 flex items-center justify-center shadow-lg">
+              <Play size={20} className="text-white ml-0.5" />
+            </div>
           ) : (
-            <Clock size={24} className="text-white" />
+            <Clock size={24} className="text-white/90" />
           )}
         </div>
         {resource.duration_seconds && (
