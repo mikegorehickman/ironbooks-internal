@@ -148,6 +148,17 @@ export async function intakeStatement(
     return { ok: false, error: error?.message || "Could not file the statement" };
   }
 
+  // Auto-clear any open bookkeeper request this statement satisfies.
+  if (ex.matched_qbo_account_id || matchedName) {
+    await fulfillStatementRequests(service, clientLinkId, {
+      id: row.id,
+      matched_qbo_account_id: ex.matched_qbo_account_id,
+      matched_account_name: matchedName,
+      account_label: ex.account_label,
+      last4: ex.last4,
+    }).catch(() => {});
+  }
+
   return {
     ok: true,
     id: row.id,
@@ -157,4 +168,53 @@ export async function intakeStatement(
     period_month: row.period_month,
     period_year: row.period_year,
   };
+}
+
+const norm = (s: string | null | undefined) =>
+  (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Mark open statement_requests fulfilled when a statement that satisfies them
+ * is filed. Matches on QBO account id first, then on a normalized name/last4
+ * overlap (requests created from the cleanup view may carry only an account
+ * name, not a QBO id). Called from intake and from the portal manual-match.
+ */
+export async function fulfillStatementRequests(
+  service: any,
+  clientLinkId: string,
+  stmt: {
+    id: string;
+    matched_qbo_account_id: string | null;
+    matched_account_name: string | null;
+    account_label: string | null;
+    last4: string | null;
+  }
+): Promise<number> {
+  const { data: open } = await service
+    .from("statement_requests")
+    .select("id, account_name, qbo_account_id")
+    .eq("client_link_id", clientLinkId)
+    .eq("status", "open");
+  if (!open || open.length === 0) return 0;
+
+  const stmtNames = [stmt.matched_account_name, stmt.account_label].map(norm).filter(Boolean);
+  const last4 = stmt.last4 || "";
+
+  const toFulfill = (open as any[]).filter((r) => {
+    if (stmt.matched_qbo_account_id && r.qbo_account_id && r.qbo_account_id === stmt.matched_qbo_account_id) {
+      return true;
+    }
+    const rn = norm(r.account_name);
+    if (!rn) return false;
+    if (stmtNames.some((sn) => sn === rn || sn.includes(rn) || rn.includes(sn))) return true;
+    if (last4 && r.account_name && r.account_name.replace(/\D/g, "").includes(last4)) return true;
+    return false;
+  });
+  if (toFulfill.length === 0) return 0;
+
+  await service
+    .from("statement_requests")
+    .update({ status: "fulfilled", fulfilled_statement_id: stmt.id, fulfilled_at: new Date().toISOString() })
+    .in("id", toFulfill.map((r) => r.id));
+  return toFulfill.length;
 }

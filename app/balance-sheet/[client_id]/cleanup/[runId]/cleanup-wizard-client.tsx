@@ -1642,6 +1642,25 @@ function NeedFromClientPanel({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to send");
+
+      // Also create structured statement requests for the bank/CC/loan items,
+      // so the client sees a self-clearing checklist by their upload panel.
+      const statementItems = selected
+        .map((i) => {
+          if (i.id.startsWith("bank-")) return { label: `Bank statement — ${i.id.slice(5)}`, account_name: i.id.slice(5), account_kind: "bank" };
+          if (i.id.startsWith("cc-")) return { label: `Credit-card statement — ${i.id.slice(3)}`, account_name: i.id.slice(3), account_kind: "credit_card" };
+          if (i.id.startsWith("loan-")) return { label: `Loan statement — ${i.id.slice(5)}`, account_name: i.id.slice(5), account_kind: "loan" };
+          return null;
+        })
+        .filter(Boolean);
+      if (statementItems.length > 0) {
+        await fetch(`/api/clients/${clientLinkId}/statement-requests`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: statementItems }),
+        }).catch(() => {});
+      }
+
       const d = data.email_delivery;
       setSentInfo({
         count: totalCount,
