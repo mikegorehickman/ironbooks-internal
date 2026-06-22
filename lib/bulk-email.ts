@@ -43,8 +43,12 @@ export function applyMergeFields(
   const first = (vars.firstName || "there").trim() || "there";
   const biz = (vars.businessName || "your business").trim() || "your business";
   return text
+    // {{first_name}} / {{contact.first_name}}  and  #firstname# / #first_name#
     .replace(/\{\{\s*(contact\.)?first_?name\s*\}\}/gi, first)
-    .replace(/\{\{\s*(client_?name|business_?name|company_?name)\s*\}\}/gi, biz);
+    .replace(/#\s*first_?name\s*#/gi, first)
+    // {{business_name}} / {{company_name}} / {{client_name}}  and  #businessname# etc.
+    .replace(/\{\{\s*(client_?name|business_?name|company_?name)\s*\}\}/gi, biz)
+    .replace(/#\s*(client_?name|business_?name|company_?name)\s*#/gi, biz);
 }
 
 const LOGO = "https://internal.ironbooks.com/logo.png";

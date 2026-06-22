@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { wrapBrandedEmail } from "@/lib/bulk-email";
+import { wrapBrandedEmail, applyMergeFields } from "@/lib/bulk-email";
 import { renderUserSignature, type SignatureUser } from "@/lib/user-signature";
 import {
   Mail, Send, Loader2, Search, Users, AlertTriangle, CheckCircle2, Save, FileText, Clock,
@@ -59,6 +59,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
   const [alsoPortal, setAlsoPortal] = useState(true);
   const [includeSignature, setIncludeSignature] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -137,11 +138,18 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
     setMsg(res.ok ? { tone: "ok", text: `Test sent to ${senderEmail}.` } : { tone: "err", text: "Test send failed." });
   }
 
-  async function send() {
+  // Click "Send" → open the per-recipient preview (so the sender sees exactly
+  // how #firstname# resolves for each client) instead of a bare confirm.
+  function send() {
     if (!subject || !bodyText) { setMsg({ tone: "err", text: "Add a subject and body first." }); return; }
     if (!selectedEligible.length) { setMsg({ tone: "err", text: "Select at least one eligible recipient." }); return; }
-    const kindLabel = kind === "operational" ? "operational" : kind === "resubscribe" ? "re-subscribe" : "marketing";
-    if (!confirm(`Send this ${kindLabel} email to ${selectedEligible.length} client${selectedEligible.length === 1 ? "" : "s"}? This is client-facing.`)) return;
+    setMsg(null);
+    setPreviewOpen(true);
+  }
+
+  // Actual send — fired from the preview modal's "Confirm & send".
+  async function doSend() {
+    setPreviewOpen(false);
     setBusy("send"); setMsg(null);
     const res = await fetch("/api/admin/bulk-email/send", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -152,6 +160,13 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
     if (res.ok) { setMsg({ tone: "ok", text: `Sending to ${d.recipient_count} clients… they'll go out over the next minute.` }); setSelected(new Set()); setTimeout(refreshCampaigns, 1500); }
     else setMsg({ tone: "err", text: d.error || "Send failed." });
   }
+
+  // Selected recipients (full objects) for the preview modal.
+  const previewRecips: Recipient[] = previewOpen
+    ? (selectedEligible
+        .map((id) => recipients.find((r) => r.client_link_id === id))
+        .filter(Boolean) as Recipient[])
+    : [];
 
   const counts = {
     eligible: eligibleFiltered.length,
@@ -228,11 +243,11 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
           <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" />
           <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
             <span className="text-ink-light font-semibold">Insert:</span>
-            <button type="button" onClick={() => insertToken("{{first_name}}")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">First name</button>
-            <button type="button" onClick={() => insertToken("{{business_name}}")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">Business name</button>
-            <span className="text-ink-light">— auto-fills each client's details</span>
+            <button type="button" onClick={() => insertToken("#firstname#")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">#firstname#</button>
+            <button type="button" onClick={() => insertToken("#businessname#")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">#businessname#</button>
+            <span className="text-ink-light">— each client gets their own; preview before send</span>
           </div>
-          <textarea ref={bodyRef} value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={9} placeholder={"Write your message…\n\nBlank line = new paragraph. **bold** for emphasis.\nUse the Insert buttons for {{first_name}} / {{business_name}}."} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-y font-mono" />
+          <textarea ref={bodyRef} value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={9} placeholder={"Write your message…\n\nExample: Hi #firstname#, your June books are ready!\n\nBlank line = new paragraph. **bold** for emphasis.\n#firstname# / #businessname# fill in per client — you'll preview each before sending."} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-y font-mono" />
           <div className="flex items-center gap-3 flex-wrap text-xs text-ink-slate">
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={alsoPortal} onChange={(e) => setAlsoPortal(e.target.checked)} className="rounded border-gray-300 text-teal" /> Also post to portal inbox</label>
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={includeSignature} onChange={(e) => setIncludeSignature(e.target.checked)} className="rounded border-gray-300 text-teal" /> Include my signature</label>
@@ -245,10 +260,10 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
             <div className="rounded-lg border border-gray-200 overflow-auto max-h-[420px]"
               dangerouslySetInnerHTML={{
                 __html: wrapBrandedEmail({
-                  bodyHtml: textToHtml(bodyText || "Your message goes here. The Ironbooks header, logo, and footer are added automatically.")
-                    .replace(/\{\{\s*(contact\.)?first_?name\s*\}\}/gi, "Daniel")
-                    .replace(/\{\{\s*(client_?name|business_?name|company_?name)\s*\}\}/gi, "Acme Painting")
-                    + (includeSignature ? renderUserSignature({ ...senderSignature, signature_enabled: true }) : ""),
+                  bodyHtml: applyMergeFields(
+                    textToHtml(bodyText || "Your message goes here. The Ironbooks header, logo, and footer are added automatically."),
+                    { firstName: "Daniel", businessName: "Acme Painting" }
+                  ) + (includeSignature ? renderUserSignature({ ...senderSignature, signature_enabled: true }) : ""),
                   footerHtml: kind === "normal"
                     ? "You're receiving this because you're an Ironbooks client. <span style=\"color:#1F5D58;font-weight:600;\">Unsubscribe</span> from updates like this."
                     : kind === "resubscribe"
@@ -267,6 +282,18 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
         </div>
       </div>
 
+      {previewOpen && (
+        <SendPreviewModal
+          recips={previewRecips}
+          subject={subject}
+          bodyText={bodyText}
+          kind={kind}
+          busy={busy}
+          onConfirm={doSend}
+          onCancel={() => setPreviewOpen(false)}
+        />
+      )}
+
       {/* History */}
       {campaigns.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
@@ -284,6 +311,91 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Send-time preview: shows exactly how #firstname# resolves for every selected
+ * client before anything goes out, so the sender can confirm the mapping. Rows
+ * with no first name on file are flagged (they'll receive "there").
+ */
+function SendPreviewModal({
+  recips, subject, bodyText, kind, busy, onConfirm, onCancel,
+}: {
+  recips: Recipient[];
+  subject: string;
+  bodyText: string;
+  kind: Kind;
+  busy: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const sample = recips[0];
+  const noFirst = recips.filter((r) => !(r.first_name || "").trim()).length;
+  const firstLine = bodyText.split(/\n/).find((l) => l.trim()) || "";
+  const exSubject = sample ? applyMergeFields(subject, { firstName: sample.first_name, businessName: sample.client_name }) : subject;
+  const exLine = sample ? applyMergeFields(firstLine, { firstName: sample.first_name, businessName: sample.client_name }) : firstLine;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h3 className="text-base font-bold text-navy">Review personalization — {recips.length} client{recips.length === 1 ? "" : "s"}</h3>
+          <p className="text-xs text-ink-slate mt-1">
+            Each client gets their own <code className="bg-slate-100 rounded px-1">#firstname#</code>. Confirm the mapping below before sending — this is client-facing.
+          </p>
+        </div>
+
+        {sample && (
+          <div className="px-5 py-3 border-b border-gray-100 bg-slate-50 text-xs">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light mb-1">Example — {sample.client_name}</div>
+            <div><span className="text-ink-light">Subject:</span> <span className="text-navy font-medium">{exSubject}</span></div>
+            {firstLine && <div className="mt-0.5"><span className="text-ink-light">Opens:</span> <span className="text-navy">{exLine}</span></div>}
+          </div>
+        )}
+
+        {noFirst > 0 && (
+          <div className="px-5 py-2 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800 flex items-center gap-1.5">
+            <AlertTriangle size={13} className="flex-shrink-0" />
+            {noFirst} {noFirst === 1 ? "client has" : "clients have"} no first name on file — they'll receive “there”. Edit their profile to fix.
+          </div>
+        )}
+
+        <div className="overflow-y-auto flex-1">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-white border-b border-gray-100 text-ink-light">
+              <tr>
+                <th className="text-left font-semibold px-5 py-1.5">Client</th>
+                <th className="text-left font-semibold px-2 py-1.5">#firstname# →</th>
+                <th className="text-left font-semibold px-5 py-1.5">Email</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recips.map((r) => {
+                const fn = (r.first_name || "").trim();
+                return (
+                  <tr key={r.client_link_id} className="border-b border-gray-50">
+                    <td className="px-5 py-1.5 text-navy truncate max-w-[200px]">{r.client_name}</td>
+                    <td className={`px-2 py-1.5 font-semibold ${fn ? "text-teal-dark" : "text-amber-700"}`}>
+                      {fn || "there"}{!fn && <span className="text-[10px] font-normal text-amber-600"> (no name)</span>}
+                    </td>
+                    <td className="px-5 py-1.5 text-ink-light truncate max-w-[200px]">{r.email}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="px-5 py-3 border-t border-gray-100 flex items-center gap-2">
+          <button onClick={onConfirm} disabled={busy !== null} className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-bold px-4 py-2 rounded-lg disabled:opacity-50">
+            {busy === "send" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Confirm &amp; send to {recips.length}
+          </button>
+          <button onClick={onCancel} disabled={busy !== null} className="text-sm font-semibold border border-gray-200 px-3 py-2 rounded-lg hover:border-gray-300">Cancel</button>
+          <span className="ml-auto text-[10px] text-ink-light uppercase tracking-wider">{kind}</span>
+        </div>
+      </div>
     </div>
   );
 }
