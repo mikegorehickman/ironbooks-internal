@@ -6,7 +6,7 @@ import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
   FileSpreadsheet, Wallet, Volume2, VolumeX, HeartPulse, Gauge, CalendarCheck,
-  ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap,
+  ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap, Settings as SettingsIcon,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -250,6 +250,9 @@ export function Sidebar() {
             </div>
           </div>
           <SoundToggle />
+          <Link href="/settings" className="text-white/40 hover:text-white transition-colors" title="Settings · email signature">
+            <SettingsIcon size={15} />
+          </Link>
           <button onClick={handleSignOut} className="text-white/40 hover:text-white transition-colors">
             <LogOut size={15} />
           </button>
