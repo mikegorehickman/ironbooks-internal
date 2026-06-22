@@ -7,6 +7,7 @@ import {
   applyOnboardingFormToProfile,
   deriveJurisdictionFromForm,
 } from "@/lib/onboarding";
+import { provisionPortalUser } from "@/lib/portal-invite";
 
 export const dynamic = "force-dynamic";
 
@@ -186,6 +187,27 @@ export async function POST(request: Request) {
     console.warn("[ghl/ob-form] profile fill skipped:", e?.message);
   }
 
+  // ── 4. Auto-invite to the client portal. The form is in, so the client is
+  //    ready for portal access — no QBO dependency (that's firm-side). Idempotent:
+  //    provisionPortalUser resends/skips for an existing portal user. Fail-soft —
+  //    a flaky invite must never break the webhook ack.
+  let invite: { ok: boolean; resend?: boolean; error?: string; skipped?: string } = { ok: false, skipped: "no_name_or_email" };
+  const inviteName = (cf.full_name || cf.business_name || "").toString().trim();
+  if (emailLc && inviteName) {
+    try {
+      const r = await provisionPortalUser(service, {
+        email: emailLc,
+        fullName: inviteName,
+        clientLinkId,
+        sendInvite: true,
+        invitedBy: null,
+      });
+      invite = r.ok ? { ok: true, resend: r.resend } : { ok: false, error: r.error };
+    } catch (e: any) {
+      invite = { ok: false, error: e?.message || "invite threw" };
+    }
+  }
+
   // Audit trail for the created/matched account.
   try {
     await service.from("audit_log").insert({
@@ -197,6 +219,9 @@ export async function POST(request: Request) {
         business_name: cf.business_name,
         created,
         profile_filled: profileFilled,
+        portal_invited: invite.ok,
+        portal_invite_resend: invite.resend || false,
+        portal_invite_error: invite.error || null,
       } as any,
     });
   } catch {
@@ -210,5 +235,7 @@ export async function POST(request: Request) {
     matched_by: leadClientLinkId ? "lead" : created ? "created" : "email",
     lead_id: leadId,
     profile_filled: profileFilled,
+    portal_invited: invite.ok,
+    portal_invite: invite,
   });
 }

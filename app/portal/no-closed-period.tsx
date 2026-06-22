@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Sparkles } from "lucide-react";
+import { ConnectQuickBooksCard } from "./connect-quickbooks-card";
 
 /**
  * Shown on any portal surface that defaults to "the most recent closed
@@ -14,12 +15,16 @@ import { Sparkles } from "lucide-react";
 export function NoClosedPeriodState({
   heading = "Your numbers are being prepared",
   blurb,
+  showAccountantSetup = false,
 }: {
   heading?: string;
   blurb?: string;
+  /** Portal home only: show the "connect us to QuickBooks" card while QBO isn't linked. */
+  showAccountantSetup?: boolean;
 }) {
   return (
     <div className="space-y-6">
+      {showAccountantSetup && <ConnectQuickBooksCard />}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-7 text-white">
         <div className="absolute -right-12 -top-12 w-56 h-56 rounded-full bg-teal/20 blur-3xl" />
         <div className="relative">

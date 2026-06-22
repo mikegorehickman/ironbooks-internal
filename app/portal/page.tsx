@@ -51,7 +51,9 @@ export default async function PortalOverview() {
   // No reconciled month yet → show the "being prepared" state, never
   // partial/guessed numbers. (Strict data-accuracy policy.)
   if (!closed) {
-    return <NoClosedPeriodState />;
+    // Onboarding home: prompt the client to add us as their QBO accountant
+    // until they're connected (ctx.qboRealmId is set once QBO is linked).
+    return <NoClosedPeriodState showAccountantSetup={!ctx.qboRealmId} />;
   }
 
   const data = await fetchOverview(

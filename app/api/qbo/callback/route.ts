@@ -1,5 +1,6 @@
 import { exchangeCodeForTokens, fetchCompanyInfo, markQboConnectionHealthy } from "@/lib/qbo";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { sendWalkthroughIfNeeded } from "@/lib/walkthrough-email";
 import { NextResponse } from "next/server";
 
 /**
@@ -161,6 +162,10 @@ export async function GET(request: Request) {
       // probe runs.
       await markQboConnectionHealthy(serviceClient as any, inserted.id);
 
+      // First QBO connect → send the client the SNAP walkthrough (once; no-ops
+      // until the video URL env is set). Fail-soft so it never blocks the redirect.
+      await sendWalkthroughIfNeeded(serviceClient as any, inserted.id).catch(() => {});
+
       // Send them to the Double matching screen for the new client they just connected
       return NextResponse.redirect(
         `${origin}/clients/${inserted.id}/match-double?qbo_connected=true`
@@ -186,7 +191,7 @@ export async function GET(request: Request) {
 
       const { error: updateErr } = await serviceClient
         .from("client_links")
-        .update(updatePayload)
+        .update(updatePayload as any)
         .eq("id", clientLinkId);
 
       if (updateErr) {
@@ -196,6 +201,10 @@ export async function GET(request: Request) {
       }
 
       await markQboConnectionHealthy(serviceClient as any, clientLinkId);
+
+      // First QBO connect for this onboarding client → SNAP walkthrough email
+      // (once; no-ops until the video URL env is set). Fail-soft.
+      await sendWalkthroughIfNeeded(serviceClient as any, clientLinkId).catch(() => {});
 
       return NextResponse.redirect(`${origin}/dashboard?qbo_connected=true`);
     }
