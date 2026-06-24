@@ -78,3 +78,64 @@ export async function syncClientLoginEmail(
   await service.from("users").update({ email: clean } as any).eq("id", uid);
   return { portalUpdated: 1, error: null, note: null };
 }
+
+export type DesyncedLogin = {
+  client_link_id: string;
+  client_name: string;
+  contact_email: string;
+  login_email: string;
+  user_id: string;
+};
+
+/**
+ * Find clients whose single active portal LOGIN email no longer matches their
+ * client_links.client_email — the leftover desync from email edits made before
+ * the profile path repointed logins. Scoped to single-login client accounts
+ * (the only ones we can safely auto-repoint; multi-login clients are skipped).
+ */
+export async function findDesyncedClientLogins(
+  service: ReturnType<typeof createServiceSupabase>
+): Promise<DesyncedLogin[]> {
+  const { data: maps } = await (service as any)
+    .from("client_users")
+    .select("user_id, client_link_id")
+    .eq("active", true);
+  const rows = ((maps as any[]) || []).filter((r) => r.user_id && r.client_link_id);
+  if (!rows.length) return [];
+
+  const byClient = new Map<string, string[]>();
+  for (const r of rows) {
+    const arr = byClient.get(r.client_link_id) || [];
+    arr.push(r.user_id);
+    byClient.set(r.client_link_id, arr);
+  }
+
+  const userIds = [...new Set(rows.map((r) => r.user_id))];
+  const clientIds = [...byClient.keys()];
+  const { data: users } = await service.from("users").select("id, email, role").in("id", userIds);
+  const userById = new Map(((users as any[]) || []).map((u) => [u.id, u]));
+  const { data: clients } = await service
+    .from("client_links")
+    .select("id, client_name, client_email")
+    .in("id", clientIds);
+  const clientById = new Map(((clients as any[]) || []).map((c) => [c.id, c]));
+
+  const out: DesyncedLogin[] = [];
+  for (const [clientLinkId, ids] of byClient) {
+    const clientLogins = ids.map((id) => userById.get(id)).filter((u) => u && (u as any).role === "client");
+    if (clientLogins.length !== 1) continue; // only safe single-login accounts
+    const login: any = clientLogins[0];
+    const cl: any = clientById.get(clientLinkId);
+    if (!cl?.client_email) continue;
+    if (String(cl.client_email).toLowerCase() !== String(login.email || "").toLowerCase()) {
+      out.push({
+        client_link_id: clientLinkId,
+        client_name: cl.client_name,
+        contact_email: cl.client_email,
+        login_email: login.email,
+        user_id: login.id,
+      });
+    }
+  }
+  return out;
+}
