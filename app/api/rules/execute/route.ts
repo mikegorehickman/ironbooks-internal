@@ -47,6 +47,16 @@ export async function POST(request: Request) {
     .single();
   if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
+  // Idempotency guard — a completed job is already posted; re-running would
+  // silently re-mark the rules active and log a duplicate "activated" event.
+  // (Matches the reclass/COA execute routes, which already short-circuit.)
+  if ((job as any).status === "complete") {
+    return NextResponse.json({ started: false, already_complete: true, message: "Rules already activated" });
+  }
+  if ((job as any).status === "executing") {
+    return NextResponse.json({ started: false, message: "Already executing" });
+  }
+
   await service
     .from("rule_discovery_jobs")
     .update({
