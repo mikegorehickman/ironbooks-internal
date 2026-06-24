@@ -36,6 +36,13 @@ export function NewRulesForm({
   const [starting, setStarting] = useState(false);
   const [redoAllowed, setRedoAllowed] = useState(true);
 
+  // Reuse the analysis window carried from the upstream reclass step
+  // (?months=), so the bookkeeper doesn't re-pick the period.
+  useEffect(() => {
+    const m = Number(searchParams.get("months"));
+    if ([3, 6, 12].includes(m)) setMonths(m);
+  }, [searchParams]);
+
   const filtered = clientLinks.filter((c) =>
     c.client_name.toLowerCase().includes(search.toLowerCase())
   );
@@ -121,44 +128,61 @@ export function NewRulesForm({
           <p className="text-xs text-ink-slate">Choose a client with a connected QBO account</p>
         </div>
         <div className="p-5">
-          <div className="relative mb-3">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-light" />
-            <input
-              type="text"
-              placeholder="Search clients..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-teal text-navy"
-            />
-          </div>
+          {selected ? (
+            // Once a client is chosen (incl. carried over from a prior step),
+            // show it plainly instead of an unselected-looking long list.
+            <div className="flex items-center gap-3 rounded-lg bg-teal-lighter border-2 border-teal px-3 py-2.5">
+              <div className="rounded-md flex items-center justify-center font-bold text-xs flex-shrink-0 w-8 h-8 bg-teal-light text-teal">
+                {selected.client_name.charAt(0)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm text-navy">{selected.client_name}</div>
+                <div className="text-xs text-ink-slate flex items-center gap-1">
+                  <MapPin size={11} /> {selected.jurisdiction} {selected.state_province}
+                </div>
+              </div>
+              <CheckCircle2 size={18} className="text-teal flex-shrink-0" />
+              <button
+                onClick={() => setSelected(null)}
+                className="text-xs font-semibold text-teal hover:text-teal-dark whitespace-nowrap"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="relative mb-3">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-light" />
+                <input
+                  type="text"
+                  placeholder="Search clients..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-teal text-navy"
+                />
+              </div>
 
-          <div className="space-y-1.5 max-h-72 overflow-y-auto">
-            {filtered.map((client) => {
-              const isSelected = selected?.id === client.id;
-              return (
-                <button
-                  key={client.id}
-                  onClick={() => setSelected(client)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
-                    isSelected
-                      ? "bg-teal-lighter border-2 border-teal"
-                      : "border-2 border-gray-100 hover:bg-teal-lighter"
-                  }`}
-                >
-                  <div className="rounded-md flex items-center justify-center font-bold text-xs flex-shrink-0 w-8 h-8 bg-teal-light text-teal">
-                    {client.client_name.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm text-navy">{client.client_name}</div>
-                    <div className="text-xs text-ink-slate flex items-center gap-1">
-                      <MapPin size={11} /> {client.jurisdiction} {client.state_province}
+              <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                {filtered.map((client) => (
+                  <button
+                    key={client.id}
+                    onClick={() => setSelected(client)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors border-2 border-gray-100 hover:bg-teal-lighter"
+                  >
+                    <div className="rounded-md flex items-center justify-center font-bold text-xs flex-shrink-0 w-8 h-8 bg-teal-light text-teal">
+                      {client.client_name.charAt(0)}
                     </div>
-                  </div>
-                  {isSelected && <CheckCircle2 size={18} className="text-teal" />}
-                </button>
-              );
-            })}
-          </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-navy">{client.client_name}</div>
+                      <div className="text-xs text-ink-slate flex items-center gap-1">
+                        <MapPin size={11} /> {client.jurisdiction} {client.state_province}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 

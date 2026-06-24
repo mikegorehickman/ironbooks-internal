@@ -19,6 +19,11 @@ export interface RedoStatus {
   cleanupCompletedAt: string | null;
   hasCompletedJobOfType: boolean;
   lastCompletedAt: string | null;
+  /** The date range the last completed job of this type covered — so the next
+   *  step can reuse the same period instead of asking again. (coa/reclass only;
+   *  rule_discovery_jobs has no range.) */
+  lastRangeStart: string | null;
+  lastRangeEnd: string | null;
 }
 
 export async function getRedoStatus(
@@ -34,10 +39,17 @@ export async function getRedoStatus(
 
   let hasCompletedJobOfType = false;
   let lastCompletedAt: string | null = null;
+  let lastRangeStart: string | null = null;
+  let lastRangeEnd: string | null = null;
   try {
+    // rule_discovery_jobs has no date range; coa/reclass do.
+    const select =
+      kind === "rules"
+        ? "status, execution_completed_at"
+        : "status, execution_completed_at, date_range_start, date_range_end";
     const { data: job } = await service
       .from(JOB_TABLE[kind])
-      .select("status, execution_completed_at")
+      .select(select)
       .eq("client_link_id", clientLinkId)
       .eq("status", "complete")
       .order("execution_completed_at", { ascending: false })
@@ -46,6 +58,8 @@ export async function getRedoStatus(
     if (job) {
       hasCompletedJobOfType = true;
       lastCompletedAt = (job as any).execution_completed_at || null;
+      lastRangeStart = (job as any).date_range_start || null;
+      lastRangeEnd = (job as any).date_range_end || null;
     }
   } catch {
     /* table/shape varies — fail open (no warning) */
@@ -56,5 +70,7 @@ export async function getRedoStatus(
     cleanupCompletedAt: (client as any)?.cleanup_completed_at || null,
     hasCompletedJobOfType,
     lastCompletedAt,
+    lastRangeStart,
+    lastRangeEnd,
   };
 }

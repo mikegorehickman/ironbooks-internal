@@ -32,6 +32,8 @@ export function RedoWarning({
     cleanupCompletedAt: string | null;
     hasCompletedJobOfType: boolean;
     lastCompletedAt: string | null;
+    lastRangeStart: string | null;
+    lastRangeEnd: string | null;
   } | null>(null);
   const [override, setOverride] = useState(false);
 
@@ -66,6 +68,19 @@ export function RedoWarning({
   const date = status.cleanupCompletedAt || status.lastCompletedAt;
   const dateStr = date ? ` on ${new Date(date).toLocaleDateString()}` : "";
 
+  // Carry the upstream period into the next step so it doesn't ask again. Bank
+  // Rules (the reclass→rules hop) takes a months count, so map the reclass
+  // date range to the nearest preset {3,6,12}.
+  let skipHref = `${NEXT_STEP[kind].path}?client=${clientId}`;
+  if (kind === "reclass" && status.lastRangeStart && status.lastRangeEnd) {
+    const months =
+      (new Date(status.lastRangeEnd).getTime() - new Date(status.lastRangeStart).getTime()) /
+      86_400_000 /
+      30.44;
+    const nearest = [3, 6, 12].reduce((a, b) => (Math.abs(b - months) < Math.abs(a - months) ? b : a), 6);
+    skipHref += `&months=${nearest}`;
+  }
+
   return (
     <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
       <div className="flex items-center gap-2 font-semibold text-amber-900">
@@ -82,7 +97,7 @@ export function RedoWarning({
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         {clientId && (
           <Link
-            href={`${NEXT_STEP[kind].path}?client=${clientId}`}
+            href={skipHref}
             className="inline-flex items-center gap-1.5 text-[13px] font-bold bg-teal text-white px-3 py-1.5 rounded-lg hover:bg-teal-dark"
           >
             It&apos;s done — skip to {NEXT_STEP[kind].label}
