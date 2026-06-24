@@ -30,7 +30,7 @@ export const dynamic = "force-dynamic";
  *
  * The drill-down lives at /today/[clientId].
  */
-export default async function TodayPage({
+export async function TodayContent({
   searchParams,
 }: {
   searchParams: Promise<{ viewas?: string }>;
@@ -408,9 +408,7 @@ export default async function TodayPage({
     statementEscalations.length === 0
   ) {
     return (
-      <AppShell>
-        <TopBar title="Today" subtitle="Daily reconciliation queue" />
-        <div className="px-8 py-12 max-w-2xl">
+      <div className="px-8 py-12 max-w-2xl">
           <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center space-y-4">
             <div className="inline-flex w-16 h-16 rounded-full bg-teal-lighter items-center justify-center">
               <Sparkles className="text-teal" size={28} />
@@ -432,7 +430,6 @@ export default async function TodayPage({
             )}
           </div>
         </div>
-      </AppShell>
     );
   }
 
@@ -578,9 +575,7 @@ export default async function TodayPage({
   );
 
   return (
-    <AppShell>
-      <TopBar title="Today" subtitle={`Daily reconciliation · ${today}`} />
-      <div className="px-8 py-6 max-w-5xl space-y-5">
+    <div className="px-8 py-6 max-w-5xl space-y-5">
         {/* Pulse bar — time-pressure at a glance + month-end status + view-as */}
         <PulseBar
           counts={counts}
@@ -743,6 +738,19 @@ export default async function TodayPage({
           Auto items are already in QuickBooks; review items need your sign-off first.
         </p>
       </div>
+  );
+}
+
+/** Standalone /today — wraps the shared TodayContent in the app shell (V1). */
+export default async function TodayPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ viewas?: string }>;
+}) {
+  return (
+    <AppShell>
+      <TopBar title="Today" subtitle="Daily reconciliation queue" />
+      <TodayContent searchParams={searchParams} />
     </AppShell>
   );
 }

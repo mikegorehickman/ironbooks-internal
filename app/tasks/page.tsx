@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * middleware. Tasks are fetched flat and enriched with assignee/creator/client
  * names here so the board renders without per-row joins.
  */
-export default async function TasksPage() {
+export async function TasksContent() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
@@ -61,16 +61,23 @@ export default async function TasksPage() {
   }));
 
   return (
+    <div className="px-8 py-6">
+      <TasksBoard
+        initialTasks={tasks}
+        staff={staff}
+        clients={clients}
+        currentUserId={user.id}
+      />
+    </div>
+  );
+}
+
+/** Standalone /tasks — wraps the shared TasksContent in the app shell (V1). */
+export default async function TasksPage() {
+  return (
     <AppShell>
       <TopBar title="Tasks" subtitle="Team to-do board — assign, track, and clear work" />
-      <div className="px-8 py-6">
-        <TasksBoard
-          initialTasks={tasks}
-          staff={staff}
-          clients={clients}
-          currentUserId={user.id}
-        />
-      </div>
+      <TasksContent />
     </AppShell>
   );
 }

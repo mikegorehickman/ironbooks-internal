@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * oldest-unanswered first, with the thread + reply composer inline (no need to
  * open each client page). Bookkeepers see their assigned clients; seniors see all.
  */
-export default async function InboxPage() {
+export async function InboxContent() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
@@ -74,11 +74,18 @@ export default async function InboxPage() {
   }
 
   return (
+    <div className="px-8 py-6">
+      <InboxClient threads={threads} canSend={canSend} />
+    </div>
+  );
+}
+
+/** Standalone /inbox — wraps the shared InboxContent in the app shell (V1). */
+export default async function InboxPage() {
+  return (
     <AppShell>
       <TopBar title="Inbox" subtitle="All client messages · oldest-waiting first" />
-      <div className="px-8 py-6">
-        <InboxClient threads={threads} canSend={canSend} />
-      </div>
+      <InboxContent />
     </AppShell>
   );
 }
