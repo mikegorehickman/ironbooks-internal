@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { isV2For, isArchivedRoute } from "@/lib/feature-flags";
 
 /**
  * Routing rules (with client portal):
@@ -95,6 +96,11 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(url);
       }
     } else {
+      // V2 (site simplification) flips the staff home to /home and archives
+      // unused tools. Both are no-ops for V1 users.
+      const v2 = isV2For(user.email);
+      const staffHome = v2 ? "/home" : "/today";
+
       // Internal staff: bounce them OUT of /portal/* — UNLESS they have
       // the impersonation cookie set (admin/lead only path). The portal
       // layout + resolvePortalContext re-validate everything; middleware
@@ -104,14 +110,24 @@ export async function middleware(request: NextRequest) {
         !!request.cookies.get("snap_impersonate_user_id")?.value;
       if (isPortal && !isImpersonating) {
         const url = request.nextUrl.clone();
-        url.pathname = "/today";
+        url.pathname = staffHome;
         return NextResponse.redirect(url);
       }
-      if (isRoot) {
-        // Today is the internal home — the daily command center every
-        // staff member should land on after login.
+
+      // V2 archives unused tools: a V2 user landing on an archived route sees
+      // the "archived" notice instead. The route + its data are untouched —
+      // an admin can re-enable. V1 users reach the tool normally.
+      if (v2 && isArchivedRoute(pathname)) {
         const url = request.nextUrl.clone();
-        url.pathname = "/today";
+        url.pathname = "/archived";
+        url.search = `?from=${encodeURIComponent(pathname)}`;
+        return NextResponse.rewrite(url);
+      }
+
+      if (isRoot) {
+        // The daily command center every staff member lands on after login.
+        const url = request.nextUrl.clone();
+        url.pathname = staffHome;
         return NextResponse.redirect(url);
       }
     }

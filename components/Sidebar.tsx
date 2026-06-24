@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import type { Database } from "@/lib/database.types";
 import { StripeConnectModal } from "./StripeConnectModal";
 import { isMuted, setMuted, onMutedChange, playSound } from "@/lib/sounds";
+import { isV2For } from "@/lib/feature-flags";
 
 /** Daily work surface — the whole job in five stops. */
 const dailyNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
@@ -56,10 +57,28 @@ const adminItems = [
  *  team (admin, lead, bookkeeper). For admins it sits just below Audit Log. */
 const handbookNav = { href: "/handbook", label: "Handbook", icon: GraduationCap };
 
+// ── V2 navigation (SNAP site simplification, behind the V2 flag) ──
+// Four work stops; per-client engines launch in context, not from the nav.
+const v2WorkNav: { href: string; label: string; icon: any }[] = [
+  { href: "/home", label: "Home", icon: Sun },
+  { href: "/workflow", label: "Workflow", icon: KanbanSquare },
+  { href: "/clients", label: "Clients", icon: Users },
+];
+const v2AdminItems: { href: string; label: string; icon: any }[] = [
+  { href: "/admin", label: "Admin", icon: Shield },
+  { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/bulk-email", label: "Bulk Email", icon: Mail },
+  { href: "/admin/call-matching", label: "Call Matching", icon: Video },
+  { href: "/admin/audit", label: "Audit Log", icon: BookOpen },
+  { href: "/templates", label: "Master COA", icon: BookOpen },
+];
+const v2OversightNav = { href: "/oversight", label: "Oversight", icon: Gauge };
+
 export function Sidebar() {
   const pathname = usePathname();
   const [userName, setUserName] = useState<string>("");
   const [userRole, setUserRole] = useState<string>("");
+  const [userEmail, setUserEmail] = useState<string>("");
   const [flaggedCount, setFlaggedCount] = useState(0);
   const [unreadComms, setUnreadComms] = useState(0);
   const [stripeModalOpen, setStripeModalOpen] = useState(false);
@@ -76,6 +95,7 @@ export function Sidebar() {
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (data.user) {
+        if (data.user.email) setUserEmail(data.user.email);
         const { data: profile } = await supabase
           .from("users")
           .select("full_name, role")
@@ -138,6 +158,7 @@ export function Sidebar() {
 
   const isAdmin = userRole === "admin";
   const isSenior = userRole === "admin" || userRole === "lead";
+  const isV2 = isV2For(userEmail);
 
   const cleanupActive =
     pathname.startsWith("/jobs/") ||
@@ -174,62 +195,100 @@ export function Sidebar() {
           <span>New Cleanup</span>
         </Link>
 
-        <NavSection label="Work" />
-        {dailyNav
-          .filter((item) => !item.senior || isSenior)
-          .map((item) => (
-            <NavItem
-              key={item.href}
-              item={item}
-              pathname={pathname}
-              badgeCount={item.href === "/today" ? unreadComms : undefined}
-              badgeTone="red"
-            />
-          ))}
-
-        {isSenior && (
+        {!isV2 && (
           <>
-            <button
-              onClick={() => setToolsOpen((v) => !v)}
-              className="w-full flex items-center gap-2 px-3 py-2 mt-3 text-[10px] font-bold uppercase tracking-wider text-white/35 hover:text-white/60 transition-colors"
-            >
-              {toolsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              Tools
-              {flaggedCount > 0 && (
-                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/90 text-white tabular-nums">
-                  {flaggedCount}
-                </span>
-              )}
-            </button>
-            {toolsOpen && (
-              <div className="space-y-0.5">
-                {toolsNav.map((item) => (
-                  <NavItem
-                    key={item.href}
-                    item={item}
-                    pathname={pathname}
-                    dim
-                    badgeCount={item.href === "/flagged" ? flaggedCount : undefined}
-                  />
-                ))}
+            <NavSection label="Work" />
+            {dailyNav
+              .filter((item) => !item.senior || isSenior)
+              .map((item) => (
+                <NavItem
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  badgeCount={item.href === "/today" ? unreadComms : undefined}
+                  badgeTone="red"
+                />
+              ))}
+
+            {isSenior && (
+              <>
                 <button
-                  onClick={() => setStripeModalOpen(true)}
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-medium text-white/40 hover:bg-white/5 hover:text-white/70 transition-all mb-0.5"
+                  onClick={() => setToolsOpen((v) => !v)}
+                  className="w-full flex items-center gap-2 px-3 py-2 mt-3 text-[10px] font-bold uppercase tracking-wider text-white/35 hover:text-white/60 transition-colors"
                 >
-                  <CreditCard size={14} />
-                  Stripe connect link
+                  {toolsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                  Tools
+                  {flaggedCount > 0 && (
+                    <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/90 text-white tabular-nums">
+                      {flaggedCount}
+                    </span>
+                  )}
                 </button>
-              </div>
+                {toolsOpen && (
+                  <div className="space-y-0.5">
+                    {toolsNav.map((item) => (
+                      <NavItem
+                        key={item.href}
+                        item={item}
+                        pathname={pathname}
+                        dim
+                        badgeCount={item.href === "/flagged" ? flaggedCount : undefined}
+                      />
+                    ))}
+                    <button
+                      onClick={() => setStripeModalOpen(true)}
+                      className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-medium text-white/40 hover:bg-white/5 hover:text-white/70 transition-all mb-0.5"
+                    >
+                      <CreditCard size={14} />
+                      Stripe connect link
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {isAdmin && (
+              <>
+                <NavSection label="Admin" className="mt-4" />
+                {adminItems.map((item) => (
+                  <NavItem key={item.href} item={item} pathname={pathname} />
+                ))}
+              </>
             )}
           </>
         )}
 
-        {isAdmin && (
+        {isV2 && (
           <>
-            <NavSection label="Admin" className="mt-4" />
-            {adminItems.map((item) => (
-              <NavItem key={item.href} item={item} pathname={pathname} />
+            <NavSection label="Work" />
+            {v2WorkNav.map((item) => (
+              <NavItem
+                key={item.href}
+                item={item}
+                pathname={pathname}
+                badgeCount={item.href === "/home" ? unreadComms : undefined}
+                badgeTone="red"
+              />
             ))}
+
+            {isSenior && (
+              <div className="mt-3">
+                <NavItem
+                  item={v2OversightNav}
+                  pathname={pathname}
+                  badgeCount={flaggedCount}
+                />
+              </div>
+            )}
+
+            {isAdmin && (
+              <>
+                <NavSection label="Admin" className="mt-4" />
+                {v2AdminItems.map((item) => (
+                  <NavItem key={item.href} item={item} pathname={pathname} />
+                ))}
+              </>
+            )}
           </>
         )}
 
