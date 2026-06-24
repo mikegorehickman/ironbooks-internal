@@ -22,7 +22,7 @@ export const maxDuration = 120;
  * browser. Client component just renders the resulting data + handles
  * tier toggles + filter UI.
  */
-export default async function AdvisorPage({
+export async function AdvisorContent({
   searchParams,
 }: {
   searchParams?: Promise<{ bookkeeper?: string }>;
@@ -56,22 +56,33 @@ export default async function AdvisorPage({
   });
 
   return (
+    <AdvisorDashboard
+      data={data}
+      bookkeepers={
+        ((bookkeepers || []) as any[]).map((b) => ({
+          id: b.id,
+          name: b.full_name || "(unnamed)",
+          role: b.role,
+        }))
+      }
+      activeBookkeeperId={sp.bookkeeper || null}
+    />
+  );
+}
+
+/** Standalone /advisor — wraps AdvisorContent in the app shell (V1). */
+export default async function AdvisorPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ bookkeeper?: string }>;
+}) {
+  return (
     <AppShell>
       <TopBar
         title="Strategic Advisor"
         subtitle="Spot the clients who need support — focus your advisory time where it matters."
       />
-      <AdvisorDashboard
-        data={data}
-        bookkeepers={
-          ((bookkeepers || []) as any[]).map((b) => ({
-            id: b.id,
-            name: b.full_name || "(unnamed)",
-            role: b.role,
-          }))
-        }
-        activeBookkeeperId={sp.bookkeeper || null}
-      />
+      <AdvisorContent searchParams={searchParams} />
     </AppShell>
   );
 }

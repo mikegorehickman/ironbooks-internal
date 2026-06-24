@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
  * Admin/lead only — the probe + re-auth flows shouldn't be initiated
  * by bookkeepers casually.
  */
-export default async function QboHealthPage() {
+export async function QboHealthContent() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
@@ -122,12 +122,7 @@ export default async function QboHealthPage() {
   const joinSuspect = healthRowCount > 0 && joinedCount === 0;
 
   return (
-    <AppShell>
-      <TopBar
-        title="QBO Connection Health"
-        subtitle="Every client's QuickBooks refresh-token state — re-auth dead connections in bulk"
-      />
-      <div className="px-6 py-5 max-w-[1400px] mx-auto space-y-3">
+    <div className="px-6 py-5 max-w-[1400px] mx-auto space-y-3">
         {joinSuspect && (
           <div className="rounded-lg bg-red-50 border border-red-300 p-3 text-xs text-red-800">
             <strong className="block mb-1">Join diagnostic — page is broken:</strong>
@@ -138,7 +133,19 @@ export default async function QboHealthPage() {
           </div>
         )}
         <QboHealthClient rows={rows} probeNeverRun={probeNeverRun} />
-      </div>
+    </div>
+  );
+}
+
+/** Standalone /fleet/qbo-health — wraps QboHealthContent in the shell (V1). */
+export default async function QboHealthPage() {
+  return (
+    <AppShell>
+      <TopBar
+        title="QBO Connection Health"
+        subtitle="Every client's QuickBooks refresh-token state — re-auth dead connections in bulk"
+      />
+      <QboHealthContent />
     </AppShell>
   );
 }

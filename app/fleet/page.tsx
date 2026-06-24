@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  * Access: admin + lead see everything. Bookkeepers see only their
  * portfolio (server enforces this in /api/fleet/health).
  */
-export default async function FleetHealthPage({
+export async function FleetContent({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
@@ -65,24 +65,35 @@ export default async function FleetHealthPage({
   });
 
   return (
+    <div className="px-6 py-5 max-w-[1400px] mx-auto">
+      <FleetDashboardClient
+        snapshot={snapshot}
+        bookkeepers={(bookkeepers as any) || []}
+        currentUserId={user.id}
+        isSenior={isSenior}
+        activeFilters={{
+          bookkeeperId,
+          severity,
+          search,
+        }}
+      />
+    </div>
+  );
+}
+
+/** Standalone /fleet — wraps FleetContent in the app shell (V1). */
+export default async function FleetHealthPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  return (
     <AppShell>
       <TopBar
         title="Fleet Health"
         subtitle="Every client with issues — sorted by severity (critical, warning, healthy)"
       />
-      <div className="px-6 py-5 max-w-[1400px] mx-auto">
-        <FleetDashboardClient
-          snapshot={snapshot}
-          bookkeepers={(bookkeepers as any) || []}
-          currentUserId={user.id}
-          isSenior={isSenior}
-          activeFilters={{
-            bookkeeperId,
-            severity,
-            search,
-          }}
-        />
-      </div>
+      <FleetContent searchParams={searchParams} />
     </AppShell>
   );
 }

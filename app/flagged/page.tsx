@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { FlaggedQueue, type FlaggedClient, type FlaggedSource } from "./flagged-queue";
 import { Flag, ShieldAlert } from "lucide-react";
 
-export default async function FlaggedPage() {
+export async function FlaggedContent() {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
@@ -19,22 +19,19 @@ export default async function FlaggedPage() {
 
   if (!profile || !["admin", "lead"].includes(profile.role)) {
     return (
-      <AppShell>
-        <TopBar title="Access restricted" />
-        <div className="px-8 py-12 max-w-2xl">
-          <div className="rounded-2xl p-8 bg-amber-50 border border-amber-200 text-center">
-            <ShieldAlert size={36} className="mx-auto text-amber-600 mb-3" />
-            <h2 className="text-lg font-bold text-navy mb-2">
-              Senior bookkeeper access required
-            </h2>
-            <p className="text-sm text-ink-slate">
-              The Flagged Queue is reserved for senior bookkeepers, leads, and admins.
-              If you have items flagged on your jobs, they'll show up on your dashboard
-              under "Awaiting senior review."
-            </p>
-          </div>
+      <div className="px-8 py-12 max-w-2xl">
+        <div className="rounded-2xl p-8 bg-amber-50 border border-amber-200 text-center">
+          <ShieldAlert size={36} className="mx-auto text-amber-600 mb-3" />
+          <h2 className="text-lg font-bold text-navy mb-2">
+            Senior bookkeeper access required
+          </h2>
+          <p className="text-sm text-ink-slate">
+            The Flagged Queue is reserved for senior bookkeepers, leads, and admins.
+            If you have items flagged on your jobs, they'll show up on your dashboard
+            under "Awaiting senior review."
+          </p>
         </div>
-      </AppShell>
+      </div>
     );
   }
 
@@ -273,16 +270,7 @@ export default async function FlaggedPage() {
   const totalItems = clients.reduce((s, c) => s + c.items.length, 0);
 
   return (
-    <AppShell>
-      <TopBar
-        title="Flagged for Senior Review"
-        subtitle={
-          totalItems === 0
-            ? "Nothing in the queue"
-            : `${totalItems} item${totalItems !== 1 ? "s" : ""} across ${clients.length} client${clients.length !== 1 ? "s" : ""}`
-        }
-      />
-      <div className="px-8 py-6">
+    <div className="px-8 py-6">
         {queryErrors.length > 0 && (
           <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800 space-y-1">
             <div className="font-bold">Query errors (debug):</div>
@@ -300,7 +288,16 @@ export default async function FlaggedPage() {
         ) : (
           <FlaggedQueue clients={clients} reviewerName={profile.full_name} />
         )}
-      </div>
+    </div>
+  );
+}
+
+/** Standalone /flagged — wraps FlaggedContent in the app shell (V1). */
+export default async function FlaggedPage() {
+  return (
+    <AppShell>
+      <TopBar title="Flagged for Senior Review" subtitle="Items awaiting senior sign-off" />
+      <FlaggedContent />
     </AppShell>
   );
 }
