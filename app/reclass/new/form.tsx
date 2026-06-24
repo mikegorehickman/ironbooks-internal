@@ -441,8 +441,8 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
             </div>
             <div className="text-sm text-ink-slate">
               Pull all transactions in a date range and let AI map each one to the correct account
-              in the new COA. Auto-approves below your threshold, flags higher-value transactions
-              for review. Best run right after a COA cleanup.
+              in the new COA. You review the matches in one list — change any, then approve &amp; post.
+              Best run right after a COA cleanup.
             </div>
           </div>
           <ChevronRight className="text-ink-slate self-center" size={20} />
@@ -614,25 +614,9 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
                   </div>
                 </div>
 
-                <div>
-                  <label className="flex items-center gap-1.5 text-sm font-semibold text-navy mb-2">
-                    <DollarSign size={14} /> Auto-approve Threshold
-                  </label>
-                  <div className="text-xs text-ink-slate mb-2">
-                    Transactions under this amount with high AI confidence are auto-approved.
-                    Higher amounts always require bookkeeper review.
-                  </div>
-                  <div className="relative max-w-xs">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-slate text-sm">$</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={50}
-                      value={threshold}
-                      onChange={(e) => setThreshold(parseInt(e.target.value, 10) || 0)}
-                      className="w-full pl-7 pr-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none text-sm"
-                    />
-                  </div>
+                <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs text-ink-slate">
+                  AI matches every transaction to its best account. You&apos;ll review the full list
+                  next — change any row, then approve &amp; post.
                 </div>
               </>
             )}

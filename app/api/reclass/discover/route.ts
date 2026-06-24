@@ -817,10 +817,9 @@ async function runFullCategorization(
         target_account_name: resolvedAccountName,
         confidence: kbMatch.confidence,
         reasoning: kbMatch.reasoning + (account ? "" : ` (suggest creating "${kbMatch.account}")`),
-        decision:
-          kbMatch.confidence >= 0.80 && absAmount < threshold
-            ? "auto_approve"
-            : "needs_review",
+        // Pre-matched from the knowledge base → pre-approve; bookkeeper reviews
+        // the one list and can change any row before posting.
+        decision: "auto_approve",
       });
       kbHits++;
       continue;
@@ -838,7 +837,7 @@ async function runFullCategorization(
           target_account_name: account.account_name,
           confidence: 1.0,
           reasoning: "Matched existing bank rule from prior categorization",
-          decision: absAmount < threshold ? "auto_approve" : "needs_review",
+          decision: "auto_approve",
         });
         cacheHits++;
         continue;

@@ -698,10 +698,12 @@ Classify each line. Return JSON only.`;
         decision = "flagged";
         target_id = null;
         target_name = null;
-      } else if (confidence >= 0.80 && absAmount < params.autoApproveThreshold) {
-        decision = "auto_approve";
       } else {
-        decision = "needs_review";
+        // AI matched a target — pre-approve it. The bookkeeper reviews ONE list
+        // and can change any row before posting, rather than wading through a
+        // confidence/$-threshold-gated "needs review" pile. Genuinely
+        // unmatchable rows stay flagged above for a manual pick.
+        decision = "auto_approve";
       }
 
       localDecisions.push({
