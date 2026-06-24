@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight, CheckCircle2, Circle, ClipboardList,
-  Loader2, MinusCircle, PlayCircle, Plus, Sparkles, X, XCircle,
+  Loader2, MinusCircle, PlayCircle, Plus, Sparkles, Wrench, X, XCircle,
 } from "lucide-react";
 import { ClientRecCard, type ProdClient } from "../production/rec-card";
 
@@ -39,6 +39,14 @@ interface KanbanCard {
   latest_reclass_job: { id: string; status: string } | null;
   bank_rule_count: number;
   has_complete_reclass: boolean;
+  manual_cleanup_needed?: boolean;
+  manual_cleanup_notes?: string | null;
+  manual_cleanup_items?: {
+    account_name?: string;
+    reason?: string;
+    suggestion?: string;
+    intended_action?: string;
+  }[];
 }
 
 /* ── Next-step chips ──────────────────────────────────────────────────
@@ -228,6 +236,7 @@ export function CleanupBoard() {
     return {
       needs_cleanup: get("needs_cleanup"),
       in_progress: inProgress,
+      manual_cleanup: get("manual_cleanup"),
       review: get("review"),
     };
   }, [columns]);
@@ -260,6 +269,7 @@ export function CleanupBoard() {
   const COLS: { id: keyof typeof collapsed; title: string; tone: string; hint: string }[] = [
     { id: "needs_cleanup", title: "Needs Cleanup", tone: "border-gray-200", hint: "New — start with COA cleanup" },
     { id: "in_progress", title: "In Progress", tone: "border-teal/40", hint: "Working the checklist" },
+    { id: "manual_cleanup", title: "Manual Cleanup (QBO)", tone: "border-orange-300", hint: "Needs hand-fixing in QuickBooks" },
     { id: "review", title: "Awaiting Mgr Review", tone: "border-purple-300", hint: "Statements submitted — manager approves & sends" },
   ];
 
@@ -321,9 +331,14 @@ export function CleanupBoard() {
           <Loader2 className="animate-spin text-teal mx-auto" size={28} />
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
           {COLS.map((col) => {
-            const cards = visible(collapsed[col.id], col.id === "review");
+            // The chip funnel filter applies to the pipeline columns; the
+            // manual-cleanup stage is separate and always shows its cards.
+            const cards =
+              col.id === "manual_cleanup"
+                ? collapsed.manual_cleanup
+                : visible(collapsed[col.id], col.id === "review");
             return (
               <div key={col.id} className={`bg-white rounded-2xl border-2 ${col.tone} overflow-hidden`}>
                 <div className="px-3 py-2.5 border-b border-gray-100">
@@ -346,20 +361,24 @@ export function CleanupBoard() {
                       )}
                     </div>
                   )}
-                  {cards.map((card) => (
-                    <CleanupCard
-                      key={card.id}
-                      card={card}
-                      inReview={col.id === "review"}
-                      hasSignoff={signoffByClient.has(card.id)}
-                      isSenior={isSenior}
-                      bookkeepers={bookkeepers}
-                      onChanged={load}
-                      onOpenSignoff={() =>
-                        setSelectedSignoff(selectedSignoff === card.id ? null : card.id)
-                      }
-                    />
-                  ))}
+                  {cards.map((card) =>
+                    col.id === "manual_cleanup" ? (
+                      <ManualCleanupCard key={card.id} card={card} onChanged={load} />
+                    ) : (
+                      <CleanupCard
+                        key={card.id}
+                        card={card}
+                        inReview={col.id === "review"}
+                        hasSignoff={signoffByClient.has(card.id)}
+                        isSenior={isSenior}
+                        bookkeepers={bookkeepers}
+                        onChanged={load}
+                        onOpenSignoff={() =>
+                          setSelectedSignoff(selectedSignoff === card.id ? null : card.id)
+                        }
+                      />
+                    )
+                  )}
                 </div>
               </div>
             );
@@ -401,6 +420,92 @@ export function CleanupBoard() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A card in the "Manual Cleanup (QBO)" column — shows the auto-fed
+ *  QBO-limitation items from the COA cleanup plus a free-text note for what to
+ *  fix by hand, with a Resolve button that clears the flag. */
+function ManualCleanupCard({ card, onChanged }: { card: KanbanCard; onChanged: () => void }) {
+  const [notes, setNotes] = useState(card.manual_cleanup_notes || "");
+  const [saving, setSaving] = useState(false);
+  const items = card.manual_cleanup_items || [];
+
+  async function patch(body: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/clients/${card.id}/manual-cleanup`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || "Failed to update");
+        return;
+      }
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-orange-200 bg-orange-50/40 p-3">
+      <div className="flex items-center gap-1.5">
+        <Wrench size={13} className="text-orange-600 flex-shrink-0" />
+        <Link
+          href={`/clients/${card.id}`}
+          className="text-sm font-semibold text-navy hover:underline truncate"
+        >
+          {card.client_name}
+        </Link>
+      </div>
+
+      {items.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {items.slice(0, 6).map((it, i) => (
+            <div key={i} className="text-[11px] text-ink-slate leading-snug">
+              <span className="font-semibold text-navy">
+                {it.account_name || it.intended_action || "Item"}
+              </span>
+              {it.reason ? ` — ${it.reason}` : ""}
+              {it.suggestion ? (
+                <span className="block text-ink-light">↳ {it.suggestion}</span>
+              ) : null}
+            </div>
+          ))}
+          {items.length > 6 && (
+            <div className="text-[10px] text-ink-light">+{items.length - 6} more…</div>
+          )}
+        </div>
+      )}
+
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="What needs fixing in QuickBooks?"
+        rows={2}
+        className="mt-2 w-full text-[11px] px-2 py-1.5 rounded border border-orange-200 bg-white resize-none"
+      />
+
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <button
+          onClick={() => patch({ notes })}
+          disabled={saving}
+          className="text-[11px] font-semibold px-2 py-1 rounded border border-orange-200 text-orange-800 hover:bg-orange-100 disabled:opacity-50"
+        >
+          Save note
+        </button>
+        <button
+          onClick={() => patch({ needed: false, notes })}
+          disabled={saving}
+          className="text-[11px] font-bold px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {saving ? "…" : "Resolved"}
+        </button>
+      </div>
     </div>
   );
 }

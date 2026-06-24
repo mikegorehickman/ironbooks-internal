@@ -156,6 +156,7 @@ export async function GET(request: Request) {
     coa_in_progress: [],
     reclass_in_progress: [],
     awaiting_stripe: [],
+    manual_cleanup: [],
     bs_cleanup: [],
     review: [],
   };
@@ -173,17 +174,23 @@ export async function GET(request: Request) {
   // (Same fallback `complete-cleanup` uses, so the dates match.)
   const completeCoaRangeQuery: any = await (service as any)
     .from("coa_jobs")
-    .select("client_link_id, date_range_start, date_range_end, execution_completed_at")
+    .select("client_link_id, date_range_start, date_range_end, execution_completed_at, manual_cleanup_items")
     .in("client_link_id", clientIds)
     .eq("status", "complete")
     .order("execution_completed_at", { ascending: false });
   const completeCoaRange = new Map<string, { start: string | null; end: string | null }>();
+  // Auto-fed manual-cleanup detail: the most recent completed COA job's
+  // QBO-limitation items, surfaced on the "Manual cleanup (QBO)" card.
+  const manualItemsByClient = new Map<string, any[]>();
   for (const j of (completeCoaRangeQuery.data || []) as any[]) {
     if (!completeCoaRange.has(j.client_link_id)) {
       completeCoaRange.set(j.client_link_id, {
         start: j.date_range_start,
         end: j.date_range_end,
       });
+      if (Array.isArray(j.manual_cleanup_items) && j.manual_cleanup_items.length) {
+        manualItemsByClient.set(j.client_link_id, j.manual_cleanup_items);
+      }
     }
   }
 
@@ -248,11 +255,23 @@ export async function GET(request: Request) {
       latest_reclass_job: reclass ? { id: reclass.id, status: reclass.status } : null,
       bank_rule_count: ruleCountMap.get(client.id) || 0,
       has_complete_reclass: hasCompleteReclass,
+      manual_cleanup_needed: !!(client as any).manual_cleanup_needed,
+      manual_cleanup_notes: (client as any).manual_cleanup_notes || null,
+      manual_cleanup_items: manualItemsByClient.get(client.id) || [],
     };
 
     // ── PRIORITY 1: senior review (submitted, awaiting admin/lead) ──
     if ((client as any).cleanup_review_state === "in_review") {
       columns.review.push(card);
+      continue;
+    }
+
+    // ── PRIORITY 1.5: manual cleanup needed in QBO (flagged, blocking) ──
+    // Set when a COA job left QBO-limitation hand-work, or manually by a
+    // bookkeeper. Surfaces in its own column so it doesn't hide in a pipeline
+    // phase. Cleared via the manual-cleanup PATCH (Resolve).
+    if (card.manual_cleanup_needed) {
+      columns.manual_cleanup.push(card);
       continue;
     }
 
@@ -333,6 +352,7 @@ function emptyColumns() {
     "coa_in_progress",
     "reclass_in_progress",
     "awaiting_stripe",
+    "manual_cleanup",
     "bs_cleanup",
     "review",
   ];
