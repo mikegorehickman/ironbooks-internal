@@ -21,6 +21,8 @@ interface Props {
   stripeCustomerId: string | null;
   invoices: StripeInvoice[];
   coachingCallLink: string | null;
+  coaches: { coach_key: string; coach_name: string }[];
+  coachingCheckoutEnabled: boolean;
   cancelRequestAt: string | null;
   cancelRequestNote: string | null;
   impersonating: boolean;
@@ -63,6 +65,8 @@ export function BillingClient({
   stripeCustomerId,
   invoices,
   coachingCallLink,
+  coaches,
+  coachingCheckoutEnabled,
   cancelRequestAt,
   cancelRequestNote,
   impersonating,
@@ -96,7 +100,12 @@ export function BillingClient({
 
       <WhatIsIncludedCard />
 
-      <CoachingCallCard coachingCallLink={coachingCallLink} impersonating={impersonating} />
+      <CoachingCallCard
+        coachingCallLink={coachingCallLink}
+        coaches={coaches}
+        checkoutEnabled={coachingCheckoutEnabled}
+        impersonating={impersonating}
+      />
 
       {nextTier && currentTier && (
         <UpgradeCard
@@ -283,11 +292,39 @@ function WhatIsIncludedCard() {
 
 function CoachingCallCard({
   coachingCallLink,
+  coaches,
+  checkoutEnabled,
   impersonating,
 }: {
   coachingCallLink: string | null;
+  coaches: { coach_key: string; coach_name: string }[];
+  checkoutEnabled: boolean;
   impersonating: boolean;
 }) {
+  const useCheckout = checkoutEnabled && coaches.length > 0;
+  const [coachKey, setCoachKey] = useState<string>(coaches[0]?.coach_key || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function book() {
+    if (!coachKey) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await fetch("/api/coaching-calls/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coach_key: coachKey }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || "Could not start checkout");
+      window.location.href = data.url;
+    } catch (e: any) {
+      setErr(e.message);
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
       <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
@@ -308,8 +345,41 @@ function CoachingCallCard({
           <strong className="text-navy">What to expect:</strong> Your coach reviews your most recent
           month before the call. Come with 2–3 questions, leave with a clear action plan.
         </div>
+
         {impersonating ? (
-          <div className="text-xs text-ink-slate italic">Payment link hidden during impersonation.</div>
+          <div className="text-xs text-ink-slate italic">Payment actions hidden during impersonation.</div>
+        ) : useCheckout ? (
+          <>
+            {coaches.length > 1 && (
+              <div>
+                <div className="text-xs font-semibold text-navy mb-1.5">Choose your coach</div>
+                <div className="flex flex-wrap gap-2">
+                  {coaches.map((c) => (
+                    <button
+                      key={c.coach_key}
+                      onClick={() => setCoachKey(c.coach_key)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 transition-colors ${
+                        coachKey === c.coach_key
+                          ? "border-teal bg-teal-lighter text-teal-dark"
+                          : "border-slate-200 text-ink-slate hover:border-slate-300"
+                      }`}
+                    >
+                      {c.coach_name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {err && <div className="text-xs text-red-600">{err}</div>}
+            <button
+              onClick={book}
+              disabled={busy || !coachKey}
+              className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark disabled:opacity-50 text-white text-sm font-bold px-5 py-2.5 rounded-lg transition-colors"
+            >
+              {busy ? "Starting checkout…" : `Book ${coaches.find((c) => c.coach_key === coachKey)?.coach_name || ""} — $150`}
+            </button>
+            <p className="text-[11px] text-ink-light">Secure payment, then pick your time. Your saved card is used if we have one on file.</p>
+          </>
         ) : coachingCallLink ? (
           <a
             href={coachingCallLink}

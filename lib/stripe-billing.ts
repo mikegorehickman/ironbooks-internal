@@ -220,6 +220,50 @@ export async function createCustomerPortalSession(
   return session.url as string;
 }
 
+/**
+ * Create a one-time Stripe Checkout Session (mode=payment) for a fixed price.
+ * Attaching an existing `customerId` pre-fills the buyer's saved card so it's a
+ * near-one-click purchase; otherwise we seed `customer_email`. Returns the
+ * hosted Checkout URL + the session id (stored on the booking for verification).
+ */
+export async function createCheckoutSession(params: {
+  priceId: string;
+  successUrl: string;
+  cancelUrl: string;
+  customerId?: string | null;
+  customerEmail?: string | null;
+  metadata?: Record<string, string>;
+}): Promise<{ id: string; url: string }> {
+  const body: Record<string, string> = {
+    mode: "payment",
+    "line_items[0][price]": params.priceId,
+    "line_items[0][quantity]": "1",
+    success_url: params.successUrl,
+    cancel_url: params.cancelUrl,
+    // Save the card so a repeat buyer is one-click next time.
+    "payment_intent_data[setup_future_usage]": "on_session",
+  };
+  if (params.customerId) body.customer = params.customerId;
+  else if (params.customerEmail) body.customer_email = params.customerEmail;
+  for (const [k, v] of Object.entries(params.metadata || {})) {
+    if (v != null) body[`metadata[${k}]`] = String(v);
+  }
+  const session = await stripePost<any>("/checkout/sessions", body);
+  return { id: session.id as string, url: session.url as string };
+}
+
+/** Retrieve a Checkout Session to confirm payment server-side on the return page. */
+export async function retrieveCheckoutSession(
+  sessionId: string
+): Promise<{ payment_status: string; status: string } | null> {
+  try {
+    const s = await stripeGet<any>(`/checkout/sessions/${encodeURIComponent(sessionId)}`);
+    return { payment_status: s?.payment_status ?? "unpaid", status: s?.status ?? "open" };
+  } catch {
+    return null;
+  }
+}
+
 export interface StripeCustomerLite {
   id: string;
   name: string | null;

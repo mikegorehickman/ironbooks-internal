@@ -122,6 +122,24 @@ export default async function BillingPage() {
     ? (process.env.STRIPE_COACHING_CALL_PAYMENT_LINK_CAD || null)
     : (process.env.STRIPE_COACHING_CALL_PAYMENT_LINK_USD || null);
 
+  // New: SNAP-native paid coaching-call booking (migration 95). Tolerant — if
+  // the table isn't applied yet, fall back to the static link above.
+  let coaches: { coach_key: string; coach_name: string }[] = [];
+  try {
+    const { data: coachesRaw } = await (service as any)
+      .from("coaching_call_settings")
+      .select("coach_key, coach_name")
+      .eq("active", true)
+      .order("sort_order");
+    coaches = (coachesRaw as any[]) || [];
+  } catch {
+    coaches = [];
+  }
+  const coachingPriceConfigured = !!(jurisdiction === "CA"
+    ? process.env.STRIPE_COACHING_PRICE_CAD
+    : process.env.STRIPE_COACHING_PRICE_USD);
+  const coachingCheckoutEnabled = coaches.length > 0 && coachingPriceConfigured;
+
   // Pull tier + invoices from Stripe. Fail soft — if no customer ID or Stripe
   // is unreachable, the page still renders with a "contact us" fallback.
   let billingInfo: StripeBillingInfo | null = null;
@@ -150,6 +168,8 @@ export default async function BillingPage() {
       stripeCustomerId={stripeCustomerId}
       invoices={invoices}
       coachingCallLink={coachingCallLink}
+      coaches={coaches}
+      coachingCheckoutEnabled={coachingCheckoutEnabled}
       cancelRequestAt={cancelRequestAt}
       cancelRequestNote={cancelRequestNote}
       impersonating={!!impersonatingClientLinkId && isInternal}

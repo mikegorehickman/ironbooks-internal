@@ -2,7 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard } from "lucide-react";
+import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, Phone } from "lucide-react";
 
 export default async function AdminOverviewPage() {
   const supabase = await createServerSupabase();
@@ -45,6 +45,13 @@ export default async function AdminOverviewPage() {
             >
               <CreditCard size={16} />
               Link Stripe
+            </Link>
+            <Link
+              href="/admin/coaching-calls"
+              className="inline-flex items-center gap-2 bg-white border-2 border-slate-200 text-ink-slate hover:border-teal hover:text-teal text-sm font-semibold px-4 py-2 rounded-lg"
+            >
+              <Phone size={16} />
+              Coaching calls
             </Link>
             <Link
               href="/admin/users"
