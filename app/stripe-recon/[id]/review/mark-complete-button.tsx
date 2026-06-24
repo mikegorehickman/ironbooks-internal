@@ -34,12 +34,17 @@ export function MarkCleanupCompleteButton({
    *  the recon flow finishes; "secondary" is a quieter button shown
    *  alongside other actions (e.g. the unmatched panel). */
   variant = "primary",
+  /** Gate the submit (e.g. until the P&L is attested in the BS stage). */
+  disabled = false,
+  disabledHint,
 }: {
   clientLinkId: string;
   clientName: string;
   defaultRangeStart?: string | null;
   defaultRangeEnd?: string | null;
   variant?: "primary" | "secondary";
+  disabled?: boolean;
+  disabledHint?: string;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -106,11 +111,11 @@ export function MarkCleanupCompleteButton({
       )}
       <button
         onClick={handleSubmit}
-        disabled={submitting}
+        disabled={submitting || disabled}
         className={
           isPrimary
-            ? "w-full inline-flex items-center justify-center gap-2 bg-teal hover:bg-teal-dark disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
-            : "w-full inline-flex items-center justify-center gap-2 bg-white hover:bg-gray-50 disabled:opacity-60 border border-gray-200 text-navy text-sm font-semibold px-5 py-2.5 rounded-lg"
+            ? "w-full inline-flex items-center justify-center gap-2 bg-teal hover:bg-teal-dark disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+            : "w-full inline-flex items-center justify-center gap-2 bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed border border-gray-200 text-navy text-sm font-semibold px-5 py-2.5 rounded-lg"
         }
       >
         {submitting ? (
@@ -122,6 +127,9 @@ export function MarkCleanupCompleteButton({
           ? "Submitting…"
           : `Submit ${clientName}'s cleanup for senior review`}
       </button>
+      {disabled && disabledHint && (
+        <div className="mt-2 text-xs text-ink-slate text-center">{disabledHint}</div>
+      )}
     </div>
   );
 }

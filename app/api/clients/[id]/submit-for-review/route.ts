@@ -35,7 +35,7 @@ export async function POST(
   const service = createServiceSupabase();
   const { data: client } = await service
     .from("client_links")
-    .select("id, client_name, cleanup_review_state, cleanup_completed_at")
+    .select("id, client_name, cleanup_review_state, cleanup_completed_at, pl_attested_at")
     .eq("id", clientLinkId)
     .single();
   if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
@@ -44,6 +44,17 @@ export async function POST(
     return NextResponse.json(
       { error: "Client cleanup is already marked complete. Reopen first if you need to redo." },
       { status: 409 }
+    );
+  }
+
+  // Authoritative gate: the P&L must be attested in the Balance Sheet stage
+  // before a cleanup can be submitted for senior review. The UI also disables
+  // the button, but this stops a direct/stale call from bypassing it.
+  // (Tolerate the column not existing yet — migration 94 — by checking presence.)
+  if ("pl_attested_at" in (client as any) && !(client as any).pl_attested_at) {
+    return NextResponse.json(
+      { error: "Attest the P&L in the Balance Sheet step before submitting for review." },
+      { status: 422 }
     );
   }
   if ((client as any).cleanup_review_state === "in_review") {
@@ -110,12 +121,16 @@ export async function DELETE(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const service = createServiceSupabase();
+  // Withdrawing also clears the P&L attestation so a re-submitted cleanup must
+  // be re-attested (a stale attestation shouldn't carry over more work).
   const { error } = await service
     .from("client_links")
     .update({
       cleanup_review_state: null,
       cleanup_review_submitted_at: null,
       cleanup_review_submitted_by: null,
+      pl_attested_at: null,
+      pl_attested_by: null,
     } as any)
     .eq("id", clientLinkId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

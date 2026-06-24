@@ -4,10 +4,9 @@ import { WorkflowStepper } from "@/components/WorkflowStepper";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import { CheckCircle2, Loader2, Sparkles, ArrowRight } from "lucide-react";
 import { StripeReconReview } from "./review-client";
 import { UnmatchedPanel } from "./unmatched-panel";
-import { MarkCleanupCompleteButton } from "./mark-complete-button";
 import { UpgradeToStripeApiButton } from "./upgrade-button";
 
 export default async function StripeReconReviewPage({
@@ -253,12 +252,12 @@ export default async function StripeReconReviewPage({
             dateRangeEnd={(job.date_range_end as unknown as string) || null}
           />
           <div className="max-w-2xl">
-            <MarkCleanupCompleteButton
-              clientLinkId={job.client_link_id as unknown as string}
-              clientName={clientLink?.client_name || "this client"}
-              defaultRangeStart={job.date_range_start as unknown as string}
-              defaultRangeEnd={job.date_range_end as unknown as string}
-            />
+            <Link
+              href={`/balance-sheet/${job.client_link_id}`}
+              className="w-full inline-flex items-center justify-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-3 rounded-xl"
+            >
+              Next: Balance Sheet <ArrowRight size={16} />
+            </Link>
           </div>
         </div>
       </AppShell>
@@ -287,12 +286,14 @@ export default async function StripeReconReviewPage({
           matches={(matches as any) || []}
           clientLink={clientLink}
         />
-        <MarkCleanupCompleteButton
-          clientLinkId={job.client_link_id as unknown as string}
-          clientName={clientLink?.client_name || "this client"}
-          defaultRangeStart={job.date_range_start as unknown as string}
-          defaultRangeEnd={job.date_range_end as unknown as string}
-        />
+        <div className="max-w-2xl">
+          <Link
+            href={`/balance-sheet/${job.client_link_id}`}
+            className="w-full inline-flex items-center justify-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-3 rounded-xl"
+          >
+            Next: Balance Sheet <ArrowRight size={16} />
+          </Link>
+        </div>
       </div>
     </AppShell>
   );

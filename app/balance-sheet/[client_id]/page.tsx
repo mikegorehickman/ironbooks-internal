@@ -3,7 +3,7 @@ import { TopBar } from "@/components/TopBar";
 import { WorkflowStepper } from "@/components/WorkflowStepper";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect, notFound } from "next/navigation";
-import { BalanceSheetLanding } from "./landing-client";
+import { BalanceSheetStage } from "./stage-client";
 
 export const dynamic = "force-dynamic";
 
@@ -29,29 +29,36 @@ export default async function BalanceSheetLandingPage({
   if (!user) redirect("/auth/login");
 
   const service = createServiceSupabase();
+  // select("*") so we never 400 on a column that lags a migration (the new
+  // pl_attested_at / bs_statements_requested_at land in migration 94).
   const { data: client } = await service
     .from("client_links")
-    .select("id, client_name, jurisdiction, state_province")
+    .select("*")
     .eq("id", client_id)
     .single();
   if (!client) notFound();
+  const c = client as any;
 
   return (
     <AppShell>
       <TopBar
-        title={`Balance Sheet — ${(client as any).client_name}`}
-        subtitle="Step 5 · Reconcile bank, credit card, loan accounts · match Undeposited Funds to A/R"
+        title={`Balance Sheet — ${c.client_name}`}
+        subtitle="Step 5 · See statements → request → review & attest P&L → submit for review"
       />
       <WorkflowStepper
         currentStep="bs"
         currentState="active"
         completedSteps={["coa", "reclass", "rules", "stripe"]}
-        clientLinkId={(client as any).id}
+        clientLinkId={c.id}
       />
       <div className="px-8 py-6 max-w-5xl">
-        <BalanceSheetLanding
-          clientLinkId={(client as any).id}
-          clientName={(client as any).client_name}
+        <BalanceSheetStage
+          clientLinkId={c.id}
+          clientName={c.client_name}
+          plAttestedAt={c.pl_attested_at ?? null}
+          statementsRequestedAt={c.bs_statements_requested_at ?? null}
+          defaultRangeStart={c.cleanup_range_start ?? null}
+          defaultRangeEnd={c.cleanup_range_end ?? null}
         />
       </div>
     </AppShell>
