@@ -203,6 +203,13 @@ export function StripeConnectModal({
     }
   }
 
+  // Launched in-context (from a client's Stripe Recon page) → skip the picker
+  // and generate the link straight away so the bookkeeper lands on the send step.
+  useEffect(() => {
+    if (preselectedClientId) handleGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (!mounted) return null;
 
   const modalContent = (
@@ -236,7 +243,8 @@ export function StripeConnectModal({
         <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
           {!generated && (
             <>
-              {/* Client picker */}
+              {/* Client picker — hidden when a client is preselected (launched in-context) */}
+              {!preselectedClientId && (
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-ink-slate mb-2">
                   Select Client
@@ -294,6 +302,14 @@ export function StripeConnectModal({
                   )}
                 </div>
               </div>
+              )}
+
+              {preselectedClientId && !generated && (
+                <div className="p-8 text-center text-sm text-ink-slate">
+                  <Loader2 size={18} className="inline animate-spin mr-2" />
+                  Preparing the connect link…
+                </div>
+              )}
 
               {selected?.stripe_connection_status === "connected" && (
                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
@@ -453,7 +469,7 @@ export function StripeConnectModal({
           >
             Close
           </button>
-          {!generated && (
+          {!generated && !preselectedClientId && (
             <button
               onClick={handleGenerate}
               disabled={!selectedId || generating}
