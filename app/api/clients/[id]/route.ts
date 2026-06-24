@@ -1,4 +1,5 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { syncClientLoginEmail, type LoginEmailSync } from "@/lib/client-email";
 import { NextResponse } from "next/server";
 
 /**
@@ -100,6 +101,20 @@ export async function PATCH(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // When the contact email changes, repoint the client's portal LOGIN to
+  // match (Supabase auth + public.users.email) — otherwise the new address
+  // saves to client_links but the client still signs in with the old one.
+  // The client_links write above already succeeded; a login-sync hiccup
+  // (e.g. address already taken) is reported, not fatal.
+  let loginSync: LoginEmailSync | null = null;
+  if (
+    "client_email" in updates &&
+    updates.client_email &&
+    (prior as any)?.client_email !== updates.client_email
+  ) {
+    loginSync = await syncClientLoginEmail(service, id, updates.client_email);
+  }
+
   await service.from("audit_log").insert({
     user_id: user.id,
     event_type: "client_update",
@@ -112,10 +127,16 @@ export async function PATCH(
           { from: (prior as any)?.[k] ?? null, to: v },
         ])
       ),
+      ...(loginSync ? { portal_login_updated: loginSync.portalUpdated } : {}),
     } as any,
   });
 
-  return NextResponse.json({ client: data });
+  return NextResponse.json({
+    client: data,
+    login_updated: loginSync?.portalUpdated ?? 0,
+    login_note: loginSync?.note ?? null,
+    login_error: loginSync?.error ?? null,
+  });
 }
 
 /**
