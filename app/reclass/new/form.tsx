@@ -45,7 +45,11 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [workflow, setWorkflow] = useState<Workflow>(null);
+  // Default straight into Full AI Categorization — for almost every client the
+  // reclass job is just "match the transactions, then review & approve". The
+  // mode picker (consolidation / scrub / advanced bypass) is one click away via
+  // the "Other reclass options" link on the setup screen.
+  const [workflow, setWorkflow] = useState<Workflow>("full_categorization");
   // Picker tab — splits the workflow chooser between the day-to-day
   // reclass options ("standard") and bypass routes that skip reclass
   // entirely ("advanced", currently just Balance Sheet only).
@@ -490,7 +494,7 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
         onClick={() => { setWorkflow(null); setClientLinkId(""); }}
         className="text-sm text-ink-slate hover:text-navy"
       >
-        ← Change workflow
+        Other reclass options (consolidate · scrub · advanced) →
       </button>
 
       <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
