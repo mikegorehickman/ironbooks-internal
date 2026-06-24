@@ -79,6 +79,12 @@ export function NewStripeReconForm({
     checked_at: string | null;
   } | null>(null);
   const [rechecking, setRechecking] = useState(false);
+  // Pre-flight: do the QBO accounts the Stripe write-back needs exist?
+  const [acctCheck, setAcctCheck] = useState<{
+    ok: boolean;
+    missing: { label: string; suggested: string }[];
+  } | null>(null);
+  const [acctChecking, setAcctChecking] = useState(false);
   // When the API responds 409 with an existing_job_id, we hold it here so
   // the form can swap its generic error block for an actionable conflict
   // panel that links directly to the in-flight job.
@@ -129,10 +135,33 @@ export function NewStripeReconForm({
     }
   }
 
+  // Pre-flight account check: do the QBO accounts the Stripe write-back needs
+  // exist? Run on client select so a missing account is caught here, not after
+  // Execute. The inline "Re-check" button re-runs it after the bookkeeper
+  // creates the account in QBO.
+  async function checkStripeAccounts() {
+    const c = clientLinks.find((x) => x.id === clientLinkId);
+    if (!clientLinkId || !c) return;
+    setAcctChecking(true);
+    try {
+      const res = await fetch(
+        `/api/clients/${clientLinkId}/stripe-account-check?jurisdiction=${c.jurisdiction}`
+      );
+      if (res.ok) setAcctCheck(await res.json());
+    } catch {
+      /* non-fatal — never block on our own check */
+    } finally {
+      setAcctChecking(false);
+    }
+  }
+
   // Reset the override whenever the selected client changes so we don't
   // leak one client's recheck result onto another.
   useEffect(() => {
     setHealthOverride(null);
+    setAcctCheck(null);
+    if (clientLinkId) checkStripeAccounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientLinkId]);
 
   // Default to Stripe API when connected, QBO matching otherwise. The user
@@ -589,6 +618,33 @@ export function NewStripeReconForm({
           <div className="flex items-start gap-2 p-3 bg-red-50 text-red-800 rounded-lg text-sm">
             <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
             {submitError}
+          </div>
+        )}
+
+        {acctCheck && !acctCheck.ok && acctCheck.missing.length > 0 && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+            <div className="flex items-center gap-2 font-semibold text-amber-900">
+              <AlertCircle size={15} />
+              Missing QBO accounts — create these before executing
+            </div>
+            <ul className="mt-1.5 space-y-0.5 text-[13px] text-amber-800">
+              {acctCheck.missing.map((m) => (
+                <li key={m.label}>
+                  • {m.label}: create <strong>&quot;{m.suggested}&quot;</strong> in QuickBooks
+                </li>
+              ))}
+            </ul>
+            <p className="text-[12px] text-amber-700 mt-1.5">
+              You can still find deposits, but the write-back to QBO will fail until these exist.
+            </p>
+            <button
+              type="button"
+              onClick={checkStripeAccounts}
+              disabled={acctChecking}
+              className="mt-2 text-[12px] font-semibold px-2.5 py-1 rounded border border-amber-300 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+            >
+              {acctChecking ? "Re-checking…" : "Re-check"}
+            </button>
           </div>
         )}
 

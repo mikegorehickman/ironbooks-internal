@@ -159,6 +159,64 @@ async function findCustomerIdByName(
   }
 }
 
+// Account name candidates, in priority order — the single source of truth for
+// BOTH the execute-time resolver and the pre-flight check (so they never drift).
+const STRIPE_ACCOUNT_NAMES = {
+  revenue: ["Painting Revenue", "Service Revenue", "Sales of Product Income", "Services"],
+  fee: [
+    "Bank Charges & Fees",
+    "Bank Charges and Fees",
+    "Merchant Fees",
+    "Merchant Processing Fees",
+    "Bank Service Charges",
+    "Accounting & Bookkeeping",
+  ],
+  taxPayable: ["GST/HST Payable", "Sales Tax Payable", "HST Payable", "GST Payable", "PST Payable", "QST Payable"],
+  taxOnFee: [
+    "GST/HST Receivable",
+    "GST Receivable",
+    "HST Receivable",
+    "Input Tax Credits",
+    "ITCs",
+    "GST/HST ITC",
+    "Sales Tax Recoverable",
+    "GST/HST Payable", // last-resort same-account
+  ],
+} as const;
+
+export interface StripeAccountCheck {
+  ok: boolean;
+  /** Account roles that have no matching QBO account, with the name to create. */
+  missing: { label: string; suggested: string }[];
+}
+
+/**
+ * Pre-flight: does the client's QBO chart have the accounts Stripe recon needs
+ * to write back? Non-throwing twin of resolveExpenseAccounts — run on the New
+ * form so a missing account is caught BEFORE discovery, not after Execute.
+ */
+export async function checkExpenseAccounts(
+  realmId: string,
+  accessToken: string,
+  jurisdiction: "US" | "CA"
+): Promise<StripeAccountCheck> {
+  const accounts = await fetchAllAccounts(realmId, accessToken);
+  const active = accounts.filter((a) => a.Active !== false);
+  const has = (names: readonly string[]) => {
+    const lowered = names.map((n) => n.toLowerCase());
+    return active.some((a) => lowered.includes(a.Name.toLowerCase()));
+  };
+
+  const missing: { label: string; suggested: string }[] = [];
+  if (!has(STRIPE_ACCOUNT_NAMES.revenue)) missing.push({ label: "Revenue", suggested: "Painting Revenue" });
+  if (!has(STRIPE_ACCOUNT_NAMES.fee)) missing.push({ label: "Stripe fee expense", suggested: "Bank Charges & Fees" });
+  if (jurisdiction === "CA") {
+    if (!has(STRIPE_ACCOUNT_NAMES.taxPayable)) missing.push({ label: "Sales-tax payable", suggested: "GST/HST Payable" });
+    if (!has(STRIPE_ACCOUNT_NAMES.taxOnFee)) missing.push({ label: "GST/HST receivable / ITC", suggested: "GST/HST Receivable" });
+  }
+  return { ok: missing.length === 0, missing };
+}
+
 /**
  * Resolve all destination accounts for the write-back. Throws with a clear
  * message naming exactly which account is missing.
@@ -171,18 +229,13 @@ export async function resolveExpenseAccounts(
   const accounts = await fetchAllAccounts(realmId, accessToken);
   const active = accounts.filter((a) => a.Active !== false);
 
-  const findByNames = (names: string[]) => {
+  const findByNames = (names: readonly string[]) => {
     const lowered = names.map((n) => n.toLowerCase());
     return active.find((a) => lowered.includes(a.Name.toLowerCase()));
   };
 
   // Revenue
-  const revenueAccount = findByNames([
-    "Painting Revenue",
-    "Service Revenue",
-    "Sales of Product Income",
-    "Services",
-  ]);
+  const revenueAccount = findByNames(STRIPE_ACCOUNT_NAMES.revenue);
   if (!revenueAccount) {
     throw new Error(
       'Could not find a revenue account. Create "Painting Revenue" in QBO and re-run.'
@@ -190,14 +243,7 @@ export async function resolveExpenseAccounts(
   }
 
   // Stripe fee
-  const feeAccount = findByNames([
-    "Bank Charges & Fees",
-    "Bank Charges and Fees",
-    "Merchant Fees",
-    "Merchant Processing Fees",
-    "Bank Service Charges",
-    "Accounting & Bookkeeping",
-  ]);
+  const feeAccount = findByNames(STRIPE_ACCOUNT_NAMES.fee);
   if (!feeAccount) {
     throw new Error(
       'Could not find a Stripe fee expense account. Create "Bank Charges & Fees" (or "Merchant Fees") in QBO and re-run.'
@@ -213,14 +259,7 @@ export async function resolveExpenseAccounts(
 
   if (jurisdiction === "CA") {
     // Sales tax collected from customers (a liability we owe to CRA)
-    const taxPayable = findByNames([
-      "GST/HST Payable",
-      "Sales Tax Payable",
-      "HST Payable",
-      "GST Payable",
-      "PST Payable",
-      "QST Payable",
-    ]);
+    const taxPayable = findByNames(STRIPE_ACCOUNT_NAMES.taxPayable);
     if (!taxPayable) {
       throw new Error(
         'Could not find a sales-tax-payable account. Create "GST/HST Payable" (or "Sales Tax Payable") in QBO and re-run.'
@@ -230,16 +269,7 @@ export async function resolveExpenseAccounts(
     result.taxPayableAccountName = taxPayable.Name;
 
     // ITC on the Stripe fee (recoverable on inputs)
-    const taxOnFee = findByNames([
-      "GST/HST Receivable",
-      "GST Receivable",
-      "HST Receivable",
-      "Input Tax Credits",
-      "ITCs",
-      "GST/HST ITC",
-      "Sales Tax Recoverable",
-      "GST/HST Payable", // last-resort same-account
-    ]);
+    const taxOnFee = findByNames(STRIPE_ACCOUNT_NAMES.taxOnFee);
     if (!taxOnFee) {
       throw new Error(
         'Could not find a GST/HST receivable / ITC account. Create "GST/HST Receivable" (or "Input Tax Credits") in QBO and re-run.'
