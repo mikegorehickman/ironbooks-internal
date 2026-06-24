@@ -130,7 +130,6 @@ function Section({
   emptyHint?: string;
 }) {
   const [open, setOpen] = useState(!defaultCollapsed);
-  if (rows.length === 0 && defaultCollapsed) return null;
   const sorted = sortRows(rows);
   return (
     <div className="rounded-xl bg-white border border-gray-200 mb-5">
@@ -168,9 +167,9 @@ export function CleanupSections({
 }) {
   return (
     <div>
-      <Section title="Continue cleanup" icon={RefreshCw} rows={continueCleanup} emptyHint="No cleanups in progress." />
-      <Section title="Stripe recon — waiting to connect" icon={CreditCard} rows={stripeRecon} emptyHint="No pending Stripe connections." />
-      <Section title="Balance Sheet cleanup" icon={Scale} rows={bsCleanup} emptyHint="No production clients awaiting BS." />
+      <Section title="Continue cleanup" icon={RefreshCw} rows={continueCleanup} defaultCollapsed emptyHint="No cleanups in progress." />
+      <Section title="Stripe recon — waiting to connect" icon={CreditCard} rows={stripeRecon} defaultCollapsed emptyHint="No pending Stripe connections." />
+      <Section title="Balance Sheet cleanup" icon={Scale} rows={bsCleanup} defaultCollapsed emptyHint="No production clients awaiting BS." />
       <Section title="Open a completed cleanup" icon={CheckCircle2} rows={completed} defaultCollapsed emptyHint="No completed files." />
     </div>
   );
