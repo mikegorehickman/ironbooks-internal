@@ -792,9 +792,15 @@ export function ReclassReview({
           <div className="mb-3 p-3 bg-red-50 text-red-800 rounded-lg text-sm">{error}</div>
         )}
 
+        {job.status === "complete" && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+            <span aria-hidden>✓</span>
+            Already executed — these reclassifications were posted to QBO. Running again won&apos;t re-post.
+          </div>
+        )}
         <button
           onClick={handleExecute}
-          disabled={!attested || submitting}
+          disabled={!attested || submitting || job.status === "complete"}
           className="w-full bg-teal hover:bg-teal-dark text-white font-semibold px-6 py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {submitting ? (
@@ -802,7 +808,11 @@ export function ReclassReview({
           ) : (
             <Play size={18} />
           )}
-          {totalApproved === 0 ? "Continue to next step" : `Execute ${totalApproved} reclassifications in QBO`}
+          {job.status === "complete"
+            ? "Already executed"
+            : totalApproved === 0
+            ? "Continue to next step"
+            : `Execute ${totalApproved} reclassifications in QBO`}
         </button>
         <p className="text-xs text-ink-slate text-center mt-2">
           Skipped, flagged, and rejected transactions will NOT be executed.

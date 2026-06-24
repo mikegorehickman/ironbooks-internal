@@ -509,6 +509,10 @@ export default async function ClientsPage() {
       };
     });
 
+  // Reuse the precise lifecycle status the manager dashboard already derives,
+  // so the clients list shows the same 11-stage label (not the old 3-label set).
+  const lifecycleById = new Map(managerRows.map((r) => [r.id, r.status]));
+
   return (
     <AppShell>
       <TopBar
@@ -537,7 +541,7 @@ export default async function ClientsPage() {
           canEdit={!!canEdit}
         />
         <ClientsList
-          initialClients={activeClients as any}
+          initialClients={activeClients.map((c: any) => ({ ...c, lifecycle: lifecycleById.get(c.id) ?? null })) as any}
           bookkeepers={bookkeepersRes.data || []}
           currentUserId={user?.id || ""}
           canEdit={!!canEdit}

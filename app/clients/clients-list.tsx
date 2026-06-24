@@ -3,6 +3,7 @@
 import { useState, useMemo, Component, useEffect, useRef, type ReactNode } from "react";
 import { CommsTracker } from "./comms-tracker";
 import { PyTaxesWidget } from "./py-taxes-widget";
+import { LIFECYCLE_META, type LifecycleStatus } from "@/lib/client-lifecycle";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -51,6 +52,9 @@ interface ClientRow {
   jurisdiction: "US" | "CA";
   state_province: string | null;
   status: "onboarding" | "active" | "behind" | "paused" | "churned";
+  /** Precise lifecycle stage from deriveLifecycleStatus (V2) — preferred over
+   *  the crude derivedStatus() badge when present. */
+  lifecycle?: LifecycleStatus | null;
   is_active: boolean;
   qbo_realm_id: string;
   double_client_id: string;
@@ -646,6 +650,16 @@ function ClientRow({
           workflow (no manual override). */}
       <div>
         {(() => {
+          // Prefer the precise 11-stage lifecycle label (V2); fall back to the
+          // legacy 3-label derivedStatus when lifecycle isn't supplied.
+          if (client.lifecycle && LIFECYCLE_META[client.lifecycle]) {
+            const m = LIFECYCLE_META[client.lifecycle];
+            return (
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold ${m.tone}`}>
+                {m.label}
+              </span>
+            );
+          }
           const ds = derivedStatus(client);
           return (
             <span
