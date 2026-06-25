@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   Home, Wallet, Receipt, Sparkles,
-  GraduationCap, Settings, FileCheck2, Mail, BookOpen, Tags, CreditCard,
+  GraduationCap, Settings, FileCheck2, Mail, BookOpen, Tags, CreditCard, Phone,
 } from "lucide-react";
 import { MessagesNavLink } from "./messages-nav-link";
 import { FinancialStatementsNav } from "./financial-statements-nav";
@@ -162,6 +162,7 @@ export default async function PortalLayout({ children }: { children: React.React
             <NavLink href="/portal/ask-ai" icon={Sparkles} label="Ask the AI" badge="NEW" ai />
             <NavLink href="/portal/knowledge-base" icon={BookOpen} label="Knowledge Base" />
             <NavLink href="/portal/learn" icon={GraduationCap} label="Learn" />
+            <NavLink href="/portal/coaching-call" icon={Phone} label="Book a coaching call" />
 
             {/* Account actions sit right under Help so they're reachable without
                 scrolling to the footer. */}
