@@ -315,7 +315,13 @@ export function ClientRecCard({
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-navy">{client.client_name}</span>
+            <Link
+              href={`/clients/${client.id}`}
+              className="font-bold text-navy hover:text-teal hover:underline"
+              title="Open client profile"
+            >
+              {client.client_name}
+            </Link>
             {isCleanupKind && (
               <span className="text-[10px] font-bold bg-violet-100 text-violet-800 px-1.5 py-0.5 rounded">
                 CLEANUP SIGN-OFF

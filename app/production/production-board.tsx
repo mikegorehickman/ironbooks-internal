@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle, CalendarCheck, CheckCircle2, ChevronLeft, ChevronRight, CircleDashed,
@@ -459,16 +460,24 @@ function BoardCard({
         selected ? "border-teal ring-1 ring-teal/30" : "border-gray-150 border-gray-200"
       }`}
     >
-      <button onClick={onSelect} className="w-full text-left">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-sm font-semibold text-navy">{client.client_name}</span>
-          {client.paused && (
-            <span className="text-[9px] font-bold bg-gray-100 text-ink-slate px-1 py-0.5 rounded">PAUSED</span>
-          )}
-          {bsOff && (
-            <span className="text-[9px] font-bold bg-sky-100 text-sky-800 px-1 py-0.5 rounded">P&L ONLY</span>
-          )}
-        </div>
+      {/* Client name links to the profile; the rest of the body opens the
+          month-end detail drawer. */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <Link
+          href={`/clients/${client.id}`}
+          className="text-sm font-semibold text-navy hover:text-teal hover:underline"
+          title="Open client profile"
+        >
+          {client.client_name}
+        </Link>
+        {client.paused && (
+          <span className="text-[9px] font-bold bg-gray-100 text-ink-slate px-1 py-0.5 rounded">PAUSED</span>
+        )}
+        {bsOff && (
+          <span className="text-[9px] font-bold bg-sky-100 text-sky-800 px-1 py-0.5 rounded">P&L ONLY</span>
+        )}
+      </div>
+      <button onClick={onSelect} className="w-full text-left" title="Open month-end detail">
         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
           {isPending ? (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded">
