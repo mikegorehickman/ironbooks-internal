@@ -45,6 +45,7 @@ import { ClientDetailsCard } from "./client-details-card";
 import { GrainSection } from "./grain-section";
 import { CallTodosPanel } from "./call-todos-panel";
 import { CloseAndSendCard } from "./close-and-send-card";
+import { ResendLoginLink } from "./resend-login-link";
 import { StatementsCard } from "./statements-card";
 import { MessagesPanel } from "./messages-panel";
 import { BillingTab } from "./billing-tab";
@@ -215,6 +216,7 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
             Messages
           </Link>
           {canImpersonate && <ViewAsClientButton clientLinkId={clientLink.id} />}
+          <ResendLoginLink clientLinkId={clientLink.id} />
           <DoubleLinkControl
             clientLinkId={clientLink.id}
             doubleName={clientLink.double_client_name}
@@ -511,10 +513,12 @@ function ProductionStatusCard({
   // marked complete, but still allow override (some clients come in
   // already clean and don't need a cleanup run).
   if (!dailyReconEnabled) {
-    // Only surface the promote CTA once the client has worked through COA
-    // cleanup + reclass + bank rules (reached the BS stage). Before that,
-    // promoting is premature — hide the card entirely.
-    if (!reachedBsStage) return null;
+    // Always surface the promote CTA for un-enrolled clients. We used to hide
+    // it until the COA/reclass/rules stages all read "complete" — but the
+    // stage derivation is easily thrown off by a stale failed or in-review job
+    // (and some clients come in already clean), which left seniors with NO way
+    // to move a verified-clean client to production. Show it always; warn
+    // (below) when the stages aren't all green, but allow the override.
     return (
       <section className="rounded-2xl border-2 border-teal/20 bg-gradient-to-br from-teal/5 to-white p-5">
         <div className="flex items-start gap-3">
@@ -534,7 +538,15 @@ function ProductionStatusCard({
               confidence; anything below or unmatched lands on the Today queue for
               your sr. to review.
             </p>
-            {!cleanupCompletedAt && (
+            {!reachedBsStage && (
+              <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <strong>Heads up:</strong> COA cleanup, reclass, and bank rules
+                aren&apos;t all marked complete in the system yet. If you&apos;ve
+                finished (or are intentionally skipping) cleanup, you can still move
+                this client to production — this overrides the stage checks.
+              </div>
+            )}
+            {reachedBsStage && !cleanupCompletedAt && (
               <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 <strong>Heads up:</strong> cleanup hasn&apos;t been marked complete for
                 this client yet. You can still promote, but ideally finish a cleanup

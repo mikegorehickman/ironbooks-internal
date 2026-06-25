@@ -163,6 +163,14 @@ export function ClientDetailsCard({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // The profile saved. If an email change couldn't repoint the portal
+      // login (e.g. the new address already belongs to another login), surface
+      // it and keep the card open so it isn't missed — the contact email still
+      // saved either way.
+      if (data.login_error) {
+        setError(data.login_error);
+        return;
+      }
       setEditing(false);
       router.refresh();
     } catch (e: any) {

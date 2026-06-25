@@ -1,4 +1,39 @@
+import { randomBytes } from "crypto";
 import { sendPortalInviteEmail } from "@/lib/client-comms";
+
+/** How long an emailed activation link stays valid. */
+export const ACTIVATION_TTL_DAYS = 7;
+
+/**
+ * Create a 7-day activation link for a portal user. Stores a high-entropy token
+ * and returns the /auth/activate URL to email. Clicking it within 7 days mints
+ * a fresh Supabase sign-in link server-side (see app/auth/activate) — so the
+ * link the client holds works for a full week, despite Supabase magic links
+ * themselves expiring in ≤24h. Returns null if the token couldn't be stored
+ * (e.g. table not migrated yet) so callers can fall back to a raw link.
+ */
+export async function createActivationLink(
+  service: any,
+  opts: { userId: string; clientLinkId: string; email: string; createdBy?: string | null }
+): Promise<string | null> {
+  try {
+    const token = randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + ACTIVATION_TTL_DAYS * 86400000).toISOString();
+    const { error } = await service.from("portal_invite_tokens").insert({
+      token,
+      user_id: opts.userId,
+      client_link_id: opts.clientLinkId,
+      email: (opts.email || "").toLowerCase(),
+      expires_at: expiresAt,
+      created_by: opts.createdBy ?? null,
+    });
+    if (error) return null;
+    const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    return `${base}/auth/activate?token=${token}`;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Provision (and optionally email) a client portal user. The single source of
@@ -65,17 +100,6 @@ export async function provisionPortalUser(
 
   const redirectTo = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`;
 
-  const linkForExistingUser = async (): Promise<string | null> => {
-    const ml = await service.auth.admin.generateLink({ type: "magiclink", email, options: { redirectTo } });
-    if (ml?.data?.properties?.action_link) return ml.data.properties.action_link;
-    const inv = await service.auth.admin.generateLink({
-      type: "invite",
-      email,
-      options: { data: { full_name: fullName, role: "client" }, redirectTo },
-    });
-    return inv?.data?.properties?.action_link || null;
-  };
-
   const { data: existing } = await service
     .from("users")
     .select("id, role, is_active, full_name")
@@ -108,12 +132,7 @@ export async function provisionPortalUser(
               invited_at: new Date().toISOString(),
             })
             .eq("id", userId);
-          if (sendInvite) {
-            const link = await linkForExistingUser();
-            if (link) {
-              await sendPortalInviteEmail({ to: email, fullName, clientName, actionLink: link, isResend: false });
-            }
-          }
+          // Invite email is sent once at the end (7-day activation link).
         } else {
           return { ok: false, status: 409, resend: false, silent: !sendInvite, error: "This email already has portal access. Use resend instead." };
         }
@@ -127,11 +146,7 @@ export async function provisionPortalUser(
       if (!(existing as any).is_active) {
         await service.from("users").update({ is_active: true }).eq("id", userId);
       }
-      if (sendInvite) {
-        const link = await linkForExistingUser();
-        if (!link) return { ok: false, status: 500, resend: true, silent: false, error: "Resend failed: could not generate a sign-in link" };
-        await sendPortalInviteEmail({ to: email, fullName, clientName, actionLink: link, isResend: true });
-      }
+      // Invite/resend email is sent once at the end (7-day activation link).
     }
   } else {
     // No public.users row. Create the auth user + branded invite.
@@ -153,21 +168,18 @@ export async function provisionPortalUser(
         email,
         options: { data: { full_name: fullName, role: "client" }, redirectTo },
       });
-      let inviteLink: string | null = data?.properties?.action_link || null;
+      // generateLink(type:invite) creates the auth user; we email a 7-day
+      // activation link at the end rather than this raw (≤24h) link.
       if (inviteErr || !data?.user) {
         if (inviteErr && isAlreadyRegistered(inviteErr.message)) {
           const recovered = await recoverExistingAuthUser();
           if (!recovered) return { ok: false, status: 500, resend: false, silent: false, error: `Email registered but couldn't recover auth user: ${inviteErr.message}` };
           authResponse = recovered;
-          inviteLink = await linkForExistingUser();
         } else {
           return { ok: false, status: 500, resend: false, silent: false, error: inviteErr?.message || "Invite failed" };
         }
       } else {
         authResponse = data;
-      }
-      if (inviteLink) {
-        await sendPortalInviteEmail({ to: email, fullName, clientName, actionLink: inviteLink, isResend: false });
       }
     } else {
       const { data, error: createErr } = await service.auth.admin.createUser({
@@ -217,6 +229,30 @@ export async function provisionPortalUser(
       active: true,
     });
     if (mapErr) return { ok: false, status: 500, resend: isResend, silent: !sendInvite, error: `Mapping insert failed: ${mapErr.message}` };
+  }
+
+  // Email a single 7-day activation link (mints a fresh Supabase sign-in link
+  // at click time), so the invite/resend link works for a full week instead of
+  // Supabase's ≤24h. Falls back to silent provisioning if the link can't be made.
+  if (sendInvite) {
+    let actionLink = await createActivationLink(service, { userId, clientLinkId, email, createdBy: invitedBy });
+    if (!actionLink) {
+      // Fallback (e.g. migration 92 not applied yet) — raw Supabase link (≤24h)
+      // so the invite still goes out rather than silently sending nothing.
+      const ml = await service.auth.admin.generateLink({ type: "magiclink", email, options: { redirectTo } });
+      actionLink = ml?.data?.properties?.action_link || null;
+      if (!actionLink) {
+        const inv = await service.auth.admin.generateLink({
+          type: "invite",
+          email,
+          options: { data: { full_name: fullName, role: "client" }, redirectTo },
+        });
+        actionLink = inv?.data?.properties?.action_link || null;
+      }
+    }
+    if (actionLink) {
+      await sendPortalInviteEmail({ to: email, fullName, clientName, actionLink, isResend });
+    }
   }
 
   return {

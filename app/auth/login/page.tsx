@@ -14,6 +14,8 @@ const ERROR_COPY: Record<string, string> = {
     "Couldn't create your account. Please try again, or email admin@ironbooks.com if it keeps failing.",
   missing_code: "Sign-in link expired or invalid. Request a new one below.",
   oauth_failed: "Sign-in failed. Try requesting a new magic link.",
+  expired_invite:
+    "Your activation link has expired or was already used. Enter your email below for a fresh sign-in link, or ask your bookkeeper to re-send your invite.",
 };
 
 /** Friendly message for when there's no portal account for the email yet.

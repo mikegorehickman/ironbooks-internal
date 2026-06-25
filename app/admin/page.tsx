@@ -2,7 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, Phone } from "lucide-react";
+import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, Phone, RefreshCw } from "lucide-react";
 
 export default async function AdminOverviewPage() {
   const supabase = await createServerSupabase();
@@ -113,6 +113,23 @@ export default async function AdminOverviewPage() {
             <ComplianceItem label="Service role isolated" ok />
           </div>
         </div>
+
+        {/* Maintenance utilities */}
+        <Link
+          href="/admin/resync-logins"
+          className="group flex items-center justify-between rounded-xl bg-white border border-gray-200 px-5 py-3 mb-6 hover:border-teal hover:bg-teal-lighter/40 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg flex items-center justify-center w-9 h-9 bg-teal-light">
+              <RefreshCw size={16} className="text-teal" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-navy">Re-sync portal logins</h3>
+              <p className="text-xs text-ink-slate">Repoint client login emails that drifted from their contact email</p>
+            </div>
+          </div>
+          <ArrowRight size={16} className="text-ink-light group-hover:text-teal" />
+        </Link>
 
         <div className="grid grid-cols-2 gap-6">
           {/* Team leaderboard */}

@@ -134,7 +134,7 @@ export interface ClosedPeriodResult {
   /** Friendly label like "April 2026" for that month */
   closedMonthLabel: string;
   /** Source of truth — how we determined the closed-through date */
-  source: "reclass_job_closed" | "cleanup_completed" | "calendar_default";
+  source: "monthly_close_sent" | "reclass_job_closed" | "cleanup_completed" | "calendar_default";
 }
 
 export async function resolveClosedPeriod(
@@ -144,21 +144,43 @@ export async function resolveClosedPeriod(
   let closedThrough: string | null = null;
   let source: ClosedPeriodResult["source"] = "calendar_default";
 
-  // 1. Most recent closed reclass job
+  // 0. Most recent PRODUCTION month-end close that was actually sent to the
+  //    client — the strongest "this month is reconciled AND delivered" signal,
+  //    and the one a production client's portal should reflect. (Previously
+  //    this was ignored, so production clients closed via the month-end send
+  //    still showed the "not ready yet" empty state.)
   try {
-    const { data: lastClosed } = await service
-      .from("reclass_jobs")
-      .select("date_range_end, month_closed_at")
+    const { data: lastSent } = await service
+      .from("monthly_rec_runs")
+      .select("period_end, sent_to_client_at")
       .eq("client_link_id", clientLinkId)
-      .not("month_closed_at", "is", null)
-      .order("date_range_end", { ascending: false })
+      .not("sent_to_client_at", "is", null)
+      .order("period_end", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (lastClosed?.date_range_end) {
-      closedThrough = lastClosed.date_range_end;
-      source = "reclass_job_closed";
+    if (lastSent?.period_end) {
+      closedThrough = lastSent.period_end;
+      source = "monthly_close_sent";
     }
   } catch { /* fall through */ }
+
+  // 1. Most recent closed reclass job
+  if (!closedThrough) {
+    try {
+      const { data: lastClosed } = await service
+        .from("reclass_jobs")
+        .select("date_range_end, month_closed_at")
+        .eq("client_link_id", clientLinkId)
+        .not("month_closed_at", "is", null)
+        .order("date_range_end", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastClosed?.date_range_end) {
+        closedThrough = lastClosed.date_range_end;
+        source = "reclass_job_closed";
+      }
+    } catch { /* fall through */ }
+  }
 
   // 2. Cleanup completion date
   if (!closedThrough) {
@@ -605,7 +627,7 @@ export async function fetchOverview(
   primaryPLOverride?: ProfitLossData | null
 ): Promise<OverviewData> {
   const emptyPL: ProfitLossData = {
-    totalIncome: 0, totalExpenses: 0, netIncome: 0,
+    totalIncome: 0, totalExpenses: 0, netIncome: 0, cogs: 0, grossProfit: 0,
     mealsExpense: 0, mealsAccounts: [], lineItems: [],
   };
 

@@ -230,6 +230,8 @@ export function demoProfitAndLoss(start?: string): ProfitLossData {
     totalIncome,
     totalExpenses,
     netIncome: totalIncome - totalExpenses,
+    cogs: 0,
+    grossProfit: totalIncome,
     mealsExpense: mealsAccounts.reduce((s, a) => s + Math.abs(a.amount), 0),
     mealsAccounts,
     lineItems,
