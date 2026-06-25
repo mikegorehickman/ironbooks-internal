@@ -89,6 +89,9 @@ export default async function CategorizePage() {
     const seen = new Set<string>();
     categoryOptions = ((mc as any[]) || [])
       .filter((a) => PL.has(a.section) || ["Expense", "Income", "Revenue", "Cost of Goods Sold", "Other Income", "Other Expense"].includes(a.qbo_account_type))
+      // Never offer "Uncategorized" as a client pick — it's the bookkeeper
+      // escalation bucket, not a category a client should choose.
+      .filter((a) => !/uncategor/i.test(String(a.account_name || "")))
       .map((a) => ({ name: a.account_name as string, fqn: a.account_name as string }))
       .filter((o) => (seen.has(o.name) ? false : (seen.add(o.name), true)))
       .sort((a, b) => a.name.localeCompare(b.name));
