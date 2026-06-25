@@ -1,4 +1,4 @@
-import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { BillingClient } from "./billing-client";
 import { PortalErrorState } from "../error-state";
@@ -9,6 +9,7 @@ import {
   type StripeBillingInfo,
   type StripeInvoice,
 } from "@/lib/stripe-billing";
+import { tryResolvePortalContext } from "@/lib/portal-context";
 
 export const dynamic = "force-dynamic";
 
@@ -23,51 +24,19 @@ export const dynamic = "force-dynamic";
  * never needs to be set manually.
  */
 export default async function BillingPage() {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/auth/login");
-
+  // Resolve the portal client the SAME way the layout does (honors admin
+  // impersonation). Doing our own cookie/mapping logic here is what made
+  // billing diverge from the rest of the portal — e.g. showing "Portal access
+  // not available" for a client the layout rendered fine.
+  const ctxResult = await tryResolvePortalContext();
+  if (!ctxResult.ok) {
+    if (ctxResult.code === "no_session") redirect("/auth/login");
+    return <PortalErrorState code={ctxResult.code as any} />;
+  }
+  const { ctx } = ctxResult;
+  const clientLinkId = ctx.clientLinkId;
+  const impersonating = ctx.impersonating;
   const service = createServiceSupabase();
-
-  const { data: profile } = await service
-    .from("users")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  const role = (profile as any)?.role;
-  const isInternal = ["admin", "lead", "bookkeeper", "viewer"].includes(role);
-
-  const { cookies } = await import("next/headers");
-  const cookieStore = await cookies();
-  const impersonatingClientLinkId = cookieStore.get("ironbooks_impersonate_client_link_id")?.value;
-
-  let clientLinkId: string | null = impersonatingClientLinkId || null;
-
-  if (!clientLinkId) {
-    if (isInternal) {
-      return (
-        <PortalErrorState
-          code="not_client"
-          message="Billing is a client-facing page. Use impersonation to preview it for a specific client."
-        />
-      );
-    }
-    const { data: mapping } = await (service as any)
-      .from("client_users")
-      .select("client_link_id")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    clientLinkId = mapping?.client_link_id || null;
-  }
-
-  if (!clientLinkId) {
-    return (
-      <PortalErrorState
-        code="no_mapping"
-        message="Your account isn't linked to a client yet. Your Ironbooks team will send you access soon."
-      />
-    );
-  }
 
   const { data: clientLink } = await service
     .from("client_links")
@@ -89,7 +58,7 @@ export default async function BillingPage() {
   if (!stripeCustomerId) {
     const candidateEmails = [
       (clientLink as any).client_email as string | null,
-      user.email || null,
+      ctx.userEmail || null,
     ].filter((e): e is string => !!e && e.trim().length > 0);
 
     for (const email of candidateEmails) {
@@ -172,7 +141,7 @@ export default async function BillingPage() {
       coachingCheckoutEnabled={coachingCheckoutEnabled}
       cancelRequestAt={cancelRequestAt}
       cancelRequestNote={cancelRequestNote}
-      impersonating={!!impersonatingClientLinkId && isInternal}
+      impersonating={impersonating}
       portalReturnUrl={`${baseUrl}/portal/billing`}
     />
   );
