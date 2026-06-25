@@ -3,7 +3,6 @@ import { createServiceSupabase } from "@/lib/supabase";
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import {
   validateAttachments,
-  sendResendEmail,
   type ClientCommunication,
 } from "@/lib/client-comms";
 
@@ -100,27 +99,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
   }
 
-  // Best-effort email to the team — same destination as support tickets.
-  // The DB row is the source of truth; email failure never fails the send.
-  const fileList = attResult.attachments.map((a) => `  • ${a.name}`).join("\n");
-  await sendResendEmail({
-    to: [process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com"],
-    replyTo: ctx.userEmail,
-    subject: `[Ironbooks Portal] ${attResult.attachments.length > 0 ? "Files from" : "Message from"} ${ctx.clientName}`,
-    text: [
-      `New portal ${attResult.attachments.length > 0 ? "upload" : "message"} from ${ctx.clientName}.`,
-      ``,
-      `From: ${ctx.userFullName || "(no name)"} <${ctx.userEmail}>`,
-      ctx.impersonating ? `(sent while impersonated by ${ctx.realUserName || "Admin"})` : null,
-      ``,
-      body || "(no message text)",
-      attResult.attachments.length > 0 ? `\nAttached files:\n${fileList}` : null,
-      ``,
-      `View in SNAP: /clients/${ctx.clientLinkId}/messages`,
-    ]
-      .filter((l) => l !== null)
-      .join("\n"),
-  });
+  // No internal email — client messages surface in-app only (the client_link's
+  // Messages thread + the bookkeeper's unread badge / Today). Per the
+  // no-internal-emails policy, the DB row is the only notification.
 
   return NextResponse.json({ ok: true, message: inserted });
 }
