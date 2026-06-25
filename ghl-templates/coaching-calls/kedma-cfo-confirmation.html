@@ -1,0 +1,31 @@
+<div style="background:#F4F5F7;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #E5E7EB;border-radius:14px;overflow:hidden;">
+      <tr><td style="background:#0F1F2E;padding:20px 28px;">
+        <span style="color:#ffffff;font-size:18px;font-weight:700;">Ironbooks</span>
+        <span style="display:block;color:#8CD3CC;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-top:3px;">CFO Consult with Kedma &middot; 30 min</span>
+      </td></tr>
+      <tr><td style="padding:26px 28px;color:#33414E;font-size:15px;line-height:1.6;">
+        <h1 style="margin:0 0 14px;color:#0F1F2E;font-size:20px;">You're booked with Kedma 🎉</h1>
+        <p style="margin:0 0 16px;">Hi {{contact.first_name}}, your 30-minute <strong>CFO Consult</strong> is confirmed. Here are the details:</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F9F8;border:1px solid #CBD5E1;border-radius:10px;margin:0 0 18px;">
+          <tr><td style="padding:14px 16px;">
+            <div style="font-size:12px;color:#2D7A75;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">When</div>
+            <div style="font-size:16px;color:#0F1F2E;font-weight:600;margin-bottom:10px;">{{appointment.start_time}}</div>
+            <div style="font-size:12px;color:#2D7A75;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">With</div>
+            <div style="font-size:15px;color:#0F1F2E;margin-bottom:10px;">Kedma &middot; CFO Consult (30 min)</div>
+            <div style="font-size:12px;color:#2D7A75;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Join</div>
+            <div style="font-size:14px;"><a href="{{appointment.meeting_location}}" style="color:#1A9B8F;word-break:break-all;">{{appointment.meeting_location}}</a></div>
+          </td></tr>
+        </table>
+        <p style="margin:0 0 6px;font-weight:700;color:#0F1F2E;">To get the most from it</p>
+        <p style="margin:0 0 18px;">Come with your 2&ndash;3 biggest questions on cash flow, margins, or your next growth move. Kedma reviews your latest numbers beforehand, so you can dig straight in and leave with a clear plan.</p>
+        <p style="margin:0;font-size:13px;color:#8A94A0;">Need to change it?
+          <a href="{{appointment.reschedule_link}}" style="color:#1A9B8F;font-weight:600;">Reschedule</a> &nbsp;&middot;&nbsp;
+          <a href="{{appointment.cancellation_link}}" style="color:#1A9B8F;font-weight:600;">Cancel</a>
+        </p>
+      </td></tr>
+      <tr><td style="background:#0F1F2E;padding:14px 28px;color:rgba(255,255,255,0.6);font-size:11px;">Ironbooks &mdash; Advancing Financial Literacy In The Trades</td></tr>
+    </table>
+  </td></tr></table>
+</div>
