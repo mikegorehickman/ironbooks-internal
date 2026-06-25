@@ -41,6 +41,7 @@ import { ClientDetailsCard } from "./client-details-card";
 import { GrainSection } from "./grain-section";
 import { CallTodosPanel } from "./call-todos-panel";
 import { CloseAndSendCard } from "./close-and-send-card";
+import { ResendLoginLink } from "./resend-login-link";
 import { StatementsCard } from "./statements-card";
 import { MessagesPanel } from "./messages-panel";
 import { BillingTab } from "./billing-tab";
@@ -207,6 +208,7 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
             Messages
           </Link>
           {canImpersonate && <ViewAsClientButton clientLinkId={clientLink.id} />}
+          <ResendLoginLink clientLinkId={clientLink.id} />
           <DoubleLinkControl
             clientLinkId={clientLink.id}
             doubleName={clientLink.double_client_name}
