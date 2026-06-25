@@ -380,7 +380,10 @@ export async function fetchClientProgress(
   stages.push({
     key: "coa",
     label: "COA Cleanup",
-    status: coaFailed > 0
+    // Block only when the LATEST job failed — an old failed run that was later
+    // re-done (newer complete) shouldn't keep the stage red. (coaList is
+    // ordered created_at desc, so [0] is the most recent.)
+    status: coaList[0]?.status === "failed"
       ? "blocked"
       : coaOpen > 0
       ? "in_progress"
@@ -421,7 +424,10 @@ export async function fetchClientProgress(
   stages.push({
     key: "reclass",
     label: "Reclass",
-    status: rcFailed > 0
+    // Block only when the LATEST reclass failed — older failed runs (e.g.
+    // watchdog-killed) that were later re-completed shouldn't keep the stage
+    // red and stop the client moving to production. (rcList is created_at desc.)
+    status: rcList[0]?.status === "failed"
       ? "blocked"
       : rcOpen > 0
       ? "in_progress"
