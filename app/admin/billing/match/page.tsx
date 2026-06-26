@@ -41,7 +41,13 @@ export default async function BillingMatchPage() {
     });
   }
 
-  const clients = index.clients.map((c) => ({ id: c.id, company: c.company })).sort((a, b) => a.company.localeCompare(b.company));
+  // Picker offers ONLY clients not already mapped to a Stripe customer — you're
+  // matching a charge to a client who still needs one.
+  const mapped = new Set(index.byCustomer.values());
+  const clients = index.clients
+    .filter((c) => !mapped.has(c.id))
+    .map((c) => ({ id: c.id, company: c.company }))
+    .sort((a, b) => a.company.localeCompare(b.company));
 
   return <MatchClient items={items} clients={clients} />;
 }
