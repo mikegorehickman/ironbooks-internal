@@ -47,6 +47,7 @@ const toolsNav = [
 
 const adminItems = [
   { href: "/admin", label: "Admin", icon: Shield },
+  { href: "/admin/billing", label: "Billing", icon: CreditCard },
   { href: "/admin/bulk-email", label: "Bulk Email", icon: Mail },
   { href: "/admin/call-matching", label: "Call Matching", icon: Video },
   { href: "/admin/audit", label: "Audit Log", icon: BookOpen },
