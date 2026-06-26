@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Loader2, Check, ArrowLeft } from "lucide-react";
 
 type Item = {
-  id: string; chargeId: string; customerId: string | null; who: string; displayEmail: string | null;
+  id: string; chargeId: string; customerId: string | null; who: string; displayEmail: string | null; displayName: string | null;
   amountCents: number; currency: string; year: number; month: number;
   suggestion: { clientLinkId: string; company: string; score: number; reason: string } | null;
 };
@@ -31,6 +31,22 @@ export function MatchClient({ items, clients }: { items: Item[]; clients: Client
       const j = await res.json();
       if (!res.ok) { setErr(j.error || "Match failed"); return; }
       setDone((d) => ({ ...d, [it.id]: company }));
+    } catch (e: any) { setErr(e?.message || "Network error"); }
+    finally { setBusy(null); }
+  }
+
+  // Create a NEW SNAP account (onboarding, assigned to Lisa) for a payer who
+  // has no client yet, and map this Stripe customer to it.
+  async function createAccount(it: Item) {
+    setBusy(it.id); setErr(null);
+    try {
+      const res = await fetch("/api/admin/billing/create-client", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stripe_customer_id: it.customerId, email: it.displayEmail, name: it.displayName, currency: it.currency }),
+      });
+      const j = await res.json();
+      if (!res.ok) { setErr(j.error || "Create failed"); return; }
+      setDone((d) => ({ ...d, [it.id]: `${it.displayName || it.displayEmail || "new client"} (created → onboarding)` }));
     } catch (e: any) { setErr(e?.message || "Network error"); }
     finally { setBusy(null); }
   }
@@ -78,6 +94,13 @@ export function MatchClient({ items, clients }: { items: Item[]; clients: Client
                       disabled={!chosen || busy === it.id || !it.customerId}
                       className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50">
                       {busy === it.id ? <Loader2 size={13} className="animate-spin" /> : null} Match
+                    </button>
+                    <button
+                      onClick={() => createAccount(it)}
+                      disabled={busy === it.id}
+                      title="No account for this payer? Create one in onboarding (assigned to Lisa) and map this customer."
+                      className="inline-flex items-center gap-1.5 border border-gray-200 bg-white hover:border-teal text-ink-slate hover:text-teal-dark text-sm font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50">
+                      + New account
                     </button>
                   </div>
                 )}

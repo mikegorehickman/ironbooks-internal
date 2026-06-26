@@ -43,7 +43,7 @@ export default async function BillingMatchPage() {
     const suggestion = r.stripe_customer_id ? suggestClient(index, email, name) : null;
     items.push({
       id: r.id, chargeId: r.stripe_charge_id, customerId: r.stripe_customer_id || null,
-      who: r.who, displayEmail: email, amountCents: r.amount_cents, currency: r.currency,
+      who: r.who, displayEmail: email, displayName: name, amountCents: r.amount_cents, currency: r.currency,
       year: r.period_year, month: r.period_month, suggestion,
     });
   }
