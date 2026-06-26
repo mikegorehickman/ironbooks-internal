@@ -42,7 +42,7 @@ export function similarity(a: string, b: string): number {
 export async function buildClientIndex(service: any): Promise<ClientIndex> {
   const { data: clients } = await service
     .from("client_links")
-    .select("id, client_name, legal_business_name, contact_first_name, contact_last_name, client_email, stripe_customer_id")
+    .select("id, client_name, legal_business_name, contact_first_name, contact_last_name, client_email, stripe_customer_id, metadata")
     .eq("is_active", true);
 
   // Portal-login emails per client (the address that usually pays on Stripe).
@@ -68,6 +68,10 @@ export async function buildClientIndex(service: any): Promise<ClientIndex> {
     const emails = new Set<string>();
     if (c.client_email) emails.add(String(c.client_email).toLowerCase());
     for (const e of (portalEmailsByClient.get(c.id) || [])) emails.add(e);
+    // Alternate emails (e.g. a merged duplicate's address — same business, 2nd
+    // email) so a charge paid from either address still maps to this client.
+    const alts = (c.metadata && (c.metadata as any).alternate_emails) || [];
+    if (Array.isArray(alts)) for (const e of alts) if (e) emails.add(String(e).toLowerCase());
     for (const e of emails) if (!byEmail.has(e)) byEmail.set(e, c.id);
     if (c.stripe_customer_id) byCustomer.set(c.stripe_customer_id, c.id);
     const first = (c.contact_first_name || "").trim();
