@@ -283,11 +283,13 @@ export async function runDailyRecon(
       );
     }
 
-    // 8. Load bank rules cache
+    // 8. Load bank rules cache — only live rules (active/approved), so a
+    //    draft/rejected rule never auto-categorizes.
     const { data: bankRules } = await service
       .from("bank_rules")
       .select("vendor_pattern, target_account_name")
-      .eq("client_link_id", clientLinkId);
+      .eq("client_link_id", clientLinkId)
+      .in("status", ["active", "approved"]);
     const bankRulesByVendor = new Map<string, string>(
       (bankRules || [])
         .filter((r: any) => r.vendor_pattern && r.target_account_name)

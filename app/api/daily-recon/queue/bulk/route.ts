@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, reclassifyTransactionLines } from "@/lib/qbo-reclass";
+import { upsertActivateRule } from "@/lib/bank-rules";
 
 export const dynamic = "force-dynamic";
 // Bulk approve may need to ship 30+ QBO writes serially per realm
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
   }
 
   const reason = typeof body.reason === "string" ? body.reason : null;
+  const createRules = (body as any).create_rules === true;
 
   const service = createServiceSupabase();
 
@@ -86,7 +88,7 @@ export async function POST(request: Request) {
   const { data: rows } = await service
     .from("daily_review_queue" as any)
     .select(
-      "id, client_link_id, decision, qbo_transaction_id, qbo_transaction_type, qbo_line_id, suggested_account_id, suggested_account_name, client_links!inner(id, qbo_realm_id, assigned_bookkeeper_id)"
+      "id, client_link_id, decision, qbo_transaction_id, qbo_transaction_type, qbo_line_id, vendor_name, description, transaction_amount, suggested_account_id, suggested_account_name, client_links!inner(id, qbo_realm_id, assigned_bookkeeper_id)"
     )
     .in("id", ids);
 
@@ -189,6 +191,24 @@ export async function POST(request: Request) {
           executed_at: now,
         } as any)
         .eq("id", id);
+
+      // Learning loop (best-effort) — teach a rule so this vendor
+      // auto-categorizes next run.
+      if (createRules && r.vendor_name) {
+        try {
+          await upsertActivateRule(service as any, {
+            client_link_id: r.client_link_id,
+            vendor: r.vendor_name,
+            target_account_name: r.suggested_account_name,
+            created_by: user.id,
+            sample_descriptions: r.description ? [String(r.description)] : [],
+            transaction_count: 1,
+            total_amount: r.transaction_amount || 0,
+          });
+        } catch {
+          /* rule hiccup never fails the approve */
+        }
+      }
 
       results.push({ id, status: "executed" });
       succeeded++;

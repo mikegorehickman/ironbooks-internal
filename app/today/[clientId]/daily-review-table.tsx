@@ -68,6 +68,9 @@ export function DailyReviewTable({
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ summary: any; results?: any[] } | null>(null);
   const [filter, setFilter] = useState<"all" | "high" | "med" | "low" | "anomalies">("all");
+  // Learning loop: when on, approving also teaches a bank rule so this vendor
+  // auto-categorizes next run. Default on — that's the whole point.
+  const [teachRules, setTeachRules] = useState(true);
 
   const filteredRows = useMemo(() => {
     const arr = [...rows];
@@ -96,6 +99,9 @@ export function DailyReviewTable({
     setErrorId(null);
     try {
       const body: any = { action };
+      if (action === "approve" || action === "approve_with_override") {
+        body.create_rule = teachRules;
+      }
       if (action === "approve_with_override") {
         const o = overrides.get(row.id);
         if (!o) {
@@ -148,7 +154,7 @@ export function DailyReviewTable({
       const res = await fetch(`/api/daily-recon/queue/bulk`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, action }),
+        body: JSON.stringify({ ids, action, create_rules: action === "approve" ? teachRules : false }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -272,6 +278,15 @@ export function DailyReviewTable({
             </button>
           </div>
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-white/80 mr-1 cursor-pointer select-none" title="When on, approving teaches a bank rule so this vendor auto-categorizes next run">
+              <input
+                type="checkbox"
+                checked={teachRules}
+                onChange={(e) => setTeachRules(e.target.checked)}
+                className="accent-emerald-400"
+              />
+              Teach rule
+            </label>
             <button
               onClick={() => bulkAct("approve")}
               disabled={bulkBusy}

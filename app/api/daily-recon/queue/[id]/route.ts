@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, reclassifyTransactionLines } from "@/lib/qbo-reclass";
 import { qboErrorResponse } from "@/lib/qbo";
+import { upsertActivateRule } from "@/lib/bank-rules";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -128,7 +129,28 @@ export async function PATCH(
         } as any)
         .eq("id", id);
 
-      return NextResponse.json({ ok: true, decision: "executed" });
+      // Learning loop: optionally teach a bank rule so this vendor
+      // auto-categorizes next run. Best-effort — the QBO write already
+      // succeeded, so a rule hiccup must not fail the decision.
+      let bankRuleCreated = false;
+      if (body.create_rule && r.vendor_name) {
+        try {
+          const res = await upsertActivateRule(service as any, {
+            client_link_id: r.client_link_id,
+            vendor: r.vendor_name,
+            target_account_name: targetName,
+            created_by: user.id,
+            sample_descriptions: r.description ? [String(r.description)] : [],
+            transaction_count: 1,
+            total_amount: r.transaction_amount || 0,
+          });
+          bankRuleCreated = res.created;
+        } catch {
+          bankRuleCreated = false;
+        }
+      }
+
+      return NextResponse.json({ ok: true, decision: "executed", bank_rule_created: bankRuleCreated });
     } catch (err: any) {
       return qboErrorResponse(err);
     }
