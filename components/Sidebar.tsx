@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
-  FileSpreadsheet, Wallet, Volume2, VolumeX, HeartPulse, Gauge, CalendarCheck,
+  FileSpreadsheet, Wallet, Volume2, VolumeX, HeartPulse, Gauge, CalendarCheck, Repeat, BadgeCheck,
   ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap, Settings as SettingsIcon, Mail, Inbox, ListTodo, LifeBuoy, ExternalLink,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
@@ -22,9 +22,16 @@ const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newT
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/onboarding", label: "Onboarding", icon: UserPlus, senior: true },
   { href: "/cleanup", label: "Cleanup", icon: ClipboardCheck },
-  { href: "/production", label: "Production", icon: ListChecks },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/history", label: "History", icon: Clock },
+];
+
+/** Production — clients live on daily recon. The board, the daily-recon engine,
+ *  and the manager's approval queue. */
+const productionNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
+  { href: "/production", label: "Production board", icon: ListChecks },
+  { href: "/admin/daily-recon", label: "Daily Recon", icon: Repeat, senior: true },
+  { href: "/approvals", label: "Approvals", icon: BadgeCheck, senior: true },
 ];
 
 /** Everything else — standalone tools, tucked under Tools, senior+ only. */
@@ -219,6 +226,13 @@ export function Sidebar() {
               badgeCount={item.href === "/today" ? unreadComms : undefined}
               badgeTone="red"
             />
+          ))}
+
+        <NavSection label="Production" className="mt-3" />
+        {productionNav
+          .filter((item) => !item.senior || isSenior)
+          .map((item) => (
+            <NavItem key={item.href} item={item} pathname={pathname} />
           ))}
 
         {isSenior && (
