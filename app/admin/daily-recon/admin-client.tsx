@@ -86,25 +86,90 @@ export function DailyReconAdminClient({
     }
   }
 
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchResult, setBatchResult] = useState<any>(null);
+
+  // Run the FULL production batch now (admin-session auth — works even when the
+  // Vercel cron can't authenticate). Live run posts auto-categorizations to QBO.
+  async function runAllNow(dry: boolean) {
+    if (
+      !dry &&
+      !window.confirm(
+        `Run daily recon for ALL ${enrolled.length} enrolled clients and post the high-confidence categorizations to QuickBooks now?`
+      )
+    )
+      return;
+    setBatchBusy(true);
+    setBatchResult(null);
+    try {
+      const res = await fetch(`/api/cron/daily-recon?dryRun=${dry ? "true" : "false"}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || `Failed (${res.status})`);
+        return;
+      }
+      setBatchResult(data);
+      router.refresh();
+    } catch (e: any) {
+      alert(e?.message || "Network error");
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
   const enrolled = clients.filter((c) => c.daily_recon_enabled);
   const notEnrolled = clients.filter((c) => !c.daily_recon_enabled);
 
   return (
     <div className="space-y-6">
-      {/* Wiring status banner */}
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm">
-        <div className="font-bold text-amber-900 mb-1 flex items-center gap-2">
-          <FlaskConical size={16} />
-          Scaffold mode — cron is NOT registered yet
+      {/* Engine control + status */}
+      <div className="bg-white border border-gray-200 rounded-2xl p-4 text-sm space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="font-bold text-navy flex items-center gap-2">
+              <Play size={16} className="text-teal" /> Daily recon engine
+            </div>
+            <div className="text-ink-slate leading-relaxed mt-1">
+              <strong className="text-navy">{enrolled.length}</strong> clients enrolled. Auto-runs daily
+              at 7am UTC via Vercel Cron — that requires{" "}
+              <code className="bg-gray-100 px-1 rounded">CRON_SECRET</code> set in the Vercel production
+              env, or the cron call 401s and nothing runs. Run it manually here anytime to verify or
+              catch up.
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => runAllNow(true)}
+              disabled={batchBusy}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-ink-slate hover:border-teal hover:text-teal text-xs font-semibold disabled:opacity-50"
+            >
+              {batchBusy ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />}
+              Dry-run all
+            </button>
+            <button
+              onClick={() => runAllNow(false)}
+              disabled={batchBusy}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-teal hover:bg-teal-dark text-white text-xs font-bold disabled:opacity-50"
+            >
+              {batchBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              Run all now (live)
+            </button>
+          </div>
         </div>
-        <div className="text-amber-800 leading-relaxed">
-          The daily recon system is built but dormant. Enrolling a client below
-          just turns on the feature flag — nothing will run automatically until
-          the cron is added to <code className="bg-amber-100 px-1 rounded">vercel.json</code>.
-          Use the dry-run button to test the worker against a single client right now.
-          See <code className="bg-amber-100 px-1 rounded">docs/DAILY_RECON.md</code> for the
-          full wiring checklist.
-        </div>
+        {batchResult && (
+          <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-ink-slate">
+            <strong className="text-navy">{batchResult.eligible_clients}</strong> clients ·
+            auto-executed <strong className="text-navy">{batchResult.totals?.auto_executed ?? 0}</strong> ·
+            queued for review{" "}
+            <strong className="text-navy">{batchResult.totals?.queued_for_review ?? 0}</strong> · errored{" "}
+            <strong className="text-navy">{batchResult.totals?.errored ?? 0}</strong>
+            {batchResult.dry_run && (
+              <span className="text-amber-700 font-semibold"> · dry-run (nothing posted)</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Lookback slider */}

@@ -8,24 +8,20 @@ export const maxDuration = 800; // big tick — many clients × per-client pipel
 /**
  * GET/POST /api/cron/daily-recon
  *
- * SCAFFOLDED. NOT registered in vercel.json — this endpoint exists but
- * will only fire when manually invoked (or once added to the crons array).
+ * Registered in vercel.json ("0 7 * * *", dryRun=false). Iterates every client
+ * where daily_recon_enabled=true (and not paused), runs the reconciliation
+ * pipeline, and returns a summary. Every tick writes an audit_log row so we can
+ * confirm it actually fired (a missing tick = the cron isn't authenticating).
  *
- * Iterates every client where daily_recon_enabled=true, runs the
- * reconciliation pipeline, and returns a summary.
+ * Auth:
+ *   1. Cron secret: `Authorization: Bearer ${CRON_SECRET}` — Vercel only attaches
+ *      this header when the CRON_SECRET env var is set. IF IT IS UNSET, Vercel's
+ *      cron call has no auth, this route 401s, and the engine never runs (this
+ *      was the silent failure: 57 enabled clients, 0 runs). Set CRON_SECRET in
+ *      the Vercel production env to fix.
+ *   2. Admin/lead session — for manual "run now" from /admin/daily-recon.
  *
- * Auth (matches the pattern from stripe-invite-detector):
- *   1. Cron secret header: `Authorization: Bearer ${CRON_SECRET}` — for Vercel Cron
- *   2. Admin/lead session — for manual runs from the admin panel
- *
- * Query/body params:
- *   - dryRun=true|false (default: true — safety while wiring)
- *
- * When ready to go live, add to vercel.json:
- *   {
- *     "path": "/api/cron/daily-recon",
- *     "schedule": "0 13,17,21 * * *"   // 3× daily (UTC)
- *   }
+ * Query params: dryRun=true|false (default true).
  */
 async function handleRequest(request: Request) {
   // ── AUTH ──
@@ -100,11 +96,36 @@ async function handleRequest(request: Request) {
     results.push(...batchResults);
   }
 
+  // Observability: one audit row per tick so we can SEE the cron fired and what
+  // it did. (No tick rows showing up = the cron isn't authenticating/firing.)
+  const totals = results.reduce(
+    (a, r) => ({
+      auto_executed: a.auto_executed + (r.auto_executed || 0),
+      queued_for_review: a.queued_for_review + (r.queued_for_review || 0),
+      errored: a.errored + (r.error ? 1 : 0),
+    }),
+    { auto_executed: 0, queued_for_review: 0, errored: 0 }
+  );
+  try {
+    await service.from("audit_log").insert({
+      event_type: "daily_recon_cron_tick",
+      request_payload: {
+        triggered_by: isCron ? "vercel_cron" : "admin_manual",
+        dry_run: dryRun,
+        eligible_clients: eligible.length,
+        totals,
+      } as any,
+    });
+  } catch {
+    /* never fail the run on a log hiccup */
+  }
+
   return NextResponse.json({
     ok: true,
     dry_run: dryRun,
     eligible_clients: eligible.length,
     ran_at: new Date().toISOString(),
+    totals,
     results,
   });
 }
