@@ -2,7 +2,13 @@ import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase";
 
 /**
- * Admin layout - gates ALL /admin/* routes to admin role only.
+ * Admin layout - gates ALL /admin/* routes to admin role.
+ *
+ * billing_admin is also allowed through: it's a restricted role that can only
+ * see /admin/billing, and middleware already confines it there (any other
+ * /admin/* path bounces back to /admin/billing). Without this exception it hits
+ * an admin-layout reject → /dashboard → middleware → /admin/billing loop, so
+ * the billing_admin can never actually reach the page.
  */
 export default async function AdminLayout({
   children,
@@ -20,7 +26,7 @@ export default async function AdminLayout({
     .eq("id", user.id)
     .single<{ role: string; is_active: boolean | null }>();
 
-  if (!profile || !profile.is_active || profile.role !== "admin") {
+  if (!profile || !profile.is_active || !["admin", "billing_admin"].includes(profile.role)) {
     redirect("/dashboard?error=admin_required");
   }
 

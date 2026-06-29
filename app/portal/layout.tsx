@@ -78,6 +78,19 @@ export default async function PortalLayout({ children }: { children: React.React
   const { ctx } = ctxResult;
   const clientName = ctx.clientName;
 
+  // Billing hold — portal access suspended for a past-due account (collections).
+  // Admins impersonating are NOT blocked, so they can still inspect the account.
+  if (!ctx.impersonating) {
+    const { data: cl } = await service
+      .from("client_links")
+      .select("portal_billing_hold")
+      .eq("id", ctx.clientLinkId)
+      .maybeSingle();
+    if ((cl as any)?.portal_billing_hold) {
+      return <BillingHoldState clientName={clientName} />;
+    }
+  }
+
   // Unread bookkeeper→client messages drive the red badge on the
   // Messages nav item — this is the client's notification spot.
   // try/catch so the portal keeps working if migration 58 hasn't
@@ -261,6 +274,25 @@ function NavLink({
  * admins see an additional "Stop impersonating" link so they're never
  * stuck inside a broken portal session.
  */
+function BillingHoldState({ clientName }: { clientName: string }) {
+  return (
+    <div className="min-h-screen bg-[var(--app-canvas)] flex items-center justify-center px-4 py-12">
+      <div className="max-w-lg w-full bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+        <div className="bg-[#0F1F2E] px-7 py-5 text-white">
+          <div className="text-xs uppercase tracking-widest text-[#8CD3CC]">Ironbooks</div>
+          <h1 className="text-xl font-bold mt-1">Your account is on hold</h1>
+        </div>
+        <div className="px-7 py-6 text-[15px] text-[#33414E] leading-relaxed">
+          <p>Hi {clientName} — access to your portal is paused because your account is past due.</p>
+          <p className="mt-3">To restore access right away, please update your payment, or reach us and we'll sort it out:</p>
+          <a href="mailto:admin@ironbooks.com" className="mt-4 inline-block bg-[#1A9B8F] text-white font-semibold text-sm px-5 py-2.5 rounded-lg">Email admin@ironbooks.com</a>
+          <p className="mt-4 text-xs text-[#8A94A0]">Once your balance is settled, your books and reports come right back — nothing is lost.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function QboDisconnectedState({
   clientLinkId,
   clientName,

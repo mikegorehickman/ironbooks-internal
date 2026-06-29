@@ -87,6 +87,20 @@ export async function middleware(request: NextRequest) {
     const isPortal = pathname.startsWith("/portal") && !isPortalMockup;
     const isRoot = pathname === "/";
 
+    // Billing admin: a restricted internal role that can ONLY see the billing
+    // page — no client bookkeeping. Confine them to /admin/billing; everything
+    // else (including / and /dashboard) bounces there. (APIs are gated
+    // separately: requireStaff rejects this role, and the billing endpoints
+    // explicitly allow it.)
+    if (role === "billing_admin") {
+      if (!pathname.startsWith("/admin/billing")) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/admin/billing";
+        return NextResponse.redirect(url);
+      }
+      return supabaseResponse;
+    }
+
     if (role === "client") {
       // Clients are confined to /portal/* (and the mockup during preview).
       // Any other route — including / and /dashboard — gets pushed to /portal.

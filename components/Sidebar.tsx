@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
-  FileSpreadsheet, Wallet, HeartPulse, Gauge, CalendarCheck,
-  ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap, Settings as SettingsIcon, Mail, Inbox, ListTodo, LifeBuoy,
+  FileSpreadsheet, Wallet, HeartPulse, Gauge, CalendarCheck, Repeat, BadgeCheck,
+  ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap, Settings as SettingsIcon, Mail, Inbox, ListTodo, LifeBuoy, ExternalLink,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -15,16 +15,23 @@ import { StripeConnectModal } from "./StripeConnectModal";
 import { isV2For } from "@/lib/feature-flags";
 
 /** Daily work surface — the whole job in five stops. */
-const dailyNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
+const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newTab?: boolean }[] = [
   { href: "/today", label: "Today", icon: Sun },
   { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/support", label: "Support", icon: LifeBuoy },
+  { href: "/support", label: "Support", icon: LifeBuoy, newTab: true },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/onboarding", label: "Onboarding", icon: UserPlus, senior: true },
   { href: "/cleanup", label: "Cleanup", icon: ClipboardCheck },
-  { href: "/production", label: "Production", icon: ListChecks },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/history", label: "History", icon: Clock },
+];
+
+/** Production — clients live on daily recon. The board, the daily-recon engine,
+ *  and the manager's approval queue. */
+const productionNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
+  { href: "/production", label: "Production board", icon: ListChecks },
+  { href: "/admin/daily-recon", label: "Daily Recon", icon: Repeat, senior: true },
+  { href: "/approvals", label: "Approvals", icon: BadgeCheck, senior: true },
 ];
 
 /** Everything else — standalone tools, tucked under Tools, senior+ only. */
@@ -47,6 +54,7 @@ const toolsNav = [
 
 const adminItems = [
   { href: "/admin", label: "Admin", icon: Shield },
+  { href: "/admin/billing", label: "Billing", icon: CreditCard },
   { href: "/admin/bulk-email", label: "Bulk Email", icon: Mail },
   { href: "/admin/call-matching", label: "Call Matching", icon: Video },
   { href: "/admin/audit", label: "Audit Log", icon: BookOpen },
@@ -157,6 +165,39 @@ export function Sidebar() {
   const isAdmin = userRole === "admin";
   const isSenior = userRole === "admin" || userRole === "lead";
   const isV2 = isV2For(userEmail);
+  const isBillingAdmin = userRole === "billing_admin";
+
+  // Billing-only admin: a stripped sidebar with just Billing — no bookkeeping
+  // nav (middleware also confines them to /admin/billing).
+  if (isBillingAdmin) {
+    return (
+      <aside className="flex flex-col h-screen sticky top-0 w-56 bg-navy text-white">
+        <div className="px-4 py-4 border-b border-white/10">
+          <div className="flex items-center gap-2.5">
+            <img src="/logo.png" alt="Ironbooks" className="w-9 h-9 object-contain flex-shrink-0" />
+            <div>
+              <div className="font-bold text-base tracking-tight leading-none">Ironbooks</div>
+              <div className="text-[11px] mt-0.5 text-white/45">Billing</div>
+            </div>
+          </div>
+        </div>
+        <nav className="flex-1 px-2.5 py-3">
+          <NavSection label="Billing" />
+          <NavItem item={{ href: "/admin/billing", label: "Billing", icon: CreditCard }} pathname={pathname} />
+        </nav>
+        <div className="px-2.5 py-3 border-t border-white/10">
+          <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg bg-white/5">
+            <div className="rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 w-8 h-8 bg-teal">{userName.charAt(0) || "?"}</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold leading-tight truncate">{userName || "Loading..."}</div>
+              <div className="text-[11px] leading-tight truncate text-white/45 capitalize">billing admin</div>
+            </div>
+            <button onClick={handleSignOut} className="text-white/40 hover:text-white transition-colors" title="Sign out"><LogOut size={15} /></button>
+          </div>
+        </div>
+      </aside>
+    );
+  }
 
   const cleanupActive =
     pathname.startsWith("/jobs/") ||
@@ -206,6 +247,13 @@ export function Sidebar() {
                   badgeCount={item.href === "/today" ? unreadComms : undefined}
                   badgeTone="red"
                 />
+              ))}
+
+            <NavSection label="Production" className="mt-3" />
+            {productionNav
+              .filter((item) => !item.senior || isSenior)
+              .map((item) => (
+                <NavItem key={item.href} item={item} pathname={pathname} />
               ))}
 
             {isSenior && (
@@ -268,6 +316,13 @@ export function Sidebar() {
                 badgeTone="red"
               />
             ))}
+
+            <NavSection label="Production" className="mt-3" />
+            {productionNav
+              .filter((item) => !item.senior || isSenior)
+              .map((item) => (
+                <NavItem key={item.href} item={item} pathname={pathname} />
+              ))}
 
             {isSenior && (
               <div className="mt-3">
@@ -338,28 +393,30 @@ function NavItem({
   badgeTone = "amber",
   dim,
 }: {
-  item: { href: string; label: string; icon: any };
+  item: { href: string; label: string; icon: any; newTab?: boolean };
   pathname: string;
   badgeCount?: number;
   badgeTone?: "amber" | "red";
   dim?: boolean;
 }) {
-  const active = pathname === item.href || pathname.startsWith(item.href + "/");
+  // newTab items (e.g. Support → Freshdesk) open externally, so they never
+  // match the current path and never show as active.
+  const active = !item.newTab && (pathname === item.href || pathname.startsWith(item.href + "/"));
   const Icon = item.icon;
 
-  return (
-    <Link
-      href={item.href}
-      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all mb-0.5 ${
-        active
-          ? "bg-teal/20 text-white"
-          : dim
-          ? "text-white/40 hover:bg-white/5 hover:text-white/75"
-          : "text-white/70 hover:bg-white/5 hover:text-white"
-      }`}
-    >
+  const className = `w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all mb-0.5 ${
+    active
+      ? "bg-teal/20 text-white"
+      : dim
+      ? "text-white/40 hover:bg-white/5 hover:text-white/75"
+      : "text-white/70 hover:bg-white/5 hover:text-white"
+  }`;
+
+  const inner = (
+    <>
       <Icon size={dim ? 14 : 16} className="flex-shrink-0" />
-      <span className={dim ? "text-[13px]" : "text-[13px]"}>{item.label}</span>
+      <span className="text-[13px]">{item.label}</span>
+      {item.newTab && <ExternalLink size={12} className="ml-auto flex-shrink-0 opacity-50" />}
       {badgeCount != null && badgeCount > 0 && (
         <span
           className={`ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white tabular-nums ${
@@ -369,6 +426,21 @@ function NavItem({
           {badgeCount > 999 ? "999+" : badgeCount}
         </span>
       )}
+    </>
+  );
+
+  // Open externally in a new tab (full navigation, not SPA routing).
+  if (item.newTab) {
+    return (
+      <a href={item.href} target="_blank" rel="noopener noreferrer" className={className}>
+        {inner}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={item.href} className={className}>
+      {inner}
     </Link>
   );
 }

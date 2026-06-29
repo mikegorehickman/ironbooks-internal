@@ -28,6 +28,7 @@ import {
   Building2,
   AlertTriangle,
   CreditCard,
+  Trash2,
   ClipboardCheck,
 } from "lucide-react";
 import { CleanupTab } from "./cleanup-tab";
@@ -223,6 +224,9 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
             isLinked={isLinkedToDouble(clientLink)}
             canUnlink={actorRole === "admin" || actorRole === "lead"}
           />
+          {canImpersonate && (
+            <DeleteClientButton clientLinkId={clientLink.id} clientName={clientLink.client_name} />
+          )}
         </div>
       </div>
 
@@ -320,6 +324,51 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           onClose={() => setDrill(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── DELETE CLIENT ─────────────────────────────────────────────────────
+// Admin/lead control. The API hard-deletes a client with no financial
+// footprint, else archives it (is_active=false) to preserve the books.
+// Either way it disappears from the clients list. Two-step confirm.
+function DeleteClientButton({ clientLinkId, clientName }: { clientLinkId: string; clientName: string }) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function doDelete() {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setErr(j.error || "Delete failed"); setBusy(false); return; }
+      router.push("/clients"); // removed → back to the list
+      router.refresh();
+    } catch (e: any) { setErr(e?.message || "Network error"); setBusy(false); }
+  }
+
+  if (!confirming) {
+    return (
+      <button onClick={() => setConfirming(true)} title="Delete this client (archives if it has financial records)"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-semibold text-red-600 hover:bg-red-50 hover:border-red-300">
+        <Trash2 size={13} /> Delete
+      </button>
+    );
+  }
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <span className="text-xs text-red-700 font-medium">Delete {clientName}?</span>
+      <button onClick={doDelete} disabled={busy}
+        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 disabled:opacity-60">
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Confirm
+      </button>
+      <button onClick={() => { setConfirming(false); setErr(null); }} disabled={busy}
+        className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-ink-slate hover:bg-gray-50">
+        Cancel
+      </button>
+      {err && <span className="text-xs text-red-700">{err}</span>}
     </div>
   );
 }

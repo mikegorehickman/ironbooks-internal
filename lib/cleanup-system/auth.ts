@@ -24,7 +24,8 @@ export async function requireStaff(
     .single();
 
   const role = (profile as any)?.role || "bookkeeper";
-  if (role === "client") return null;
+  // Neither clients nor billing-only admins are bookkeeping staff.
+  if (role === "client" || role === "billing_admin") return null;
 
   return {
     userId: user.id,

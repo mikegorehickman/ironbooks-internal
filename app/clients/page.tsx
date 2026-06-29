@@ -271,7 +271,10 @@ export default async function ClientsPage() {
     }
   }
 
-  const enrichedClients = (clientsRes.data || []).map((c) => ({
+  // client_list_view does NOT filter is_active, so archived/deleted clients
+  // would otherwise leak into every partition below. Drop them here at the
+  // source. (is_active is null on legacy rows → treat as active.)
+  const enrichedClients = (clientsRes.data || []).filter((c: any) => c.is_active !== false).map((c) => ({
     ...c,
     double_client_name: c.id ? nameById.get(c.id) ?? null : null,
     stripe_connection_status: c.id ? stripeStatusById.get(c.id) ?? null : null,

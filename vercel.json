@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/stripe-connection-reminder",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/billing-dunning",
+      "schedule": "0 15 * * *"
     }
   ]
 }

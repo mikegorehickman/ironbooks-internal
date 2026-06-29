@@ -75,32 +75,10 @@ export async function TodayContent({
   // Files a bookkeeper submitted for manager review (cleanup_review_state =
   // 'in_review'). These land on Mike's Today page so he can review the
   // statements and send to the client. Oldest-submitted first.
-  let managerReviewRows: { id: string; client_name: string; submitted_at: string | null; submitted_by: string | null }[] = [];
-  if (isSenior) {
-    try {
-      let revQuery = service
-        .from("client_links")
-        .select("id, client_name, cleanup_review_submitted_at, cleanup_review_submitted_by, assigned_bookkeeper_id")
-        .eq("is_active", true)
-        .eq("cleanup_review_state" as any, "in_review");
-      if (viewAs) revQuery = revQuery.eq("assigned_bookkeeper_id", viewAs);
-      const rev = ((await revQuery).data as any[]) || [];
-      const subIds = [...new Set(rev.map((r) => r.cleanup_review_submitted_by).filter(Boolean))];
-      const nameById = new Map<string, string>();
-      if (subIds.length) {
-        const { data: us } = await service.from("users").select("id, full_name").in("id", subIds);
-        for (const u of ((us as any[]) || [])) nameById.set(u.id, u.full_name);
-      }
-      managerReviewRows = rev
-        .map((r) => ({
-          id: r.id,
-          client_name: r.client_name,
-          submitted_at: r.cleanup_review_submitted_at ?? null,
-          submitted_by: r.cleanup_review_submitted_by ? (nameById.get(r.cleanup_review_submitted_by) || null) : null,
-        }))
-        .sort((a, b) => (a.submitted_at || "").localeCompare(b.submitted_at || ""));
-    } catch { managerReviewRows = []; }
-  }
+  // Manager approvals moved to Production → Approvals (/approvals). Kept as an
+  // empty array so the rest of /today (empty-state checks, props) is unchanged
+  // and the approval widgets simply don't render here.
+  const managerReviewRows: { id: string; client_name: string; submitted_at: string | null; submitted_by: string | null }[] = [];
 
   // ─── Portal transaction flags from clients ───
   // These are independent of daily-recon enrollment — surface them even
@@ -323,93 +301,14 @@ export async function TodayContent({
   // JR-submitted monthly closes + cleanup sign-offs (monthly_rec_runs
   // status=pending_review). Senior-only: this is Lisa's approval queue —
   // she reviews the statements on /monthly-rec and approves the send.
-  let statementApprovals: StatementApprovalRow[] = [];
-  if (isSenior) {
-    try {
-      const { data: pend } = await (service as any)
-        .from("monthly_rec_runs")
-        .select("client_link_id, period, kind, submitted_by, submitted_at, has_concerns, concerns")
-        .eq("status", "pending_review")
-        .order("submitted_at", { ascending: true });
-      const raw = (pend as any[]) || [];
-      if (raw.length > 0) {
-        const cIds = [...new Set(raw.map((r) => r.client_link_id))];
-        const uIds = [...new Set(raw.map((r) => r.submitted_by).filter(Boolean))];
-        const [{ data: cn }, { data: un }] = await Promise.all([
-          service.from("client_links").select("id, client_name").in("id", cIds),
-          uIds.length > 0
-            ? service.from("users").select("id, full_name, email").in("id", uIds)
-            : Promise.resolve({ data: [] as any[] }),
-        ]);
-        const nameById = new Map(((cn as any[]) || []).map((c) => [c.id, c.client_name]));
-        const userById = new Map(((un as any[]) || []).map((u) => [u.id, u.full_name || u.email]));
-        statementApprovals = raw.map((r) => ({
-          client_link_id: r.client_link_id,
-          client_name: nameById.get(r.client_link_id) || "(unknown client)",
-          period: r.period,
-          kind: r.kind === "cleanup" ? "cleanup" : "production_me",
-          submitted_by_name: userById.get(r.submitted_by) || "",
-          submitted_at: r.submitted_at,
-          has_concerns: !!r.has_concerns,
-          concerns: r.concerns,
-        }));
-      }
-    } catch {
-      statementApprovals = [];
-    }
-  }
+  // Statement approvals moved to Production → Approvals (/approvals).
+  const statementApprovals: StatementApprovalRow[] = [];
 
   // ─── Statements flagged wrong by a bookkeeper (senior-only) ───
   // Pulled from audit_log (append-only). Show the last 30 days so resolved
   // ones age off without needing a status column.
-  let statementEscalations: StatementEscalationRow[] = [];
-  if (isSenior) {
-    try {
-      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: esc } = await (service as any)
-        .from("audit_log")
-        .select("occurred_at, request_payload")
-        .eq("event_type", "statements_escalated")
-        .gte("occurred_at", cutoff)
-        .order("occurred_at", { ascending: false })
-        .limit(50);
-      const mapped = ((esc as any[]) || []).map((r) => ({
-        item_key: `escalation:${r.request_payload?.client_link_id || ""}:${r.occurred_at}`,
-        client_link_id: r.request_payload?.client_link_id || "",
-        client_name: r.request_payload?.client_name || "(unknown client)",
-        note: r.request_payload?.note || "",
-        escalated_by_name: r.request_payload?.escalated_by_name || "",
-        at: r.occurred_at,
-        due_date: null as string | null,
-      })).filter((r) => r.client_link_id);
-
-      // Apply manager overrides: drop resolved/hidden, attach due dates,
-      // then sort by urgency (soonest due first, dateless after, newest first).
-      const keys = mapped.map((m) => m.item_key);
-      let overrides = new Map<string, any>();
-      if (keys.length > 0) {
-        const { data: ov } = await (service as any)
-          .from("today_item_overrides")
-          .select("item_key, resolved_at, hidden_at, due_date")
-          .in("item_key", keys);
-        overrides = new Map(((ov as any[]) || []).map((o) => [o.item_key, o]));
-      }
-      statementEscalations = mapped
-        .filter((m) => {
-          const o = overrides.get(m.item_key);
-          return !o?.resolved_at && !o?.hidden_at;
-        })
-        .map((m) => ({ ...m, due_date: overrides.get(m.item_key)?.due_date || null }))
-        .sort((a, b) => {
-          if (a.due_date && b.due_date) return a.due_date < b.due_date ? -1 : 1;
-          if (a.due_date) return -1;
-          if (b.due_date) return 1;
-          return a.at < b.at ? 1 : -1; // newest first when neither has a due date
-        });
-    } catch {
-      statementEscalations = [];
-    }
-  }
+  // Statement escalations moved to Production → Approvals (/approvals).
+  const statementEscalations: StatementEscalationRow[] = [];
 
   // If nothing's enabled AND no flags AND no reclass requests AND no
   // inbound messages AND no statement approvals, show the empty state
@@ -738,13 +637,15 @@ export async function TodayContent({
               {cleanupDeadlines.length > 0 && (
                 <CleanupDeadlinesWidget rows={cleanupDeadlines} showBookkeeper={true} />
               )}
-              {statementApprovals.length === 0 &&
-                statementEscalations.length === 0 &&
-                cleanupDeadlines.length === 0 && (
-                  <div className="bg-white rounded-2xl border border-gray-100 px-5 py-6 text-sm text-ink-slate">
-                    No approvals or escalations pending.
-                  </div>
-                )}
+              {cleanupDeadlines.length === 0 && (
+                <div className="bg-white rounded-2xl border border-gray-100 px-5 py-6 text-sm text-ink-slate">
+                  No cleanup deadlines. Manager approvals &amp; statement sign-offs live on the{" "}
+                  <Link href="/approvals" className="font-semibold text-teal hover:text-teal-dark">
+                    Approvals page
+                  </Link>
+                  .
+                </div>
+              )}
             </section>
           ))}
 

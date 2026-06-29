@@ -142,7 +142,16 @@ export async function PATCH(
 /**
  * DELETE /api/clients/[id]
  *
- * Permanently deletes a client and all associated records.
+ * Removes a client. Two modes, chosen automatically:
+ *   - HARD DELETE when the client has no financial footprint (no payments,
+ *     subscription, closed month, reclass/COA job, or connected QBO) — a
+ *     mistakenly-added client gets fully removed, including its portal user
+ *     mapping, onboarding lead, and messages.
+ *   - ARCHIVE (is_active=false) when it DOES touch financial info — every row
+ *     is kept intact so the books/history are preserved and it can be
+ *     restored from the Reactivate control. The clients list filters
+ *     is_active, so an archived client disappears from the UI either way.
+ *
  * Restricted to admin and lead roles.
  */
 export async function DELETE(
@@ -173,11 +182,43 @@ export async function DELETE(
     .select("client_name, assigned_bookkeeper_id, qbo_realm_id")
     .eq("id", id)
     .single();
+  if (!prior) return NextResponse.json({ error: "Client not found" }, { status: 404 });
 
-  // ARCHIVE, don't hard-delete. Setting is_active=false removes the client
-  // from the active list but keeps every row (jobs, history, portal,
-  // messages) intact so it can be restored from the Reactivate control.
-  // A real delete would cascade and be unrecoverable.
+  // ── Does this client touch financial info? If so we archive (preserve);
+  //    otherwise it's safe to hard-delete. A connected QBO realm counts.
+  const financialTables = ["billing_payments", "billing_subscriptions", "monthly_rec_runs", "reclass_jobs", "coa_jobs"];
+  let hasFinancial = !!(prior as any).qbo_realm_id;
+  for (const t of financialTables) {
+    if (hasFinancial) break;
+    try {
+      const { count } = await (service as any).from(t).select("id", { count: "exact", head: true }).eq("client_link_id", id);
+      if ((count || 0) > 0) hasFinancial = true;
+    } catch { /* table may not exist in this env — ignore */ }
+  }
+
+  if (!hasFinancial) {
+    // HARD DELETE. Remove non-financial children first (best-effort), then the
+    // client row. If a child table we didn't anticipate still references it,
+    // the final delete FK-errors → we fall back to archiving so the request
+    // never half-completes.
+    const childTables = ["client_users", "onboarding_leads", "client_communications", "support_tickets"];
+    for (const t of childTables) {
+      try { await (service as any).from(t).delete().eq("client_link_id", id); } catch { /* ignore */ }
+    }
+    const { error: delErr } = await service.from("client_links").delete().eq("id", id);
+    if (!delErr) {
+      await service.from("audit_log").insert({
+        user_id: user.id,
+        event_type: "client_deleted",
+        request_payload: { client_link_id: id, client_name: (prior as any)?.client_name ?? null, mode: "hard_delete" } as any,
+      });
+      return NextResponse.json({ ok: true, deleted: true });
+    }
+    // FK constraint or other error → fall through to archive.
+    console.warn(`[clients/DELETE] hard delete blocked for ${id}, archiving instead: ${delErr.message}`);
+  }
+
+  // ARCHIVE — financial footprint present (or hard delete was blocked).
   const { error } = await service
     .from("client_links")
     .update({ is_active: false } as any)
