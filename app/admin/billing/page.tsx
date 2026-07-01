@@ -167,9 +167,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
     rows.filter(pred).reduce((s, r) => s + val(r), 0);
   const collectedOf = (r: typeof rows[number]) => Object.values(r.months).reduce((a, c) => a + c.collected, 0);
   const totals = {
-    expectedUsdCents: sum((r) => r.currency !== "cad", (r) => r.recurringCents),
-    expectedCadCents: sum((r) => r.currency === "cad", (r) => r.recurringCents),
-    collectedUsdCents: sum((r) => r.currency !== "cad", collectedOf),
+     expectedUsdCents: sum((r) => r.currency !== "cad" && r.startMonth != null, (r) => r.recurringCents),
+    expectedCadCents: sum((r) => r.currency === "cad" && r.startMonth != null, (r) => r.recurringCents),
+     collectedUsdCents: sum((r) => r.currency !== "cad", collectedOf),
     collectedCadCents: sum((r) => r.currency === "cad", collectedOf),
   };
 
