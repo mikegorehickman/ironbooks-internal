@@ -133,6 +133,36 @@ export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected,
   const expectedCombinedCad = totals.expectedCadCents + Math.round(totals.expectedUsdCents * fxUsdToCad);
   const collectedCombinedCad = totals.collectedCadCents + Math.round(totals.collectedUsdCents * fxUsdToCad);
 
+  // Column totals shown in the header row. These sum the ACTUAL amount rendered
+  // in each month cell (collected / failed / projected-recurring), split by the
+  // cell's currency — so the header CAD & USD figures tie exactly to the column
+  // beneath them. "missed" and "comped" cells show no number, so contribute 0.
+  const cellShownCents = (row: Row, m: number): { cents: number; cur: string } => {
+    const c = row.months[m];
+    const recurring = row.recurringCents;
+    const isPast = year < curYear || (year === curYear && m < curMonth);
+    const cur = c.currency || row.currency;
+    const beforeStart = row.startMonth == null || m < row.startMonth;
+    let cents = 0;
+    if (c.collected > 0) cents = c.collected;              // green / dark-green: collected (incl. setup fee)
+    else if (c.failed > 0) cents = c.failed;               // red: failed amount
+    else if (c.comped) cents = 0;                          // comped: text, no number
+    else if (c.expected > 0) cents = c.expected;           // grey: expected (manual)
+    else if (beforeStart) cents = 0;                       // pre-start: blank
+    else if (isPast && recurring > 0 && ["active", "past_due"].includes(row.subStatus)) cents = 0; // "missed": text
+    else cents = recurring > 0 ? recurring : 0;            // grey: projected recurring
+    return { cents, cur };
+  };
+  const columnTotals = MONTHS.map((_, i) => {
+    const m = i + 1;
+    let usdCents = 0, cadCents = 0;
+    for (const r of rows) {
+      const { cents, cur } = cellShownCents(r, m);
+      if (cur === "cad") cadCents += cents; else usdCents += cents;
+    }
+    return { cadCents, usdCents };
+  });
+
   // Search + filter (client-side; server-side pagination is the scale follow-up).
   const ql = q.trim().toLowerCase();
   const filteredRows = rows.filter((r) => {
@@ -251,16 +281,15 @@ export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected,
                 a client only counts from its first billing month onward. */}
             <tr className="bg-gray-50">
               <th colSpan={4} className="sticky left-0 bg-gray-50 text-right align-bottom text-[10px] font-semibold text-ink-slate px-3 py-1 border-b border-gray-200">
-                Projected / mo →<div className="font-normal text-ink-light">CAD · USD · total CAD</div>
+                Total / mo →<div className="font-normal text-ink-light">CAD · USD</div>
               </th>
               {MONTHS.map((mm, i) => {
-                const p = monthlyProjected[i] || { usdCents: 0, cadCents: 0, combinedCadCents: 0 };
+                const p = columnTotals[i] || { usdCents: 0, cadCents: 0 };
                 return (
                   <th key={mm} className="text-center align-top px-1 py-1 border-b border-l border-gray-200 font-normal">
                     <div className="text-[10px] leading-tight">
-                      <div className="text-ink-slate">{money(p.cadCents)} CAD</div>
-                      <div className="text-ink-slate">{money(p.usdCents)} USD</div>
-                      <div className="font-semibold text-navy border-t border-gray-200 mt-0.5 pt-0.5">{cad(p.combinedCadCents)}</div>
+                      <div className="font-semibold text-navy">{money(p.cadCents)} CAD</div>
+                      <div className="font-semibold text-navy">{money(p.usdCents)} USD</div>
                     </div>
                   </th>
                 );
