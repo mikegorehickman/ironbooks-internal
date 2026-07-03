@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { createBrowserSupabase } from "@/lib/supabase-browser";
 import { playSound } from "@/lib/sounds";
+import { DOCUMENTS_CHANGED_EVENT } from "./documents-panel";
 import {
   CLIENT_UPLOADS_BUCKET,
   MAX_UPLOAD_BYTES,
@@ -136,6 +137,7 @@ export function MessagesClient({ initialMessages }: { initialMessages: ClientCom
 
       setMessages((prev) => [...prev, json.message]);
       setDraft("");
+      if (attachments.length > 0) window.dispatchEvent(new Event(DOCUMENTS_CHANGED_EVENT));
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err: any) {
