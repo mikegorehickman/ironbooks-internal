@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ClipboardEvent, ReactNode } from "react";
 import { wrapBrandedEmail, applyMergeFields } from "@/lib/bulk-email";
 import { renderUserSignature, type SignatureUser } from "@/lib/user-signature";
 import {
   Mail, Send, Loader2, Search, Users, AlertTriangle, CheckCircle2, Save, FileText, Clock,
+  Bold, Italic, Underline, Link2, List, ListOrdered,
 } from "lucide-react";
 
 interface Recipient {
@@ -25,12 +27,135 @@ type Kind = "operational" | "normal" | "resubscribe";
 interface Template { id: string; name: string; subject: string; body_html: string; kind: Kind }
 interface Campaign { id: string; subject: string; kind: string; status: string; recipient_count: number; sent_count: number; failed_count: number; created_at: string }
 
-/** Plain text → simple branded-body HTML: blank-line paragraphs, **bold**, line breaks. */
-function textToHtml(t: string): string {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return t.split(/\n\s*\n/).map((p) =>
-    `<p style="margin:0 0 14px;">${esc(p).replace(/\n/g, "<br/>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")}</p>`
-  ).join("");
+const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * Email-safe allowlist serializer. Walks the (browser-parsed) DOM and emits ONLY
+ * safe, email-friendly tags — everything else is unwrapped (children kept) or,
+ * for script/style, dropped. Text is re-escaped and the only attribute kept is a
+ * validated href on <a>. Safe-by-construction: no arbitrary HTML/attrs survive.
+ */
+const ALLOWED = new Set(["B", "STRONG", "I", "EM", "U", "A", "P", "DIV", "BR", "UL", "OL", "LI"]);
+const TAG_MAP: Record<string, string> = { B: "strong", I: "em" };
+// Fixed inline spacing on block tags so sent lists/paragraphs render consistently
+// across email clients (which otherwise apply their own defaults). Not user input.
+const BLOCK_STYLE: Record<string, string> = {
+  P: "margin:0 0 12px;",
+  UL: "margin:0 0 12px 22px;padding:0;",
+  OL: "margin:0 0 12px 22px;padding:0;",
+  LI: "margin:0 0 4px;",
+};
+function serializeNode(node: Node): string {
+  let out = "";
+  node.childNodes.forEach((c) => {
+    if (c.nodeType === Node.TEXT_NODE) { out += escHtml(c.nodeValue || ""); return; }
+    if (c.nodeType !== Node.ELEMENT_NODE) return;
+    const el = c as HTMLElement;
+    const tag = el.tagName;
+    if (tag === "SCRIPT" || tag === "STYLE") return;           // drop entirely
+    if (tag === "BR") { out += "<br>"; return; }
+    if (!ALLOWED.has(tag)) { out += serializeNode(el); return; } // unwrap unknown tag
+    if (tag === "A") {
+      const href = (el.getAttribute("href") || "").trim();
+      if (/^(https?:|mailto:)/i.test(href)) {
+        out += `<a href="${escAttr(href)}" target="_blank" rel="noopener noreferrer" style="color:#1F5D58;">${serializeNode(el)}</a>`;
+      } else { out += serializeNode(el); }
+      return;
+    }
+    const t = TAG_MAP[tag] || tag.toLowerCase();
+    const st = BLOCK_STYLE[tag] ? ` style="${BLOCK_STYLE[tag]}"` : "";
+    out += `<${t}${st}>${serializeNode(el)}</${t}>`;
+  });
+  return out;
+}
+function sanitizeEmailHtml(html: string): string {
+  if (typeof document === "undefined") return html;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  return serializeNode(tmp).trim();
+}
+/** Plain-text view of body HTML (empty-check + preview line). */
+function htmlToPlain(html: string): string {
+  if (typeof document === "undefined") return html.replace(/<[^>]+>/g, " ").trim();
+  const d = document.createElement("div");
+  d.innerHTML = html;
+  return (d.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Dependency-free WYSIWYG for the email body. contentEditable + a small toolbar
+ * (bold/italic/underline/link/lists) and the merge-token chips. Output is always
+ * run through sanitizeEmailHtml before it leaves the editor. Uncontrolled by
+ * design (we never write state back to the DOM), so the caret never jumps; the
+ * parent remounts it via `key` when loading a template.
+ */
+function RichTextEditor({
+  initialHtml, onChange,
+}: { initialHtml: string; onChange: (html: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (ref.current) ref.current.innerHTML = initialHtml || "";
+    try { document.execCommand("styleWithCSS", false, "false"); } catch { /* prefer <b>/<i> tags */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const emit = () => { if (ref.current) onChange(sanitizeEmailHtml(ref.current.innerHTML)); };
+  const focusEmit = () => { ref.current?.focus(); emit(); };
+  const exec = (cmd: string, val?: string) => { document.execCommand(cmd, false, val); focusEmit(); };
+  const addLink = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) { alert("Select the text you want to turn into a link first."); return; }
+    const raw = prompt("Link URL (https://…)");
+    if (!raw) return;
+    const url = /^(https?:|mailto:)/i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`;
+    document.execCommand("createLink", false, url);
+    focusEmit();
+  };
+  const insertToken = (t: string) => { ref.current?.focus(); document.execCommand("insertText", false, t); emit(); };
+  const onPaste = (e: ClipboardEvent) => {
+    e.preventDefault();
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    document.execCommand("insertText", false, text);   // paste as plain text → stays email-clean
+  };
+
+  const Btn = ({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) => (
+    <button type="button" title={title} onMouseDown={(e) => e.preventDefault()} onClick={onClick}
+      className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-gray-200 text-ink-slate hover:bg-slate-50 hover:text-navy">{children}</button>
+  );
+  const Chip = ({ token }: { token: string }) => (
+    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => insertToken(token)}
+      className="text-[11px] font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">{token}</button>
+  );
+
+  return (
+    <div className="rounded-lg border border-gray-200 overflow-hidden">
+      <style>{`.rte-editor:empty:before{content:attr(data-placeholder);color:#94A3B8;}.rte-editor:focus{outline:none;}.rte-editor a{color:#1F5D58;}.rte-editor p{margin:0 0 12px;}.rte-editor ul,.rte-editor ol{margin:0 0 12px 22px;}`}</style>
+      <div className="flex items-center gap-1 flex-wrap border-b border-gray-200 bg-slate-50 px-2 py-1.5">
+        <Btn title="Bold" onClick={() => exec("bold")}><Bold size={14} /></Btn>
+        <Btn title="Italic" onClick={() => exec("italic")}><Italic size={14} /></Btn>
+        <Btn title="Underline" onClick={() => exec("underline")}><Underline size={14} /></Btn>
+        <Btn title="Add link" onClick={addLink}><Link2 size={14} /></Btn>
+        <Btn title="Bulleted list" onClick={() => exec("insertUnorderedList")}><List size={14} /></Btn>
+        <Btn title="Numbered list" onClick={() => exec("insertOrderedList")}><ListOrdered size={14} /></Btn>
+        <span className="w-px h-5 bg-gray-200 mx-1" />
+        <span className="text-[10px] text-ink-light font-semibold mr-0.5">Insert:</span>
+        <Chip token="#firstname#" />
+        <Chip token="#businessname#" />
+        <Chip token="#loginemail#" />
+      </div>
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={emit}
+        onPaste={onPaste}
+        data-placeholder="Write your message… select text and use the toolbar to format. Merge tags fill in per client — preview before sending."
+        className="rte-editor min-h-[220px] max-h-[420px] overflow-y-auto px-3 py-2 text-sm leading-relaxed text-navy"
+      />
+    </div>
+  );
 }
 
 export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { senderEmail: string; senderName: string; senderSignature: SignatureUser }) {
@@ -43,19 +168,8 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [subject, setSubject] = useState("");
-  const [bodyText, setBodyText] = useState("");
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-
-  // Insert a merge field at the cursor (or append) and keep focus.
-  function insertToken(token: string) {
-    const el = bodyRef.current;
-    if (!el) { setBodyText((b) => b + token); return; }
-    const start = el.selectionStart ?? bodyText.length;
-    const end = el.selectionEnd ?? bodyText.length;
-    const next = bodyText.slice(0, start) + token + bodyText.slice(end);
-    setBodyText(next);
-    requestAnimationFrame(() => { el.focus(); const p = start + token.length; el.setSelectionRange(p, p); });
-  }
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [docKey, setDocKey] = useState(0);   // bump to remount the editor (e.g. on template load)
   const [replyMode, setReplyMode] = useState<"bookkeeper" | "support">("bookkeeper");
   const [alsoPortal, setAlsoPortal] = useState(true);
   const [includeSignature, setIncludeSignature] = useState(true);
@@ -114,7 +228,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
   function loadTemplate(id: string) {
     const t = templates.find((x) => x.id === id);
     if (!t) return;
-    setSubject(t.subject); setBodyText(t.body_html.replace(/<[^>]+>/g, "").trim()); setKind(t.kind);
+    setSubject(t.subject); setBodyHtml(sanitizeEmailHtml(t.body_html || "")); setDocKey((k) => k + 1); setKind(t.kind);
   }
 
   async function saveTemplate() {
@@ -122,18 +236,18 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
     if (!name) return;
     const res = await fetch("/api/admin/email-templates", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, subject, body_html: textToHtml(bodyText), kind }),
+      body: JSON.stringify({ name, subject, body_html: bodyHtml, kind }),
     });
     if (res.ok) { setMsg({ tone: "ok", text: "Template saved." }); fetch("/api/admin/email-templates").then((r) => r.json()).then((d) => setTemplates(d.templates || [])); }
     else setMsg({ tone: "err", text: "Couldn't save template." });
   }
 
   async function sendTest() {
-    if (!subject || !bodyText) { setMsg({ tone: "err", text: "Add a subject and body first." }); return; }
+    if (!subject || !htmlToPlain(bodyHtml)) { setMsg({ tone: "err", text: "Add a subject and body first." }); return; }
     setBusy("test"); setMsg(null);
     const res = await fetch("/api/admin/bulk-email/send", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, body_html: textToHtml(bodyText), kind, test_email: senderEmail, include_signature: includeSignature }),
+      body: JSON.stringify({ subject, body_html: bodyHtml, kind, test_email: senderEmail, include_signature: includeSignature }),
     });
     setBusy(null);
     setMsg(res.ok ? { tone: "ok", text: `Test sent to ${senderEmail}.` } : { tone: "err", text: "Test send failed." });
@@ -142,7 +256,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
   // Click "Send" → open the per-recipient preview (so the sender sees exactly
   // how #firstname# resolves for each client) instead of a bare confirm.
   function send() {
-    if (!subject || !bodyText) { setMsg({ tone: "err", text: "Add a subject and body first." }); return; }
+    if (!subject || !htmlToPlain(bodyHtml)) { setMsg({ tone: "err", text: "Add a subject and body first." }); return; }
     if (!selectedEligible.length) { setMsg({ tone: "err", text: "Select at least one eligible recipient." }); return; }
     setMsg(null);
     setPreviewOpen(true);
@@ -154,7 +268,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
     setBusy("send"); setMsg(null);
     const res = await fetch("/api/admin/bulk-email/send", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, body_html: textToHtml(bodyText), kind, client_ids: selectedEligible, also_portal: alsoPortal, reply_to_mode: replyMode, include_signature: includeSignature }),
+      body: JSON.stringify({ subject, body_html: bodyHtml, kind, client_ids: selectedEligible, also_portal: alsoPortal, reply_to_mode: replyMode, include_signature: includeSignature }),
     });
     const d = await res.json();
     setBusy(null);
@@ -242,14 +356,8 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
             {templates.length > 0 && <select onChange={(e) => e.target.value && loadTemplate(e.target.value)} className="ml-auto text-[11px] rounded-md border border-gray-200 px-2 py-1" defaultValue=""><option value="">Load template…</option>{templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
           </div>
           <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" />
-          <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-            <span className="text-ink-light font-semibold">Insert:</span>
-            <button type="button" onClick={() => insertToken("#firstname#")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">#firstname#</button>
-            <button type="button" onClick={() => insertToken("#businessname#")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">#businessname#</button>
-            <button type="button" onClick={() => insertToken("#loginemail#")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">#loginemail#</button>
-            <span className="text-ink-light">— each client gets their own; preview before send</span>
-          </div>
-          <textarea ref={bodyRef} value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={9} placeholder={"Write your message…\n\nExample: Hi #firstname#, your June books are ready!\n\nBlank line = new paragraph. **bold** for emphasis.\n#firstname# / #businessname# / #loginemail# fill in per client — you'll preview each before sending."} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-y font-mono" />
+          <RichTextEditor key={docKey} initialHtml={bodyHtml} onChange={setBodyHtml} />
+          <p className="text-[11px] text-ink-light">Select text and use the toolbar to format (bold, italic, underline, links, lists). The merge tags fill in per client — you'll preview each before sending.</p>
           <div className="flex items-center gap-3 flex-wrap text-xs text-ink-slate">
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={alsoPortal} onChange={(e) => setAlsoPortal(e.target.checked)} className="rounded border-gray-300 text-teal" /> Also post to portal inbox</label>
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={includeSignature} onChange={(e) => setIncludeSignature(e.target.checked)} className="rounded border-gray-300 text-teal" /> Include my signature</label>
@@ -263,7 +371,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
               dangerouslySetInnerHTML={{
                 __html: wrapBrandedEmail({
                   bodyHtml: applyMergeFields(
-                    textToHtml(bodyText || "Your message goes here. The Ironbooks header, logo, and footer are added automatically."),
+                    bodyHtml || "<p style=\"color:#94A3B8;\">Your message goes here. The Ironbooks header, logo, and footer are added automatically.</p>",
                     { firstName: "Daniel", businessName: "Acme Painting", loginEmail: "daniel@acmepainting.com" }
                   ) + (includeSignature ? renderUserSignature({ ...senderSignature, signature_enabled: true }) : ""),
                   footerHtml: kind === "normal"
@@ -288,7 +396,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
         <SendPreviewModal
           recips={previewRecips}
           subject={subject}
-          bodyText={bodyText}
+          bodyHtml={bodyHtml}
           kind={kind}
           busy={busy}
           onConfirm={doSend}
@@ -323,11 +431,11 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
  * with no first name on file are flagged (they'll receive "there").
  */
 function SendPreviewModal({
-  recips, subject, bodyText, kind, busy, onConfirm, onCancel,
+  recips, subject, bodyHtml, kind, busy, onConfirm, onCancel,
 }: {
   recips: Recipient[];
   subject: string;
-  bodyText: string;
+  bodyHtml: string;
   kind: Kind;
   busy: string | null;
   onConfirm: () => void;
@@ -337,9 +445,9 @@ function SendPreviewModal({
   const noFirst = recips.filter((r) => !(r.first_name || "").trim()).length;
   // Whether the copy uses a login-email token, and how many chosen clients have
   // no portal login yet (those fall back to the address we're emailing).
-  const usesLogin = /\{\{\s*(contact\.)?(login_?email|portal_?email|email|login)\s*\}\}|#\s*(login_?email|portal_?email|email|login)\s*#/i.test(`${subject}\n${bodyText}`);
+  const usesLogin = /\{\{\s*(contact\.)?(login_?email|portal_?email|email|login)\s*\}\}|#\s*(login_?email|portal_?email|email|login)\s*#/i.test(`${subject}\n${bodyHtml}`);
   const noLogin = recips.filter((r) => !r.login_email).length;
-  const firstLine = bodyText.split(/\n/).find((l) => l.trim()) || "";
+  const firstLine = htmlToPlain(bodyHtml).slice(0, 120);
   const sampleVars = sample ? { firstName: sample.first_name, businessName: sample.client_name, loginEmail: sample.login_email || sample.email } : {};
   const exSubject = sample ? applyMergeFields(subject, sampleVars) : subject;
   const exLine = sample ? applyMergeFields(firstLine, sampleVars) : firstLine;
