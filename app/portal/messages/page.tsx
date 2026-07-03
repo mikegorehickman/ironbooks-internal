@@ -3,6 +3,7 @@ import { createServiceSupabase } from "@/lib/supabase";
 import { PortalErrorState } from "../error-state";
 import { MessagesClient } from "./messages-client";
 import { StatementUploadPanel } from "./statement-upload-panel";
+import { DocumentsPanel } from "./documents-panel";
 import type { ClientCommunication } from "@/lib/client-comms";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +79,9 @@ export default async function PortalMessagesPage() {
       <StatementUploadPanel />
 
       <MessagesClient initialMessages={messages} />
+
+      {/* Permanent archive: every past statement + file upload, below the thread. */}
+      <DocumentsPanel />
     </div>
   );
 }

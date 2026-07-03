@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { FileText, Upload, Loader2, CheckCircle2, AlertTriangle, HelpCircle } from "lucide-react";
 import { createBrowserSupabase } from "@/lib/supabase-browser";
 import { CLIENT_UPLOADS_BUCKET } from "@/lib/client-comms";
+import { DOCUMENTS_CHANGED_EVENT } from "./documents-panel";
 
 type Req = { id: string; label: string; account_name: string | null; account_kind: string | null };
 type Stmt = {
@@ -93,6 +94,7 @@ export function StatementUploadPanel() {
       }
       setJustFiled(filed);
       await refresh();
+      window.dispatchEvent(new Event(DOCUMENTS_CHANGED_EVENT));
     } catch (e: any) {
       setError(e?.message || "Something went wrong — try again");
     } finally {
@@ -116,6 +118,7 @@ export function StatementUploadPanel() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Couldn't match — try again");
       await refresh();
+      window.dispatchEvent(new Event(DOCUMENTS_CHANGED_EVENT));
     } catch (e: any) {
       setError(e?.message || "Couldn't match — try again");
     } finally {
