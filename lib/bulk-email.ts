@@ -88,9 +88,26 @@ export function wrapBrandedEmail(opts: { bodyHtml: string; footerHtml?: string |
 </table>`;
 }
 
+/**
+ * Server-side defense-in-depth for the rich-text body. The composer already
+ * emits an allowlisted, safe HTML string (client serializer), but this endpoint
+ * is HTML-in from an admin, so we independently strip the dangerous constructs:
+ * script/style/iframe/etc. elements, inline event handlers, and js/data URIs.
+ * Not a full sanitizer (email clients also strip aggressively) — a safety net.
+ */
+export function stripDangerousHtml(html: string): string {
+  return (html || "")
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta|base|title|head|body|html)\b[\s\S]*?<\/\s*\1\s*>/gi, "")
+    .replace(/<\s*\/?\s*(script|style|iframe|object|embed|link|meta|base|title|head|body|html)\b[^>]*>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/((?:href|src)\s*=\s*["']?)\s*(?:javascript|vbscript|data)\s*:/gi, "$1#");
+}
+
 /** Strip HTML to a plain-text fallback. */
 export function htmlToText(html: string): string {
   return html
+    .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m, url, txt) => `${String(txt).replace(/<[^>]+>/g, "")} (${url})`)
+    .replace(/<\s*li\b[^>]*>/gi, "• ")
     .replace(/<\s*br\s*\/?>/gi, "\n")
     .replace(/<\/\s*(p|div|tr|li|h[1-6])\s*>/gi, "\n")
     .replace(/<[^>]+>/g, "")

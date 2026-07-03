@@ -2,7 +2,7 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { NextResponse, after } from "next/server";
 import { loadBulkRecipients } from "@/lib/bulk-email-recipients";
 import {
-  sendBulkEmails, wrapBrandedEmail, applyMergeFields, htmlToText,
+  sendBulkEmails, wrapBrandedEmail, applyMergeFields, htmlToText, stripDangerousHtml,
   type EmailKind, type BulkRecipient,
 } from "@/lib/bulk-email";
 import { sendResendEmail } from "@/lib/client-comms";
@@ -40,7 +40,9 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({} as any));
   const subject = (body.subject || "").trim();
-  const rawBody = (body.body_html || "").trim();
+  // Body is rich HTML from the composer (already client-sanitized); strip
+  // dangerous constructs server-side too as defense-in-depth.
+  const rawBody = stripDangerousHtml((body.body_html || "").trim());
   const kind = (body.kind || "normal") as EmailKind;
   const replyMode = body.reply_to_mode === "support" ? "support" : "bookkeeper";
   const alsoPortal = body.also_portal === true;
