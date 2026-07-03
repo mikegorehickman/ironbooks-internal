@@ -12,6 +12,7 @@ interface Recipient {
   client_name: string;
   first_name: string | null;
   email: string | null;
+  login_email: string | null;
   has_portal: boolean;
   jurisdiction: string | null;
   in_production: boolean;
@@ -245,9 +246,10 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
             <span className="text-ink-light font-semibold">Insert:</span>
             <button type="button" onClick={() => insertToken("#firstname#")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">#firstname#</button>
             <button type="button" onClick={() => insertToken("#businessname#")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">#businessname#</button>
+            <button type="button" onClick={() => insertToken("#loginemail#")} className="font-semibold text-teal-dark bg-teal-lighter border border-teal/20 rounded-full px-2 py-0.5 hover:bg-teal-light">#loginemail#</button>
             <span className="text-ink-light">— each client gets their own; preview before send</span>
           </div>
-          <textarea ref={bodyRef} value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={9} placeholder={"Write your message…\n\nExample: Hi #firstname#, your June books are ready!\n\nBlank line = new paragraph. **bold** for emphasis.\n#firstname# / #businessname# fill in per client — you'll preview each before sending."} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-y font-mono" />
+          <textarea ref={bodyRef} value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={9} placeholder={"Write your message…\n\nExample: Hi #firstname#, your June books are ready!\n\nBlank line = new paragraph. **bold** for emphasis.\n#firstname# / #businessname# / #loginemail# fill in per client — you'll preview each before sending."} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm resize-y font-mono" />
           <div className="flex items-center gap-3 flex-wrap text-xs text-ink-slate">
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={alsoPortal} onChange={(e) => setAlsoPortal(e.target.checked)} className="rounded border-gray-300 text-teal" /> Also post to portal inbox</label>
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={includeSignature} onChange={(e) => setIncludeSignature(e.target.checked)} className="rounded border-gray-300 text-teal" /> Include my signature</label>
@@ -262,7 +264,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
                 __html: wrapBrandedEmail({
                   bodyHtml: applyMergeFields(
                     textToHtml(bodyText || "Your message goes here. The Ironbooks header, logo, and footer are added automatically."),
-                    { firstName: "Daniel", businessName: "Acme Painting" }
+                    { firstName: "Daniel", businessName: "Acme Painting", loginEmail: "daniel@acmepainting.com" }
                   ) + (includeSignature ? renderUserSignature({ ...senderSignature, signature_enabled: true }) : ""),
                   footerHtml: kind === "normal"
                     ? "You're receiving this because you're an Ironbooks client. <span style=\"color:#1F5D58;font-weight:600;\">Unsubscribe</span> from updates like this."
@@ -333,9 +335,14 @@ function SendPreviewModal({
 }) {
   const sample = recips[0];
   const noFirst = recips.filter((r) => !(r.first_name || "").trim()).length;
+  // Whether the copy uses a login-email token, and how many chosen clients have
+  // no portal login yet (those fall back to the address we're emailing).
+  const usesLogin = /\{\{\s*(contact\.)?(login_?email|portal_?email|email|login)\s*\}\}|#\s*(login_?email|portal_?email|email|login)\s*#/i.test(`${subject}\n${bodyText}`);
+  const noLogin = recips.filter((r) => !r.login_email).length;
   const firstLine = bodyText.split(/\n/).find((l) => l.trim()) || "";
-  const exSubject = sample ? applyMergeFields(subject, { firstName: sample.first_name, businessName: sample.client_name }) : subject;
-  const exLine = sample ? applyMergeFields(firstLine, { firstName: sample.first_name, businessName: sample.client_name }) : firstLine;
+  const sampleVars = sample ? { firstName: sample.first_name, businessName: sample.client_name, loginEmail: sample.login_email || sample.email } : {};
+  const exSubject = sample ? applyMergeFields(subject, sampleVars) : subject;
+  const exLine = sample ? applyMergeFields(firstLine, sampleVars) : firstLine;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
@@ -359,6 +366,13 @@ function SendPreviewModal({
           <div className="px-5 py-2 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800 flex items-center gap-1.5">
             <AlertTriangle size={13} className="flex-shrink-0" />
             {noFirst} {noFirst === 1 ? "client has" : "clients have"} no first name on file — they'll receive “there”. Edit their profile to fix.
+          </div>
+        )}
+
+        {usesLogin && noLogin > 0 && (
+          <div className="px-5 py-2 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800 flex items-center gap-1.5">
+            <AlertTriangle size={13} className="flex-shrink-0" />
+            {noLogin} {noLogin === 1 ? "client has" : "clients have"} no portal login yet — <code className="bg-amber-100 rounded px-1 mx-0.5">#loginemail#</code> falls back to the address we're emailing (their contact email).
           </div>
         )}
 

@@ -38,17 +38,26 @@ export function resolveRecipientEmail(c: {
 /** Replace the supported merge fields in subject/body. */
 export function applyMergeFields(
   text: string,
-  vars: { firstName?: string | null; businessName?: string | null }
+  vars: { firstName?: string | null; businessName?: string | null; loginEmail?: string | null }
 ): string {
   const first = (vars.firstName || "there").trim() || "there";
   const biz = (vars.businessName || "your business").trim() || "your business";
+  // The client's portal login email. Never blank in a real send (the send loop
+  // falls back to the address we're mailing); the literal fallback below only
+  // guards a truly-empty value so the raw token never leaks to a client.
+  const login = (vars.loginEmail || "").trim() || "your login email";
   return text
     // {{first_name}} / {{contact.first_name}}  and  #firstname# / #first_name#
     .replace(/\{\{\s*(contact\.)?first_?name\s*\}\}/gi, first)
     .replace(/#\s*first_?name\s*#/gi, first)
     // {{business_name}} / {{company_name}} / {{client_name}}  and  #businessname# etc.
     .replace(/\{\{\s*(client_?name|business_?name|company_?name)\s*\}\}/gi, biz)
-    .replace(/#\s*(client_?name|business_?name|company_?name)\s*#/gi, biz);
+    .replace(/#\s*(client_?name|business_?name|company_?name)\s*#/gi, biz)
+    // {{login_email}} / {{portal_email}} / {{email}} / {{contact.email}} / {{login}}
+    // and #loginemail# / #login_email# / #email# / #login#.
+    // Function replacers so a "$" in the value is never treated as a backref.
+    .replace(/\{\{\s*(contact\.)?(login_?email|portal_?email|email|login)\s*\}\}/gi, () => login)
+    .replace(/#\s*(login_?email|portal_?email|email|login)\s*#/gi, () => login);
 }
 
 const LOGO = "https://internal.ironbooks.com/logo.png";
@@ -95,6 +104,8 @@ export interface BulkRecipient {
   email: string;
   firstName?: string | null;
   businessName?: string | null;
+  /** Portal login email (their auth address). Null when no portal user exists. */
+  loginEmail?: string | null;
   replyTo?: string | null;
 }
 
@@ -114,7 +125,8 @@ export async function sendBulkEmails(params: {
 }): Promise<{ sent: number; failed: number }> {
   let sent = 0, failed = 0;
   for (const r of params.recipients) {
-    const vars = { firstName: r.firstName, businessName: r.businessName };
+    // Fall back to the address we're mailing so {{login_email}} is never blank.
+    const vars = { firstName: r.firstName, businessName: r.businessName, loginEmail: r.loginEmail || r.email };
     const subject = applyMergeFields(params.subject, vars);
     const body = applyMergeFields(params.bodyHtml, vars);
     const token = makeConsentToken(r.clientLinkId);

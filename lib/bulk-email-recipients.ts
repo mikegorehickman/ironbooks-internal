@@ -6,6 +6,7 @@ export interface RecipientRow {
   client_name: string;
   first_name: string | null;
   email: string | null;          // resolved: portal email → contact email
+  login_email: string | null;    // portal login (auth) email only; null if no portal user
   has_portal: boolean;
   jurisdiction: string | null;
   in_production: boolean;
@@ -58,12 +59,14 @@ export async function loadBulkRecipients(service: SupabaseClient): Promise<Recip
 
   return rows.map((c) => {
     const portal = portalEmailByClient.get(c.id) || null;
+    const loginEmail = (portal || "").trim().toLowerCase() || null;
     const email = (portal || c.client_email || "").trim().toLowerCase() || null;
     return {
       client_link_id: c.id,
       client_name: c.client_name,
       first_name: c.contact_first_name ?? null,
       email: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
+      login_email: loginEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail) ? loginEmail : null,
       has_portal: !!portal,
       jurisdiction: c.jurisdiction ?? null,
       in_production: !!c.daily_recon_enabled,

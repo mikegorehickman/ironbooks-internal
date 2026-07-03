@@ -66,13 +66,14 @@ export async function POST(request: Request) {
 
   // Test send — single email, no campaign, no consent logic.
   if (body.test_email) {
+    const sampleVars = { firstName: "Sample", businessName: "Sample Painting Co", loginEmail: "client@theircompany.com" };
     const html = wrapBrandedEmail({
-      bodyHtml: applyMergeFields(bodyHtml, { firstName: "Sample", businessName: "Sample Painting Co" }),
+      bodyHtml: applyMergeFields(bodyHtml, sampleVars),
       footerHtml: kind === "normal" ? "Unsubscribe link appears here in the real send." : null,
     });
     const ok = await sendResendEmail({
       to: [body.test_email],
-      subject: `[TEST] ${applyMergeFields(subject, { firstName: "Sample", businessName: "Sample Painting Co" })}`,
+      subject: `[TEST] ${applyMergeFields(subject, sampleVars)}`,
       text: htmlToText(bodyHtml),
       html,
       from: fromDisplay,
@@ -123,6 +124,7 @@ export async function POST(request: Request) {
     email: r.email!,
     firstName: r.first_name,
     businessName: r.client_name,
+    loginEmail: r.login_email,
     replyTo: replyMode === "bookkeeper" ? (r.bookkeeper_id ? bkEmailById.get(r.bookkeeper_id) || SUPPORT_REPLY : SUPPORT_REPLY) : SUPPORT_REPLY,
   }));
 
@@ -143,7 +145,7 @@ export async function POST(request: Request) {
             try {
               await (svc as any).from("client_communications").insert({
                 client_link_id: clientLinkId, direction: "to_client", kind: "notification",
-                subject, body: htmlToText(applyMergeFields(rawBody, { firstName: null, businessName: null })),
+                subject, body: htmlToText(applyMergeFields(rawBody, { firstName: null, businessName: null, loginEmail: email })),
                 sender_user_id: user.id,
               });
             } catch { /* portal mirror best-effort */ }
