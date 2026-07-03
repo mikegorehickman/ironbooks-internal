@@ -86,49 +86,76 @@ export function DocumentsPanel({ initialDocuments }: { initialDocuments?: Portal
         </p>
       ) : (
         <>
-          <ul className="mt-4 divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
-            {visible.map((d) => {
-              const size = fmtSize(d.size);
-              const meta: string[] = [fmtDate(d.date)];
-              if (d.kind === "statement") {
-                if (d.account) meta.push(d.account);
-                if (d.period) meta.push(d.period);
-              } else {
-                meta.push(d.direction === "to_client" ? "From your bookkeeper" : "Sent by you");
-                if (size) meta.push(size);
-              }
-              return (
-                <li key={d.key} className="flex items-center gap-3 px-3 py-2.5 bg-white hover:bg-slate-50">
-                  {d.kind === "statement" ? (
-                    <FileText size={16} className="text-teal flex-shrink-0" />
-                  ) : (
-                    <Paperclip size={16} className="text-slate-400 flex-shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-navy truncate">{d.name}</div>
-                    <div className="text-[11px] text-ink-slate truncate">
-                      {meta.join(" · ")}
-                      {d.needs_match && (
-                        <span className="ml-1.5 text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-px font-semibold">
-                          needs account
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {d.path && (
-                    <a
-                      href={`/api/client-files/download?path=${encodeURIComponent(d.path)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-teal-dark hover:text-teal border border-slate-200 hover:border-teal/40 rounded-lg px-2.5 py-1.5 flex-shrink-0"
-                    >
-                      <Download size={13} /> View
-                    </a>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <div className="mt-4 border border-slate-200 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr className="text-[11px] uppercase tracking-wide text-ink-slate">
+                  <th className="text-left font-semibold px-3 py-2">File</th>
+                  <th className="text-left font-semibold px-3 py-2">Account</th>
+                  <th className="text-left font-semibold px-3 py-2 hidden sm:table-cell">Period</th>
+                  <th className="text-left font-semibold px-3 py-2 hidden md:table-cell">Uploaded</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visible.map((d) => {
+                  const size = fmtSize(d.size);
+                  const sub =
+                    d.kind === "attachment"
+                      ? [d.direction === "to_client" ? "From your bookkeeper" : "Sent by you", size].filter(Boolean).join(" · ")
+                      : null;
+                  return (
+                    <tr key={d.key} className="bg-white hover:bg-slate-50">
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {d.kind === "statement" ? (
+                            <FileText size={16} className="text-teal flex-shrink-0" />
+                          ) : (
+                            <Paperclip size={16} className="text-slate-400 flex-shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-navy truncate max-w-[220px]">{d.name}</div>
+                            {sub && <div className="text-[11px] text-ink-slate truncate">{sub}</div>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {d.kind === "statement" ? (
+                          d.needs_match ? (
+                            <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 font-semibold whitespace-nowrap">
+                              needs account
+                            </span>
+                          ) : (
+                            <span className="text-sm text-navy">{d.account || "—"}</span>
+                          )
+                        ) : (
+                          <span className="text-sm text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 hidden sm:table-cell text-sm text-ink-slate whitespace-nowrap">
+                        {d.period || "—"}
+                      </td>
+                      <td className="px-3 py-2.5 hidden md:table-cell text-sm text-ink-slate whitespace-nowrap">
+                        {fmtDate(d.date)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        {d.path && (
+                          <a
+                            href={`/api/client-files/download?path=${encodeURIComponent(d.path)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-teal-dark hover:text-teal border border-slate-200 hover:border-teal/40 rounded-lg px-2.5 py-1.5"
+                          >
+                            <Download size={13} /> View
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {docs.length > INITIAL_VISIBLE && (
             <button
               onClick={() => setShowAll((s) => !s)}

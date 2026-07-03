@@ -150,37 +150,62 @@ export function StatementsCard({ clientLinkId }: { clientLinkId: string }) {
         ) : statements.length === 0 ? (
           <p className="text-sm text-ink-light italic">No statements filed yet.</p>
         ) : (
-          <ul className="space-y-2">
-            {statements.map((s) => {
-              const conf = CONF[s.match_confidence || "none"] || CONF.none;
-              return (
-                <li key={s.id} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5">
-                  <FileText size={16} className="text-indigo-500 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-navy truncate">{s.display_name}</div>
-                    <div className="text-xs text-ink-slate flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      <span>{periodLabel(s)}</span>
-                      {s.last4 && <span>·•••{s.last4}</span>}
-                      {s.matched_account_name && <span className="truncate">· {s.matched_account_name}</span>}
-                      {s.uploaded_via === "portal" && <span className="text-indigo-500">· client upload</span>}
-                    </div>
-                  </div>
-                  <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border flex-shrink-0 ${conf.cls}`}>
-                    {s.status === "processed" && s.match_confidence === "high"
-                      ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={10} /> {conf.label}</span>
-                      : conf.label}
-                  </span>
-                  <a
-                    href={`/api/client-files/download?path=${encodeURIComponent(s.storage_path)}`}
-                    className="p-1.5 rounded-md hover:bg-gray-100 text-ink-slate flex-shrink-0"
-                    title="Download original"
-                  >
-                    <Download size={15} />
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+            <table className="w-full text-sm">
+              <thead className="bg-indigo-50/60">
+                <tr className="text-[11px] uppercase tracking-wide text-ink-slate">
+                  <th className="text-left font-semibold px-3 py-2">Statement</th>
+                  <th className="text-left font-semibold px-3 py-2">Applied to account</th>
+                  <th className="text-left font-semibold px-3 py-2 hidden sm:table-cell">Period</th>
+                  <th className="text-left font-semibold px-3 py-2">Match</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {statements.map((s) => {
+                  const conf = CONF[s.match_confidence || "none"] || CONF.none;
+                  return (
+                    <tr key={s.id} className="bg-white hover:bg-indigo-50/30">
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText size={16} className="text-indigo-500 flex-shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-navy truncate max-w-[220px]">{s.display_name}</div>
+                            <div className="text-xs text-ink-slate flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                              {s.last4 && <span>•••{s.last4}</span>}
+                              {s.uploaded_via === "portal" && <span className="text-indigo-500">client upload</span>}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {s.matched_account_name
+                          ? <span className="text-sm text-navy">{s.matched_account_name}</span>
+                          : <span className="text-sm text-amber-700 font-medium">Not applied yet</span>}
+                      </td>
+                      <td className="px-3 py-2.5 hidden sm:table-cell text-sm text-ink-slate whitespace-nowrap">{periodLabel(s)}</td>
+                      <td className="px-3 py-2.5">
+                        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border whitespace-nowrap ${conf.cls}`}>
+                          {s.status === "processed" && s.match_confidence === "high"
+                            ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={10} /> {conf.label}</span>
+                            : conf.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <a
+                          href={`/api/client-files/download?path=${encodeURIComponent(s.storage_path)}`}
+                          className="inline-flex p-1.5 rounded-md hover:bg-gray-100 text-ink-slate"
+                          title="Download original"
+                        >
+                          <Download size={15} />
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </section>
