@@ -124,6 +124,9 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
               has_portal: on,
               portal_provisioned: c.portal_provisioned || on,
               portal_user_count: on ? Math.max(1, c.portal_user_count) : 0,
+              // Re-activating also un-archives the client server-side (the
+              // portal blocks archived clients) — mirror that here.
+              is_active: on ? true : c.is_active,
             }
           : c
       )
@@ -223,6 +226,10 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    // Don't trust a bare 200 — an old deploy or a redirect can return OK
+    // without the confirmation payload. Only flip the UI when the API
+    // explicitly confirms the new state.
+    if (body.ok !== true) throw new Error("Server didn't confirm the change — is the latest code deployed?");
     markPortal(c.id, action === "activate");
   }
 
