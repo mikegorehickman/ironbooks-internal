@@ -21,10 +21,11 @@ import { CoaUpdatesBanner } from "./coa-updates-banner";
  * finished month "resets": next month has no row yet.
  *
  * A month reaches Completed two ways: the full SNAP close ("send" — review,
- * attest, email statements, close QBO) OR "mark complete" for closes done
- * outside SNAP (e.g. emailed from Double) — same Completed state, no email /
- * no QBO close, badged "closed outside SNAP". Picking another status on a
- * completed card reopens it.
+ * attest, email statements, close QBO) OR the board's Completed status, which
+ * runs the SAME full close. Both are client-facing sends, so both require the
+ * explicit verification popup (attested: true) — the board path mis-fired
+ * real statement emails on 2026-07-04 when it only had a browser confirm.
+ * Picking another status on a completed card reopens it.
  *
  * "Ready for manager review" is not a stored status — submitting the
  * statement review (the rec-card flow) moves the run to pending_review,
@@ -378,28 +379,31 @@ function BoardCard({
     }
   }
 
-  // Mark the month complete — this now runs the FULL close: publishes the
-  // statements to the client's portal, emails them, and sets the QuickBooks
-  // closing date. (No more no-send "closed outside SNAP" path — Double is gone.)
-  async function markComplete() {
-    if (
-      !confirm(
-        `Close & send ${client.client_name}'s ${periodLabel(period)} statements?\n\n` +
-          `This publishes their ${periodLabel(period)} statements to the client portal, ` +
-          `EMAILS the client that their books are ready, and closes the period in QuickBooks.\n\n` +
-          `This is client-facing — only do it when the month is truly done.`
-      )
-    )
-      return;
+  // Mark the month complete — this runs the FULL close: publishes the
+  // statements to the client's portal, EMAILS them, and sets the QuickBooks
+  // closing date. Client-facing, so it opens the verification popup; the
+  // actual send only fires from the modal's attested confirm (the API also
+  // rejects any close without attested: true).
+  const [confirmingSend, setConfirmingSend] = useState(false);
+  const [sendAttested, setSendAttested] = useState(false);
+
+  function markComplete() {
+    setSendAttested(false);
+    setConfirmingSend(true);
+  }
+
+  async function doMarkComplete() {
     setSaving(true);
     try {
       const res = await fetch(`/api/clients/${client.id}/monthly-rec`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "mark_complete", period }),
+        body: JSON.stringify({ action: "mark_complete", period, attested: true }),
       });
-      if (res.ok) onChanged();
-      else {
+      if (res.ok) {
+        setConfirmingSend(false);
+        onChanged();
+      } else {
         const b = await res.json().catch(() => ({}));
         alert(b.error || "Couldn't mark complete");
       }
@@ -657,6 +661,73 @@ function BoardCard({
         <div className="mt-1.5 flex items-center gap-1 text-[10px] text-amber-800">
           <AlertCircle size={10} />
           Concerns noted for the manager
+        </div>
+      )}
+
+      {/* ── VERIFICATION POPUP ── every client-facing send goes through this.
+          The Send button stays locked until the attestation box is ticked;
+          the API independently rejects any close without attested: true. */}
+      {confirmingSend && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={() => !saving && setConfirmingSend(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-4 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-2.5">
+              <div className="p-2 rounded-lg bg-red-50 flex-shrink-0">
+                <Send size={16} className="text-red-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-navy text-sm">
+                  Send {client.client_name}&apos;s {periodLabel(period)} statements?
+                </h3>
+                <p className="text-xs text-ink-slate mt-0.5">
+                  This is client-facing and can&apos;t be unsent.
+                </p>
+              </div>
+            </div>
+
+            <ul className="text-xs text-navy space-y-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+              <li>• Publishes the {periodLabel(period)} statements to their portal</li>
+              <li>• <strong>Emails the client</strong> that their books are ready</li>
+              <li>• Closes the period in QuickBooks</li>
+            </ul>
+
+            <label className="flex items-start gap-2.5 cursor-pointer bg-white border-2 border-red-200 rounded-lg px-3 py-2.5">
+              <input
+                type="checkbox"
+                checked={sendAttested}
+                onChange={(e) => setSendAttested(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-2 border-gray-300 text-red-600 focus:ring-red-500"
+              />
+              <span className="text-xs text-navy leading-relaxed">
+                I have reviewed {client.client_name}&apos;s {periodLabel(period)} statements and
+                they are accurate and ready to send to the client.
+              </span>
+            </label>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmingSend(false)}
+                disabled={saving}
+                className="px-3.5 py-2 text-sm font-semibold rounded-lg border border-gray-200 text-ink-slate hover:text-navy hover:border-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={doMarkComplete}
+                disabled={saving || !sendAttested}
+                title={!sendAttested ? "Tick the verification box first" : undefined}
+                className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40"
+              >
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                Close &amp; send to client
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -45,9 +45,17 @@ export function BackfillClient() {
 
   // Reopen the May close, then re-complete it — which now runs the full send
   // (build statements → portal notification → email → QBO closing date). Same
-  // as a bookkeeper doing it by hand on the board.
-  async function sendOne(id: string): Promise<boolean> {
+  // as a bookkeeper doing it by hand on the board. Every send is client-facing,
+  // so a single-row send gets its own verification popup (send-all confirms
+  // once for the batch), and the API requires attested: true.
+  async function sendOne(id: string, batchConfirmed = false): Promise<boolean> {
     if (rows[id]?.status === "sent") return true; // don't double-send
+    if (!batchConfirmed) {
+      const name = CLIENTS.find((c) => c.id === id)?.name || "this client";
+      if (!confirm(`Send ${name} their May 2026 statements?\n\nThis publishes to their portal and EMAILS the client. It can't be unsent.`)) {
+        return false;
+      }
+    }
     set(id, { status: "sending" });
     try {
       const reopen = await fetch(`/api/clients/${id}/monthly-rec`, {
@@ -62,7 +70,7 @@ export function BackfillClient() {
       const res = await fetch(`/api/clients/${id}/monthly-rec`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "mark_complete", period: PERIOD }),
+        body: JSON.stringify({ action: "mark_complete", period: PERIOD, attested: true }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || "send failed");
@@ -81,7 +89,7 @@ export function BackfillClient() {
     for (const c of CLIENTS) {
       if (rows[c.id]?.status === "sent") continue;
       // eslint-disable-next-line no-await-in-loop
-      await sendOne(c.id);
+      await sendOne(c.id, true);
     }
     setRunningAll(false);
   }
