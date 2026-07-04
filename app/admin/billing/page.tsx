@@ -1,6 +1,7 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { BillingTable } from "./billing-table";
+import { computeBillingCoverage, type BillingCoverage } from "@/lib/billing-coverage";
 
 export const dynamic = "force-dynamic";
 
@@ -155,6 +156,15 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
     };
   });
 
+  // Billing coverage: every serviced client cross-checked against billing
+  // state, so nobody gets bookkeeping for free. Degrades to empty on error.
+  let coverage: BillingCoverage | null = null;
+  try {
+    coverage = await computeBillingCoverage(service as any);
+  } catch {
+    coverage = null;
+  }
+
   // Current USD→CAD spot rate (server-side fetch; safe fallback if it fails).
   let fxUsdToCad = 1.37;
   try {
@@ -197,6 +207,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       unmatched={unmatched.map((u) => ({
         who: u.who, amountCents: u.amount_cents, currency: u.currency, customerId: u.stripe_customer_id,
       }))}
+      coverage={coverage}
     />
   );
 }

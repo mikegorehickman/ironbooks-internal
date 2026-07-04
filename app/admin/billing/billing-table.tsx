@@ -31,13 +31,19 @@ type Recon = {
   unmatched_count: number; unmatched_usd_cents: number; unmatched_cad_cents: number; fx_usd_cad: number; ran_at: string;
 } | null;
 type Unmatched = { who: string; amountCents: number; currency: string; customerId: string | null };
+type Coverage = {
+  activeClients: number;
+  unbilled: { client_link_id: string; client_name: string; service: "production" | "onboarding"; service_since: string | null; detail: string }[];
+  missedThisMonth: { client_link_id: string; client_name: string; expected_cents: number; currency: string; billing_day: number | null; source: "stripe" | "manual"; detail: string }[];
+  payingInactive: { client_link_id: string; client_name: string; mrr_cents: number; currency: string }[];
+} | null;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const money = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 // Currency-aware: CAD amounts get a " CAD" tag; USD stays plain.
 const fmtCur = (cents: number, currency: string) => money(cents) + (currency === "cad" ? " CAD" : "");
 
-export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected, recon, unmatched }: { year: number; rows: Row[]; fxUsdToCad: number; totals: Totals; monthlyProjected: MonthProj[]; recon: Recon; unmatched: Unmatched[] }) {
+export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected, recon, unmatched, coverage }: { year: number; rows: Row[]; fxUsdToCad: number; totals: Totals; monthlyProjected: MonthProj[]; recon: Recon; unmatched: Unmatched[]; coverage?: Coverage }) {
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -188,6 +194,73 @@ export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected,
       </div>
       {syncMsg && <div className="mb-3 text-xs text-ink-slate bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">{syncMsg}</div>}
       {pullResult?.error && <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{pullResult.error}</div>}
+
+      {/* ── BILLING COVERAGE ── every serviced client cross-checked against
+          billing state, so nobody gets bookkeeping for free. Clicking a name
+          filters the grid to that client. Green when fully covered. */}
+      {coverage && (coverage.unbilled.length > 0 || coverage.missedThisMonth.length > 0 || coverage.payingInactive.length > 0 ? (
+        <div className="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2.5 text-sm space-y-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <strong className="text-red-900">⚠ Billing coverage</strong>
+            <span className="text-ink-slate">
+              {coverage.unbilled.length > 0 && <><strong className="text-red-800">{coverage.unbilled.length}</strong> serviced with no billing</>}
+              {coverage.missedThisMonth.length > 0 && <>{coverage.unbilled.length > 0 ? " · " : ""}<strong className="text-amber-800">{coverage.missedThisMonth.length}</strong> billed but nothing collected this month</>}
+              {coverage.payingInactive.length > 0 && <> · <strong className="text-red-800">{coverage.payingInactive.length}</strong> paying while deactivated</>}
+              {" "}(of {coverage.activeClients} active clients)
+            </span>
+          </div>
+          {coverage.unbilled.length > 0 && (
+            <ul className="space-y-1">
+              {coverage.unbilled.map((g) => (
+                <li key={g.client_link_id} className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${g.service === "production" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
+                    {g.service === "production" ? "IN PRODUCTION" : "ONBOARDING"}
+                  </span>
+                  <button onClick={() => setQ(g.client_name)} className="font-semibold text-navy hover:underline">
+                    {g.client_name}
+                  </button>
+                  <span className="text-ink-slate">{g.detail}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {coverage.missedThisMonth.length > 0 && (
+            <ul className="space-y-1 pt-1 border-t border-red-200/60">
+              {coverage.missedThisMonth.map((g) => (
+                <li key={g.client_link_id} className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-bold px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800">NO PAYMENT YET</span>
+                  <button onClick={() => setQ(g.client_name)} className="font-semibold text-navy hover:underline">
+                    {g.client_name}
+                  </button>
+                  <span className="text-ink-slate">
+                    {g.expected_cents > 0 ? `expects ${fmtCur(g.expected_cents, g.currency)}/mo · ` : ""}{g.detail}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {coverage.payingInactive.length > 0 && (
+            <ul className="space-y-1 pt-1 border-t border-red-200/60">
+              {coverage.payingInactive.map((g) => (
+                <li key={g.client_link_id} className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-bold px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-800">STILL CHARGING</span>
+                  <span className="font-semibold text-navy">{g.client_name}</span>
+                  <span className="text-ink-slate">
+                    deactivated client with an active subscription{g.mrr_cents > 0 ? ` (${fmtCur(g.mrr_cents, g.currency)}/mo)` : ""} — cancel in Stripe or reactivate the client
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+          <strong className="text-emerald-900">✓ Billing coverage</strong>{" "}
+          <span className="text-ink-slate">
+            all {coverage.activeClients} active clients have a subscription, MRR, recent payment, or comped month — nobody is being serviced for free.
+          </span>
+        </div>
+      ))}
 
       {/* Single reconciliation banner — the critical number. Stripe gross this
           month = recorded + unmatched; the gap is shown loudly with a direct
