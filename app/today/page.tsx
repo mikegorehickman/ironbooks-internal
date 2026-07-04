@@ -151,7 +151,10 @@ export async function TodayContent({
         "source_account_qbo_id, source_account_name, target_account_qbo_id, target_account_name, " +
         "example_txn_id, vendor_name, client_reason, status"
       )
-      .eq("status", "pending")
+      // failed = an approve attempt errored or matched zero transactions.
+      // Those stay in the queue (decline with a note, or retry) — hiding
+      // them left the client without an answer forever.
+      .in("status", ["pending", "failed"])
       .order("requested_at", { ascending: false });
 
     let raw = (rrRows as any[]) || [];

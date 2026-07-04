@@ -19,7 +19,8 @@ export interface PendingReclassRequest {
   example_txn_id: string | null;
   vendor_name: string | null;
   client_reason: string;
-  status: "pending";
+  /** failed = an approve attempt errored / matched nothing; still actionable. */
+  status: "pending" | "failed";
 }
 
 type PreviewState = {
@@ -74,7 +75,7 @@ export function ReclassRequestsWidget({
       <div className="px-5 py-3 bg-violet-50 border-b border-violet-200 flex items-center gap-2">
         <Tag size={16} className="text-violet-700" />
         <h2 className="text-sm font-bold text-violet-900 uppercase tracking-wider">
-          Client reclass requests · {requests.length} pending
+          Client reclass requests · {requests.length} to review
         </h2>
         <span className="text-xs text-violet-700 ml-auto">
           Approve to reclassify matching txns + create a bank rule
@@ -196,6 +197,14 @@ function ReclassRow({
             </span>
             {req.requester_name && (
               <span className="text-[10px] text-ink-light">· {req.requester_name}</span>
+            )}
+            {req.status === "failed" && (
+              <span
+                className="text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded"
+                title="An approve attempt found no matching transactions (or errored). Decline with a note to answer the client, or retry approve."
+              >
+                COULDN&apos;T APPLY — DECLINE OR RETRY
+              </span>
             )}
           </div>
           <div className="text-sm text-ink-slate mt-1 flex items-center gap-2 flex-wrap">
