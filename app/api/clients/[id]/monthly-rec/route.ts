@@ -8,6 +8,13 @@ import {
   runMonthlyRecChecks,
 } from "@/lib/monthly-rec";
 import { emailPortalUsersAboutMessage } from "@/lib/client-comms";
+import {
+  runBooksVerification,
+  recomputeStoredVerification,
+  SEND_MIN_SCORE,
+  type DismissalRow,
+  type VerificationResult,
+} from "@/lib/books-verification";
 import { buildPackagesBulk } from "@/lib/month-end/package-builder";
 import { generateSummariesBatch } from "@/lib/month-end/generate-summaries";
 import { bulkApproveSummaries } from "@/lib/month-end/bulk-approve";
@@ -74,6 +81,12 @@ export async function POST(
     board_status?: string;
     waiting_reasons?: string[];
     status_note?: string;
+    /** Books Reliability gate: senior's reason for sending below threshold. */
+    override_reason?: string;
+    /** dismiss_finding / undismiss_finding */
+    check_key?: string;
+    fingerprint?: string;
+    reason?: string;
   };
   try {
     body = await request.json();
@@ -81,7 +94,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const action = body.action;
-  if (!["run", "statements", "spot_check", "submit", "send", "reopen", "board", "mark_complete"].includes(action || "")) {
+  if (!["run", "statements", "spot_check", "submit", "send", "reopen", "board", "mark_complete", "verify", "dismiss_finding", "undismiss_finding"].includes(action || "")) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
@@ -128,6 +141,127 @@ export async function POST(
     } catch (err: any) {
       return qboErrorResponse(err);
     }
+  }
+
+  if (action === "verify") {
+    // Books Reliability verification — read-only against QBO, deterministic
+    // score, snapshot stored on the run row (re-verify overwrites).
+    try {
+      const { data: existingRun } = await (service as any)
+        .from("monthly_rec_runs")
+        .select("kind")
+        .eq("client_link_id", clientLinkId)
+        .eq("period", period)
+        .maybeSingle();
+      const accessToken = await getValidToken(clientLinkId, service as any);
+      const result = await runBooksVerification({
+        service: service as any,
+        clientLinkId,
+        realmId: (client as any).qbo_realm_id,
+        accessToken,
+        period,
+        periodStart,
+        periodEnd,
+        includeBS,
+        kind: (existingRun?.kind as any) || "production_me",
+        ranBy: user.id,
+      });
+      const { data: run, error } = await (service as any)
+        .from("monthly_rec_runs")
+        .upsert(
+          {
+            client_link_id: clientLinkId,
+            period,
+            period_start: periodStart,
+            period_end: periodEnd,
+            verification: result,
+            verification_score: result.score,
+            verification_ran_at: result.ranAt,
+            created_by: user.id,
+          },
+          { onConflict: "client_link_id,period" }
+        )
+        .select("*")
+        .single();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true, run });
+    } catch (err: any) {
+      return qboErrorResponse(err);
+    }
+  }
+
+  if (action === "dismiss_finding" || action === "undismiss_finding") {
+    // Accept/revoke a known finding for this client. Pure recompute over the
+    // stored snapshot — no QBO calls, so the score updates instantly.
+    const fingerprint = (body.fingerprint || "").trim();
+    if (!fingerprint) return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
+
+    const { data: run } = await (service as any)
+      .from("monthly_rec_runs")
+      .select("id, verification, kind")
+      .eq("client_link_id", clientLinkId)
+      .eq("period", period)
+      .maybeSingle();
+    const stored = run?.verification as VerificationResult | null;
+    if (!run || !stored) {
+      return NextResponse.json({ error: "Run Verify books for this month first." }, { status: 400 });
+    }
+
+    if (action === "dismiss_finding") {
+      const reason = (body.reason || "").trim();
+      if (!reason) return NextResponse.json({ error: "A reason is required to dismiss a finding." }, { status: 400 });
+      const finding = stored.checks.flatMap((c) => c.findings).find((f) => f.fingerprint === fingerprint);
+      if (!finding) return NextResponse.json({ error: "Finding not found in the current verification." }, { status: 404 });
+      if (!finding.dismissable) {
+        return NextResponse.json({ error: "This finding can't be dismissed — it has to be fixed." }, { status: 400 });
+      }
+      if (finding.senior_only && !isSenior) {
+        return NextResponse.json({ error: "Only an admin or lead can dismiss this finding." }, { status: 403 });
+      }
+      const { error: dErr } = await (service as any).from("verification_dismissals").upsert(
+        {
+          client_link_id: clientLinkId,
+          check_key: (body.check_key || fingerprint.split(":")[0] || "").slice(0, 100),
+          fingerprint,
+          reason: reason.slice(0, 1000),
+          detail_snapshot: finding,
+          dismissed_by: user.id,
+          dismissed_at: new Date().toISOString(),
+          active: true,
+          revoked_by: null,
+          revoked_at: null,
+        },
+        { onConflict: "client_link_id,fingerprint" }
+      );
+      if (dErr) return NextResponse.json({ error: dErr.message }, { status: 500 });
+    } else {
+      const { error: rErr } = await (service as any)
+        .from("verification_dismissals")
+        .update({ active: false, revoked_by: user.id, revoked_at: new Date().toISOString() })
+        .eq("client_link_id", clientLinkId)
+        .eq("fingerprint", fingerprint);
+      if (rErr) return NextResponse.json({ error: rErr.message }, { status: 500 });
+    }
+
+    // Recompute the stored score against the new dismissal set.
+    const { data: dRows } = await (service as any)
+      .from("verification_dismissals")
+      .select("check_key, fingerprint, reason, dismissed_at, active")
+      .eq("client_link_id", clientLinkId)
+      .eq("active", true);
+    const dismissals: DismissalRow[] = ((dRows as any[]) || []).map((d) => ({
+      ...d,
+      dismissed_by_name: null,
+    }));
+    const recomputed = recomputeStoredVerification(stored, dismissals, includeBS);
+    const { data: updated, error: uErr } = await (service as any)
+      .from("monthly_rec_runs")
+      .update({ verification: recomputed, verification_score: recomputed.score })
+      .eq("id", run.id)
+      .select("*")
+      .single();
+    if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
+    return NextResponse.json({ ok: true, run: updated });
   }
 
   if (action === "statements") {
@@ -313,7 +447,7 @@ export async function POST(
     }
     let { data: existing } = await (service as any)
       .from("monthly_rec_runs")
-      .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at")
+      .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at, verification_score, verification_ran_at")
       .eq("client_link_id", clientLinkId)
       .eq("period", period)
       .maybeSingle();
@@ -349,7 +483,7 @@ export async function POST(
               },
               { onConflict: "client_link_id,period" }
             )
-            .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at")
+            .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at, verification_score, verification_ran_at")
             .single();
           if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
           existing = up;
@@ -371,6 +505,41 @@ export async function POST(
           { error: "Review the financial statements before sending." },
           { status: 400 }
         );
+      }
+    }
+
+    // ── BOOKS RELIABILITY GATE ─────────────────────────────────────────
+    // Soft-launch: the score always computes and displays; the send is only
+    // blocked when VERIFICATION_GATE_ENFORCE=true. Below-threshold sends
+    // require a senior's written override reason (recorded + audited).
+    const gateOn = process.env.VERIFICATION_GATE_ENFORCE === "true";
+    let overrideRecord: { by: string; at: string; reason: string; score_at_override: number } | null = null;
+    if (gateOn) {
+      if (!existing?.verification_ran_at) {
+        return NextResponse.json(
+          { error: "Run Verify books for this month before closing it.", requires_verification: true },
+          { status: 400 }
+        );
+      }
+      const vScore = Number(existing.verification_score ?? 0);
+      if (vScore < SEND_MIN_SCORE) {
+        const overrideReason = (body.override_reason || "").trim();
+        if (!overrideReason) {
+          return NextResponse.json(
+            {
+              error: `Books Reliability score is ${vScore} — below ${SEND_MIN_SCORE}. Fix the findings and re-verify, or override with a reason.`,
+              verification_score: vScore,
+              requires_override: true,
+            },
+            { status: 409 }
+          );
+        }
+        overrideRecord = {
+          by: user.id,
+          at: new Date().toISOString(),
+          reason: overrideReason.slice(0, 1000),
+          score_at_override: vScore,
+        };
       }
     }
 
@@ -509,11 +678,32 @@ export async function POST(
         email_delivery: emailDelivery,
         month_end_package_id: packageId,
         qbo_close_error: qboCloseError,
+        ...(overrideRecord ? { verification_override: overrideRecord } : {}),
       })
       .eq("id", existing.id)
       .select("*")
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // A below-threshold send is a real event — audit it so the Approvals
+    // overrides widget and any later review can see who/why.
+    if (overrideRecord) {
+      try {
+        await (service as any).from("audit_log").insert({
+          event_type: "verification_override",
+          request_payload: {
+            client_link_id: clientLinkId,
+            client_name: clientName,
+            period,
+            score: overrideRecord.score_at_override,
+            reason: overrideRecord.reason,
+            overridden_by: user.id,
+          },
+        });
+      } catch {
+        /* best-effort */
+      }
+    }
 
     // Cleanup sign-off: approving + sending the statements IS the cleanup
     // completion — stamp the client record and GRADUATE them to

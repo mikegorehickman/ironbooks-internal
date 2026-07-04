@@ -49,7 +49,7 @@ export async function GET(request: Request) {
   );
 
   const RUN_COLS =
-    "client_link_id, period, kind, status, has_concerns, concerns, checks, checks_ran_at, completed_at, sent_to_client_at, email_delivery, ai_spot_check, submitted_by, submitted_at, board_status, waiting_reasons, status_note";
+    "client_link_id, period, kind, status, has_concerns, concerns, checks, checks_ran_at, completed_at, sent_to_client_at, email_delivery, ai_spot_check, submitted_by, submitted_at, board_status, waiting_reasons, status_note, verification, verification_score, verification_ran_at, verification_override";
 
   // Run rows for the period (table may predate migration 62 in some envs)
   let runsByClient = new Map<string, any>();

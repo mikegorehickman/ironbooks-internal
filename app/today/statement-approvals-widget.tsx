@@ -10,6 +10,25 @@ export interface StatementApprovalRow {
   submitted_at: string | null;
   has_concerns: boolean;
   concerns: string | null;
+  /** Books Reliability score for the period; null = not verified yet. */
+  verification_score?: number | null;
+}
+
+/** Books Reliability chip: emerald ≥95, amber 85-94, red below or missing. */
+function ScoreChip({ score }: { score: number | null | undefined }) {
+  const cls =
+    score == null
+      ? "bg-red-100 text-red-800"
+      : score >= 95
+      ? "bg-emerald-100 text-emerald-800"
+      : score >= 85
+      ? "bg-amber-100 text-amber-800"
+      : "bg-red-100 text-red-800";
+  return (
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cls}`}>
+      {score == null ? "NOT VERIFIED" : `RELIABILITY ${score}`}
+    </span>
+  );
 }
 
 function periodLabel(period: string): string {
@@ -65,6 +84,7 @@ export function StatementApprovalsWidget({ rows }: { rows: StatementApprovalRow[
                       CONCERNS NOTED
                     </span>
                   )}
+                  <ScoreChip score={r.verification_score} />
                 </div>
                 <div className="text-xs text-ink-slate mt-0.5">
                   Submitted by {r.submitted_by_name || "a bookkeeper"}

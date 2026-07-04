@@ -6,6 +6,7 @@ import { getApprovalQueues } from "@/lib/approvals-data";
 import { ManagerReviewWidget } from "../today/manager-review-widget";
 import { StatementApprovalsWidget } from "../today/statement-approvals-widget";
 import { StatementEscalationsWidget } from "../today/statement-escalations-widget";
+import { ScoreOverridesWidget } from "../today/score-overrides-widget";
 
 export const dynamic = "force-dynamic";
 
@@ -31,10 +32,8 @@ export default async function ApprovalsPage({
   const params = await searchParams;
   const viewAs = params?.viewas ? String(params.viewas) : null;
 
-  const { managerReviewRows, statementApprovals, statementEscalations } = await getApprovalQueues(
-    service,
-    { isSenior, viewAs }
-  );
+  const { managerReviewRows, statementApprovals, statementEscalations, scoreOverrides } =
+    await getApprovalQueues(service, { isSenior, viewAs });
 
   const total = managerReviewRows.length + statementApprovals.length + statementEscalations.length;
 
@@ -63,6 +62,8 @@ export default async function ApprovalsPage({
             )}
           </>
         )}
+        {/* Transparency ledger, not a work queue — shown even when the queues are clear. */}
+        <ScoreOverridesWidget rows={scoreOverrides} />
       </div>
     </AppShell>
   );
