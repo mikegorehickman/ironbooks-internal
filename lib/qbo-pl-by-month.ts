@@ -74,7 +74,8 @@ export async function fetchProfitAndLossByMonth(
   const report = await fetchReport(realmId, accessToken, "ProfitAndLoss", {
     start_date: startDate,
     end_date: endDate,
-    accounting_method: "Accrual",
+    // Cash — IronBooks does cash accounting; must match statements/portal P&L.
+    accounting_method: "Cash",
     summarize_column_by: "Month",
   });
 

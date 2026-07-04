@@ -180,6 +180,13 @@ export async function provisionPortalUser(
         }
       } else {
         authResponse = data;
+        // generateLink(type:invite) creates the user UNCONFIRMED. The self-serve
+        // login form (signInWithOtp) then rejects them ("we don't have a portal
+        // account") when signups are disabled, until they click the emailed link
+        // once. Confirm the email now so the login form works immediately too.
+        try {
+          if (data.user?.id) await service.auth.admin.updateUserById(data.user.id, { email_confirm: true });
+        } catch { /* non-fatal — the emailed link still works */ }
       }
     } else {
       const { data, error: createErr } = await service.auth.admin.createUser({

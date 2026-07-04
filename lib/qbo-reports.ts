@@ -67,7 +67,9 @@ export async function fetchProfitAndLossDetail(
     data = await fetchQBOReport(realmId, accessToken, "ProfitAndLossDetail", {
       start_date: startDate,
       end_date: endDate,
-      accounting_method: "Accrual",
+      // Cash to match the statements and portal P&L (IronBooks is cash-basis) —
+      // the drill-down must sum to the line it drills into.
+      accounting_method: "Cash",
       account: accountId,
     });
   } catch (err: any) {
@@ -143,6 +145,97 @@ export async function fetchProfitAndLossDetail(
   return out;
 }
 
+// ─── Whole-P&L transaction detail (all accounts, with account context) ──────
+
+export interface PLDetailRow extends PLDetailTransaction {
+  /** The P&L account this posting line hit (section header in the report). */
+  account: string;
+  /** Top-level section: Income / Cost of Goods Sold / Expenses / Other … */
+  section: string;
+}
+
+/**
+ * ProfitAndLossDetail for the ENTIRE P&L (no account filter) — one row per
+ * posting line in the window, tagged with its account + top-level section.
+ * Used by the duplicate-transaction scan. Basis selectable (statements are
+ * cash, so dup-scans default to Cash upstream).
+ */
+export async function fetchPLDetailAll(
+  realmId: string,
+  accessToken: string,
+  startDate: string,
+  endDate: string,
+  method: "Accrual" | "Cash" = "Cash"
+): Promise<PLDetailRow[]> {
+  const data = await fetchQBOReport(realmId, accessToken, "ProfitAndLossDetail", {
+    start_date: startDate,
+    end_date: endDate,
+    accounting_method: method,
+  });
+
+  const cols: any[] = data?.Columns?.Column || [];
+  const colIndex = new Map<string, number>();
+  cols.forEach((c, i) => {
+    if (c?.ColType) colIndex.set(String(c.ColType).toLowerCase(), i);
+    if (c?.ColTitle) colIndex.set(String(c.ColTitle).toLowerCase(), i);
+  });
+  const ci = (...names: string[]): number | undefined => {
+    for (const n of names) {
+      const i = colIndex.get(n.toLowerCase());
+      if (i !== undefined) return i;
+    }
+    return undefined;
+  };
+  const idxDate = ci("tx_date", "date");
+  const idxType = ci("txn_type", "transaction type");
+  const idxNum = ci("doc_num", "num");
+  const idxName = ci("name");
+  const idxMemo = ci("memo", "memo/description");
+  const idxAmt = ci("subt_nat_amount", "amount", "subt_nat_home_amount");
+
+  const parseNum = (raw: any): number | null => {
+    if (raw == null || raw === "") return null;
+    const cleaned = String(raw).replace(/[,$ ]/g, "");
+    const parenMatch = cleaned.match(/^\((.+)\)$/);
+    const n = Number(parenMatch ? "-" + parenMatch[1] : cleaned);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const out: PLDetailRow[] = [];
+  // Walk sections keeping a header stack: stack[0] = top section (Income /
+  // Expenses / …), deepest header = the account the Data rows belong to.
+  function walk(node: any, stack: string[]) {
+    if (!node) return;
+    if (Array.isArray(node)) { for (const n of node) walk(n, stack); return; }
+    const header = (node.Header?.ColData?.[0]?.value || "").trim();
+    const nextStack = header ? [...stack, header] : stack;
+    if (node.type === "Data" && Array.isArray(node.ColData)) {
+      const cd = node.ColData;
+      const idCol = cd.find((c: any) => c?.id);
+      const get = (i: number | undefined) => (i != null ? cd[i]?.value ?? "" : "");
+      const amount = parseNum(get(idxAmt));
+      if (amount != null) {
+        out.push({
+          txn_id: idCol?.id ? String(idCol.id) : "",
+          txn_type: String(get(idxType) || ""),
+          date: String(get(idxDate) || ""),
+          doc_number: get(idxNum) ? String(get(idxNum)) : null,
+          name: get(idxName) ? String(get(idxName)) : null,
+          memo: String(get(idxMemo) || ""),
+          amount,
+          running_balance: null,
+          account: nextStack[nextStack.length - 1] || "",
+          section: nextStack[0] || "",
+        });
+      }
+    }
+    if (node.Row) walk(node.Row, nextStack);
+    if (node.Rows) walk(node.Rows, nextStack);
+  }
+  walk(data?.Rows, []);
+  return out;
+}
+
 // ─── Report row types ───────────────────────────────────────────────────────
 
 interface ReportRow {
@@ -170,25 +263,6 @@ function flattenRows(
   for (const row of rows || []) {
     const group = row.group || currentGroup;
 
-    if (row.type === "Data" && row.ColData) {
-      const label = (row.ColData[0]?.value || "").trim();
-      const accountId = (row.ColData[0] as any)?.id || null;
-      const value = parseFloat(row.ColData[1]?.value || "0") || 0;
-      if (label) {
-        flat.set(label.toLowerCase(), value);
-        // A Data row that ALSO has child rows is a parent ROLLUP — its value
-        // already equals the sum of its sub-account children. Adding it to
-        // `items` (the line-level display + per-line sum source) on top of
-        // those children double-counts the section (the "double expenses"
-        // bug for clients whose parent accounts carry their own postings).
-        // Keep it in `flat` for total lookups, but exclude it from `items`.
-        const isRollupParent = !!(row.Rows?.Row && row.Rows.Row.length > 0);
-        if (!isRollupParent) {
-          items.push({ label, amount: value, group, account_id: accountId ? String(accountId) : null });
-        }
-      }
-    }
-
     // Determine the group to propagate into child rows. Priority:
     //   1. row.group     — QBO's authoritative section type ("Income",
     //                       "COGS", "Expenses", "OtherIncome", ...)
@@ -203,16 +277,68 @@ function flattenRows(
     // landing in the expense bucket because both income lines live under a
     // "4000 Residential" parent whose header overwrote "Income".)
     const headerLabel = row.Header?.ColData?.[0]?.value?.trim() || "";
+    const headerId = (row.Header?.ColData?.[0] as any)?.id || null;
     const nextGroup = row.group || currentGroup || headerLabel;
 
-    if (row.Rows?.Row) {
-      flattenRows(row.Rows.Row, flat, items, nextGroup);
+    if (row.type === "Data" && row.ColData) {
+      const label = (row.ColData[0]?.value || "").trim();
+      const accountId = (row.ColData[0] as any)?.id || null;
+      const value = parseFloat(row.ColData[1]?.value || "0") || 0;
+      if (label) {
+        flat.set(label.toLowerCase(), value);
+        // A Data row that ALSO has child rows is a parent ROLLUP — its value
+        // includes its sub-account children, so pushing it verbatim on top of
+        // those children double-counts the section. But the parent may ALSO
+        // carry its OWN postings (transactions on the parent account itself,
+        // e.g. Neighborhood's "Direct Field Labor – Painting": $58,470.14 on
+        // the parent, zero on children). Recurse the children first, then emit
+        // only the parent's own remainder (rollup − children) as its line:
+        // zero for a pure rollup (no double-count), the true balance when the
+        // parent holds the postings (no dropped line items on statements).
+        const isRollupParent = !!(row.Rows?.Row && row.Rows.Row.length > 0);
+        if (!isRollupParent) {
+          items.push({ label, amount: value, group, account_id: accountId ? String(accountId) : null });
+        } else {
+          const before = items.length;
+          flattenRows(row.Rows!.Row!, flat, items, nextGroup);
+          const childSum = items.slice(before).reduce((s, it) => s + it.amount, 0);
+          const own = Math.round((value - childSum) * 100) / 100;
+          if (Math.abs(own) > 0.005) {
+            items.push({ label, amount: own, group, account_id: accountId ? String(accountId) : null });
+          }
+          continue; // children already recursed above
+        }
+      }
     }
 
-    if (row.type === "Section" && row.Summary?.ColData) {
+    if (row.Rows?.Row) {
+      const before = items.length;
+      flattenRows(row.Rows.Row, flat, items, nextGroup);
+
+      if (row.type === "Section" && row.Summary?.ColData) {
+        const label = (row.Summary.ColData[0]?.value || "").trim();
+        const value = parseFloat(row.Summary.ColData[1]?.value || "0") || 0;
+        if (label) flat.set(label.toLowerCase(), value);
+        // Same parent-own-postings guarantee for the Section shape: if the
+        // section total exceeds what its leaf items account for, the gap is
+        // the parent account's own balance — synthesize it so line items
+        // always reconcile to the section totals. Skip unnamed sections
+        // (Gross Profit / Net Income summary bands have no Header).
+        const childSum = items.slice(before).reduce((s, it) => s + it.amount, 0);
+        const own = Math.round((value - childSum) * 100) / 100;
+        if (headerLabel && Math.abs(own) > 0.005) {
+          items.push({ label: headerLabel, amount: own, group, account_id: headerId ? String(headerId) : null });
+        }
+      }
+    } else if (row.type === "Section" && row.Summary?.ColData) {
       const label = (row.Summary.ColData[0]?.value || "").trim();
       const value = parseFloat(row.Summary.ColData[1]?.value || "0") || 0;
       if (label) flat.set(label.toLowerCase(), value);
+      // Childless section (all sub-accounts suppressed): the summary IS the
+      // account's balance — emit it as a line so it isn't silently dropped.
+      if (headerLabel && Math.abs(value) > 0.005) {
+        items.push({ label: headerLabel, amount: value, group, account_id: headerId ? String(headerId) : null });
+      }
     }
   }
   return { flat, items };
@@ -249,13 +375,18 @@ export async function fetchProfitAndLoss(
   realmId: string,
   accessToken: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  // Accounting basis. Defaults to CASH — IronBooks does cash accounting, and
+  // statements carry a cash-basis Notice to Reader. (Until 2026-07-02 this was
+  // hardcoded Accrual, so every published statement was accrual mislabeled as
+  // cash.) Pass "Accrual" explicitly for comparisons/audits.
+  method: "Accrual" | "Cash" = "Cash"
 ): Promise<ProfitLossData> {
   if (isDemoRealm(realmId)) return demoProfitAndLoss(startDate);
   const report = await fetchQBOReport(realmId, accessToken, "ProfitAndLoss", {
     start_date: startDate,
     end_date: endDate,
-    accounting_method: "Accrual",
+    accounting_method: method,
   });
 
   const rawRows: ReportRow[] = report?.Rows?.Row || [];

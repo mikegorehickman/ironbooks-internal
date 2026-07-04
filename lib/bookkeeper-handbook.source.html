@@ -111,6 +111,10 @@
         <li><span class="n">13</span><a href="#s13">Client Service (Reporting, Messaging, Calls, Billing)</a></li>
         <li><span class="n">14</span><a href="#s14">Oversight — Lead &amp; Admin</a></li>
       </ol>
+      <div class="phase">Playbooks</div>
+      <ol>
+        <li><span class="n">15</span><a href="#s15">Daily Recon — Cleanup → Monthly Statements</a></li>
+      </ol>
     </div>
 
     <div class="phase-divider">Foundations</div>
@@ -463,11 +467,87 @@
       <div class="note tip"><span class="ic">💡</span><div><strong>Tip:</strong> Reassigning a client updates their assigned bookkeeper everywhere — including that bookkeeper's Today queue.</div></div>
     </section>
 
+    <div class="phase-divider">Playbooks</div>
+
+    <!-- 15 -->
+    <section class="sop" id="s15">
+      <div class="sop-head"><div class="sop-num">15</div><div><div class="sub">Playbook</div><h2>Daily Recon — Cleanup-Done to Monthly Statements</h2></div></div>
+      <div class="meta">
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Keep a client's books current automatically every day, so month-end is verify + send — not "do the books."</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Lisa (manager) · the day cleanup is signed off, then daily + at month-end.</div></div>
+      </div>
+
+      <div class="note tip"><span class="ic">💡</span><div><strong>The model in one line:</strong> once cleanup is signed off, put the client <strong>in production</strong> → SNAP auto-categorizes their bank activity every morning (7am) → you only review what it <em>flags</em> → at month-end you run checks, approve, and statements go out automatically. <em>(Daily recon currently auto-categorizes incoming bank transactions, mainly expenses. Revenue matching, receipt capture, and Plaid auto-reconciliation are on the roadmap — for now handle those at month-end as usual.)</em></div></div>
+
+      <h3 class="step-h">Step 1 · Put the cleaned-up client into production (one-time, ~5 min)</h3>
+      <ol class="steps">
+        <li>Sidebar → <strong>Production → Daily Recon</strong>. Find the client; if not already enrolled, <strong>enroll</strong> them (turns on daily recon).</li>
+        <li><strong>Dry-run them first</strong> (the per-client Dry-run button) — this previews what the engine <em>would</em> categorize <strong>without touching QuickBooks</strong>. Skim it: do the obvious vendors look right (Sherwin-Williams → Paint &amp; Materials)? Did it correctly hold the big / odd ones?</li>
+        <li>If it looks sane, you're done — they run automatically at 7am nightly. The client's profile pill should read <strong>"In production."</strong></li>
+      </ol>
+      <div class="note warn"><span class="ic">⚠️</span><div>If the dry-run miscategorizes a lot, don't enroll yet — flag it; the client's rules / COA likely need attention first.</div></div>
+
+      <h3 class="step-h">Step 2 · Daily review (~5–10 min each morning)</h3>
+      <ol class="steps">
+        <li>The 7am run has already posted the confident transactions. Open <strong>Today</strong> — production clients show "X to review."</li>
+        <li>For each flagged item: accept or correct the account, then <strong>Approve</strong>. Leave <strong>"Teach rule" ON</strong> so that vendor auto-categorizes next time (the queue keeps shrinking). Use <strong>Reject</strong> if it shouldn't post, <strong>Ask Client</strong> if you need info, and <strong>bulk-approve</strong> for the obvious batch.</li>
+        <li>Give <strong>anomalies</strong> (big charges, payroll, unfamiliar vendors) a closer look — they're held on purpose.</li>
+        <li>Target: queue at zero (or only genuinely-blocked items) each day.</li>
+      </ol>
+
+      <h3 class="step-h">Step 3 · Through the month</h3>
+      <ol class="steps">
+        <li>Daily recon handles new activity — you mostly just clear the daily queue.</li>
+        <li>Watch for a <strong>QuickBooks disconnect</strong> (you'll get a reconnect prompt / QBO-health flag) so the feed keeps flowing.</li>
+        <li>Gather anything you'll need for the close (e.g., bank statements) — request via the client profile when relevant.</li>
+      </ol>
+
+      <h3 class="step-h">Step 4 · Month-end: close + send statements</h3>
+      <ol class="steps">
+        <li>Sidebar → <strong>Production → Production board</strong>. Pick the close period; each production client is a card.</li>
+        <li>For each client: <strong>Run checks</strong> (uncategorized, undeposited funds, A/R…) → review the <strong>Statements</strong> preview → fix anything a check flags (it links you to the tool) → submit / complete.</li>
+        <li>Sidebar → <strong>Production → Approvals</strong> — your queue of files awaiting review + statements awaiting approval. Review and <strong>Approve</strong>.</li>
+        <li>Approving automatically <strong>publishes the statements to the client portal, emails the PDF statements + login instructions, and closes the QuickBooks period.</strong> The client is done for the month.</li>
+      </ol>
+
+      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Daily Recon · Today · Approvals</div><div class="d">The Production sidebar group: Daily Recon (enroll / dry-run / run), the Today review queue, and the Approvals page.</div><div class="path">/admin/daily-recon · /today · /production · /approvals</div></div>
+
+      <h3 class="step-h">Where things live</h3>
+      <ol class="steps">
+        <li><strong>Enroll / dry-run / monitor:</strong> Production → Daily Recon (<code>/admin/daily-recon</code>)</li>
+        <li><strong>Daily flag review:</strong> Today (<code>/today</code>)</li>
+        <li><strong>Month-end close board:</strong> Production → Production board (<code>/production</code>)</li>
+        <li><strong>Your approval queue:</strong> Production → Approvals (<code>/approvals</code>)</li>
+      </ol>
+
+      <div class="note tip"><span class="ic">💡</span><div><strong>Troubleshooting.</strong> No daily activity for a production client → confirm they're enrolled and the nightly run fired (if it's empty for everyone, it's the cron — escalate); force a catch-up with <strong>"Run all now"</strong> on the Daily Recon page. Engine miscategorized a vendor → fix the account before approving (it teaches the corrected rule). Too many flags → keep approving with "Teach rule" on; within a couple of weeks the regulars are covered.</div></div>
+    </section>
+
     <footer>
-      <b>Ironbooks</b> · SNAP Bookkeeper Handbook · 14 SOPs across the client lifecycle<br/>
+      <b>Ironbooks</b> · SNAP Bookkeeper Handbook · 15 SOPs across the client lifecycle<br/>
       Questions? <a href="mailto:admin@ironbooks.com">admin@ironbooks.com</a>
     </footer>
 
   </div>
+  <script>
+    // Deep-linking: the handbook renders inside a srcDoc iframe, so the parent
+    // page's URL hash (e.g. /handbook#s15) doesn't natively scroll this content.
+    // srcDoc iframes are same-origin with the parent, so we read the parent hash
+    // (falling back to our own) and scroll the matching section into view.
+    (function () {
+      function go() {
+        var h = "";
+        try { if (window.parent && window.parent !== window) h = window.parent.location.hash || ""; } catch (e) {}
+        if (!h) h = window.location.hash || "";
+        if (!h) return;
+        var el = document.getElementById(h.replace(/^#/, ""));
+        if (el) el.scrollIntoView({ block: "start" });
+      }
+      if (document.readyState !== "loading") go();
+      else document.addEventListener("DOMContentLoaded", go);
+      window.addEventListener("hashchange", go);
+      try { if (window.parent && window.parent !== window) window.parent.addEventListener("hashchange", go); } catch (e) {}
+    })();
+  </script>
 </body>
 </html>
