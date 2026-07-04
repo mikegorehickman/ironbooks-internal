@@ -80,7 +80,13 @@ export async function POST(
   if (!reqRow) return NextResponse.json({ error: "Request not found" }, { status: 404 });
   const r = reqRow as any;
 
-  if (r.status !== "pending" && r.status !== "approved") {
+  // Only applied (QBO was changed) and declined are terminal. A FAILED request
+  // (scan error, or zero matching transactions — e.g. already recategorized)
+  // stays actionable: decline clears it with a note to the client (no QBO
+  // writes), and approve may be retried. Previously failed was a dead end —
+  // unactionable AND hidden from the Today list, so the client never got an
+  // answer (White Oak, 2026-07-04).
+  if (r.status === "applied" || r.status === "declined") {
     return NextResponse.json(
       { error: `Request is already ${r.status} — can't act on it again.` },
       { status: 400 }
