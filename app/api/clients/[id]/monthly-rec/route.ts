@@ -437,11 +437,15 @@ export async function POST(
         { status: 403 }
       );
     }
-    // The review-screen "send" carries an explicit attestation. Marking a card
-    // Completed on the board IS the sign-off, so it's treated as attested.
-    if (!isMarkComplete && body.attested !== true) {
+    // Every client-facing send requires an explicit attestation — the human
+    // "I've reviewed these and they're ready" step. This covers BOTH the
+    // review-screen send AND the board's Completed action. Previously
+    // mark_complete was exempt (board Completed = implicit sign-off), which
+    // let statements go out with no verification and mis-fired real emails.
+    // The UI must collect this via a confirmation popup before either action.
+    if (body.attested !== true) {
       return NextResponse.json(
-        { error: "Attestation required — review the statements and tick the approval box first." },
+        { error: "Attestation required — confirm you've reviewed the statements before they're sent to the client." },
         { status: 400 }
       );
     }
