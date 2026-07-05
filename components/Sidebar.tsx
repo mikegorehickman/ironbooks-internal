@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
   Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
-  FileSpreadsheet, Wallet, HeartPulse, Gauge, CalendarCheck, Repeat, BadgeCheck,
+  FileSpreadsheet, Wallet, HeartPulse, Gauge, Repeat, BadgeCheck,
   ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap, Settings as SettingsIcon, Mail, Inbox, ListTodo, LifeBuoy, ExternalLink,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
@@ -41,7 +41,6 @@ const toolsNav = [
   { href: "/flagged", label: "Flagged", icon: Flag },
   { href: "/fleet", label: "Fleet Health", icon: Gauge },
   { href: "/fleet/qbo-health", label: "QBO Connections", icon: Shield },
-  { href: "/month-end", label: "Month-End (legacy)", icon: CalendarCheck },
   { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/templates", label: "Master COA", icon: BookOpen },
   { href: "/advisor", label: "Advisor", icon: HeartPulse },

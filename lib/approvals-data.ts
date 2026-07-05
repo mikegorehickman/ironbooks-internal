@@ -1,13 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { StatementApprovalRow } from "@/app/today/statement-approvals-widget";
-import type { StatementEscalationRow } from "@/app/today/statement-escalations-widget";
-
-export interface ManagerReviewRow {
-  id: string;
-  client_name: string;
-  submitted_at: string | null;
-  submitted_by: string | null;
-}
+import type { StatementApprovalRow } from "@/app/approvals/statement-approvals-widget";
+import type { ManagerReviewRow } from "@/app/approvals/manager-review-widget";
 
 export interface ScoreOverrideRow {
   client_link_id: string;
@@ -22,7 +15,8 @@ export interface ScoreOverrideRow {
 export interface ApprovalQueues {
   managerReviewRows: ManagerReviewRow[];
   statementApprovals: StatementApprovalRow[];
-  statementEscalations: StatementEscalationRow[];
+  /** Open client_escalations (all kinds, incl. statement) — rendered by EscalationStrip. */
+  openEscalationCount: number;
   scoreOverrides: ScoreOverrideRow[];
 }
 
@@ -32,7 +26,8 @@ export interface ApprovalQueues {
  * personal action queue). Senior-only content; returns empty arrays otherwise.
  *   1. Files submitted for manager review (cleanup_review_state='in_review')
  *   2. Statements awaiting senior approval (monthly_rec_runs status='pending_review')
- *   3. Statements a bookkeeper escalated as wrong (audit_log, last 30d, minus resolved)
+ *   3. Open client escalations — count only; the rows render via EscalationStrip,
+ *      which owns the resolve lifecycle (statement escalations dual-write here).
  */
 export async function getApprovalQueues(
   service: SupabaseClient,
@@ -40,7 +35,7 @@ export async function getApprovalQueues(
 ): Promise<ApprovalQueues> {
   const { isSenior, viewAs = null } = opts;
   if (!isSenior) {
-    return { managerReviewRows: [], statementApprovals: [], statementEscalations: [], scoreOverrides: [] };
+    return { managerReviewRows: [], statementApprovals: [], openEscalationCount: 0, scoreOverrides: [] };
   }
   const svc = service as any;
 
@@ -108,50 +103,17 @@ export async function getApprovalQueues(
     statementApprovals = [];
   }
 
-  // 3. Statements escalated as wrong (last 30 days, minus resolved/hidden)
-  let statementEscalations: StatementEscalationRow[] = [];
+  // 3. Open escalations (client_escalations is THE queue; rows render in the
+  //    strip). Count feeds the page header so "0 items" never lies.
+  let openEscalationCount = 0;
   try {
-    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: esc } = await svc
-      .from("audit_log")
-      .select("occurred_at, request_payload")
-      .eq("event_type", "statements_escalated")
-      .gte("occurred_at", cutoff)
-      .order("occurred_at", { ascending: false })
-      .limit(50);
-    const mapped = ((esc as any[]) || []).map((r) => ({
-      item_key: `escalation:${r.request_payload?.client_link_id || ""}:${r.occurred_at}`,
-      client_link_id: r.request_payload?.client_link_id || "",
-      client_name: r.request_payload?.client_name || "(unknown client)",
-      note: r.request_payload?.note || "",
-      escalated_by_name: r.request_payload?.escalated_by_name || "",
-      at: r.occurred_at,
-      due_date: null as string | null,
-    })).filter((r) => r.client_link_id);
-
-    const keys = mapped.map((m) => m.item_key);
-    let overrides = new Map<string, any>();
-    if (keys.length > 0) {
-      const { data: ov } = await svc
-        .from("today_item_overrides")
-        .select("item_key, resolved_at, hidden_at, due_date")
-        .in("item_key", keys);
-      overrides = new Map(((ov as any[]) || []).map((o) => [o.item_key, o]));
-    }
-    statementEscalations = mapped
-      .filter((m) => {
-        const o = overrides.get(m.item_key);
-        return !o?.resolved_at && !o?.hidden_at;
-      })
-      .map((m) => ({ ...m, due_date: overrides.get(m.item_key)?.due_date || null }))
-      .sort((a, b) => {
-        if (a.due_date && b.due_date) return a.due_date < b.due_date ? -1 : 1;
-        if (a.due_date) return -1;
-        if (b.due_date) return 1;
-        return a.at < b.at ? 1 : -1;
-      }) as StatementEscalationRow[];
+    const { count } = await svc
+      .from("client_escalations")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "open");
+    openEscalationCount = count || 0;
   } catch {
-    statementEscalations = [];
+    openEscalationCount = 0;
   }
 
   // 4. Below-threshold sends (Books Reliability overrides, last 30 days) —
@@ -193,5 +155,5 @@ export async function getApprovalQueues(
     scoreOverrides = [];
   }
 
-  return { managerReviewRows, statementApprovals, statementEscalations, scoreOverrides };
+  return { managerReviewRows, statementApprovals, openEscalationCount, scoreOverrides };
 }

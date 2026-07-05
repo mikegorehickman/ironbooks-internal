@@ -13,11 +13,11 @@ import {
   FileText, Loader2, PlayCircle, RotateCcw, Send, Sparkles, XCircle,
 } from "lucide-react";
 import { playSound } from "@/lib/sounds";
-import { VerificationPanel } from "./verification-panel";
+import { VerificationPanel, vFixLink } from "./verification-panel";
 
-export type CheckStatus = "pass" | "warn" | "fail";
+type CheckStatus = "pass" | "warn" | "fail";
 
-export interface Check {
+interface Check {
   key: string;
   label: string;
   status: CheckStatus;
@@ -32,7 +32,7 @@ interface StatementLine {
   depth: number;
 }
 
-export interface CashFlowSection {
+interface CashFlowSection {
   title: string;
   total: number;
   items: { label: string; amount: number }[];
@@ -61,14 +61,14 @@ export interface Statements {
   } | null;
 }
 
-export interface SpotCheck {
+interface SpotCheck {
   verdict: "looks_good" | "needs_review";
   summary: string;
   findings: { severity: "info" | "warn" | "flag"; area: string; note: string }[];
   error?: string;
 }
 
-export interface Run {
+interface Run {
   status: "open" | "pending_review" | "complete";
   has_concerns: boolean;
   concerns: string | null;
@@ -97,10 +97,7 @@ export interface Run {
 export interface ProdClient {
   id: string;
   client_name: string;
-  jurisdiction: string;
-  state_province: string | null;
   paused: boolean;
-  last_synced_at: string | null;
   bs_enabled?: boolean;
   assigned_bookkeeper_id?: string | null;
   run: Run | null;
@@ -114,29 +111,9 @@ export interface Bookkeeper {
 export interface EligibleClient {
   id: string;
   client_name: string;
-  jurisdiction: string;
-  state_province: string | null;
   cleanup_completed_at: string;
 }
 
-/** Deep link into the right fix tool for a failed check. */
-function fixLink(fix: Check["fix"], clientId: string): { href: string; label: string } | null {
-  switch (fix) {
-    case "reclass":
-      // ?client= preselects this client in the reclass form — no picker hunt
-      return { href: `/reclass/new?client=${clientId}`, label: "Open Reclassify" };
-    case "uf_audit":
-      return { href: `/balance-sheet/${clientId}/uf-audit`, label: "Open UF Audit" };
-    case "ar":
-      return { href: `/clients/${clientId}`, label: "Open client profile" };
-    case "profile":
-      return { href: `/clients/${clientId}`, label: "Open client profile" };
-    case "connections":
-      return { href: "/fleet/qbo-health", label: "QBO Connections" };
-    default:
-      return null;
-  }
-}
 
 export function shiftPeriod(period: string, delta: number): string {
   const [y, m] = period.split("-").map(Number);
@@ -453,7 +430,7 @@ export function ClientRecCard({
           ) : (
             <ul className="space-y-2">
               {checks.map((c) => {
-                const link = c.fix ? fixLink(c.fix, client.id) : null;
+                const link = vFixLink(c.fix, client.id);
                 return (
                   <li
                     key={c.key}

@@ -5,12 +5,8 @@ import { NextResponse } from "next/server";
  * GET /api/kanban/onboarding
  *
  * Returns clients grouped by onboarding stage. Stage is derived from live
- * job state — no separate status column to keep in sync.
- *
- * Query params:
- *   bookkeeper_id  — filter by assigned bookkeeper (optional)
- *   page           — 0-indexed page per column (default 0)
- *   limit          — cards per column (default 20, max 50)
+ * job state — no separate status column to keep in sync. Sole consumer:
+ * the /cleanup board (full columns, no pagination — ~dozens of clients).
  *
  * Stages (priority top-down — first matching wins):
  *   awaiting_stripe     stripe_request_sent_at set, not yet connected
@@ -28,26 +24,15 @@ export async function GET(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { searchParams } = new URL(request.url);
-  const bookkeeperFilter = searchParams.get("bookkeeper_id") || null;
-  const page = Math.max(0, parseInt(searchParams.get("page") || "0", 10));
-  const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
-  const offset = page * limit;
-
   const service = createServiceSupabase();
 
   // Pull all active onboarding clients (cleanup not yet complete, not on hold)
-  let query = service
+  const { data: clients, error } = await service
     .from("client_links")
     .select("*")
     .eq("is_active", true)
-    .is("cleanup_completed_at", null);
-
-  if (bookkeeperFilter) {
-    query = query.eq("assigned_bookkeeper_id", bookkeeperFilter);
-  }
-
-  const { data: clients, error } = await query.order("client_name");
+    .is("cleanup_completed_at", null)
+    .order("client_name");
   if (error) return NextResponse.json({ error: `client_links query: ${error.message}` }, { status: 500 });
 
   // Filter on_hold in JS — new column may not be in PostgREST schema cache yet
@@ -69,18 +54,6 @@ export async function GET(request: Request) {
     .select("id, client_link_id, status, created_at, updated_at, bookkeeper_id")
     .in("client_link_id", clientIds)
     .order("created_at", { ascending: false });
-
-  // Most recent stripe connect token per client (for attribution)
-  const { data: stripeTokens } = await service
-    .from("stripe_connect_tokens")
-    .select("client_link_id, created_at, created_by")
-    .in("client_link_id", clientIds)
-    .order("created_at", { ascending: false });
-
-  const latestStripeToken = new Map<string, any>();
-  for (const t of stripeTokens || []) {
-    if (!latestStripeToken.has(t.client_link_id)) latestStripeToken.set(t.client_link_id, t);
-  }
 
   // Most recent stripe-recon job per client — drives the BS-stage
   // gate ("stripe done OR not required").
@@ -110,12 +83,6 @@ export async function GET(request: Request) {
       latestBankRecon.set(j.client_link_id, j);
   }
 
-  // Note counts per client
-  const { data: noteCounts } = await service
-    .from("client_notes")
-    .select("client_link_id")
-    .in("client_link_id", clientIds);
-
   // Bank-rule counts — drives the "Sign-off only" vs "Needs bank rules"
   // next-step chip and the step-3 checklist state on the cleanup board.
   const { data: ruleRows } = await service
@@ -144,11 +111,6 @@ export async function GET(request: Request) {
   for (const j of reclassJobs || []) {
     if (!latestReclass.has(j.client_link_id)) latestReclass.set(j.client_link_id, j);
   }
-  const noteCountMap = new Map<string, number>();
-  for (const n of noteCounts || []) {
-    noteCountMap.set(n.client_link_id, (noteCountMap.get(n.client_link_id) || 0) + 1);
-  }
-
   const ACTIVE_STATUSES = new Set(["pending", "executing", "in_review"]);
 
   const columns: Record<string, any[]> = {
@@ -202,7 +164,6 @@ export async function GET(request: Request) {
     const stripeConnected = client.stripe_connection_status === "connected";
     const stripePending = client.stripe_connection_status === "pending";
     const stripeNotRequired = !!(client as any).stripe_not_required;
-    const token = latestStripeToken.get(client.id);
 
     // Does the client have ANY completed reclass run (not just the latest)?
     // Used to make BS Cleanup reachable even if a later reclass failed.
@@ -233,23 +194,14 @@ export async function GET(request: Request) {
     const card = {
       id: client.id,
       client_name: client.client_name,
-      jurisdiction: client.jurisdiction,
-      state_province: client.state_province,
-      // Show stripe badge if detected, pending, or connected
-      stripe_detected: client.stripe_detected || stripePending || stripeConnected,
       stripe_connected: stripeConnected,
       stripe_pending: stripePending,
       stripe_request_sent_at: client.stripe_request_sent_at,
-      stripe_link_sent_by: token ? (bkById.get(token.created_by)?.full_name ?? null) : null,
-      stripe_link_sent_at: token?.created_at ?? null,
       stripe_not_required: stripeNotRequired,
       bs_recon_started: !!bankRecon,
       bs_recon_in_progress: !!bsInProgress,
-      ask_client_email_sent_at: (client as any).ask_client_email_sent_at || null,
-      stripe_request_sent_confirmed_at: (client as any).stripe_request_sent_confirmed_at || null,
       cleanup_pdf_href: cleanupPdfHref,
       due_date: client.due_date,
-      note_count: noteCountMap.get(client.id) || 0,
       bookkeeper: bk ? { id: bk.id, full_name: bk.full_name, avatar_url: bk.avatar_url } : null,
       latest_coa_job: coa ? { id: coa.id, status: coa.status } : null,
       latest_reclass_job: reclass ? { id: reclass.id, status: reclass.status } : null,
@@ -330,17 +282,14 @@ export async function GET(request: Request) {
     (a.stripe_request_sent_at || "").localeCompare(b.stripe_request_sent_at || "")
   );
 
-  // Paginate each column
-  const paginated: Record<string, { cards: any[]; total: number }> = {};
+  // Full columns — {cards,total} shape kept for the board's consumption.
+  const shaped: Record<string, { cards: any[]; total: number }> = {};
   for (const [key, cards] of Object.entries(columns)) {
-    paginated[key] = {
-      cards: cards.slice(offset, offset + limit),
-      total: cards.length,
-    };
+    shaped[key] = { cards, total: cards.length };
   }
 
   return NextResponse.json({
-    columns: paginated,
+    columns: shaped,
     // Active bookkeepers — powers the assign dropdown on the Cleanup board.
     bookkeepers: (bookkeepers || []).map((b) => ({ id: b.id, full_name: b.full_name })),
   });

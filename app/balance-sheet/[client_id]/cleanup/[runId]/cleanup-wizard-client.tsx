@@ -462,7 +462,7 @@ export function CleanupWizardClient({
       const res = await fetch(`/api/clients/${clientLinkId}/production`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "push_balance_sheet" }),
+        body: JSON.stringify({ action: "bs_on", reason: "Published from BS Cleanup wizard" }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Couldn't publish the balance sheet");
@@ -1484,7 +1484,7 @@ export function CleanupWizardClient({
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ note: `BS cleanup run ${runId} completed via wizard` }),
                 });
-                window.location.href = "/kanban";
+                window.location.href = "/cleanup";
               }}
               className="text-sm font-bold px-5 py-2.5 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800"
             >

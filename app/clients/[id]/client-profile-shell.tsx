@@ -45,7 +45,6 @@ import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
 import { ClientDetailsCard } from "./client-details-card";
 import { GrainSection } from "./grain-section";
 import { CallTodosPanel } from "./call-todos-panel";
-import { CloseAndSendCard } from "./close-and-send-card";
 import { ResendLoginLink } from "./resend-login-link";
 import { StatementsCard } from "./statements-card";
 import { MessagesPanel } from "./messages-panel";
@@ -877,11 +876,25 @@ function OverviewTab({
         />
       )}
 
-      {/* Close period & send statements — the clear, one-action push of the
-          month's books to the client's portal + email. Production clients only
-          (a daily-recon client whose month is being closed). */}
+      {/* Closing the month lives on the production board — ONE close path,
+          with the checks, attestation, and Books Reliability gates. The old
+          per-profile CloseAndSendCard bypassed all three. */}
       {qboStatus === "connected" && clientLink.daily_recon_enabled && (
-        <CloseAndSendCard clientLinkId={clientLink.id} clientName={clientLink.client_name} />
+        <section className="bg-white rounded-2xl border border-gray-100 p-5 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-navy">Monthly close</h3>
+            <p className="text-xs text-ink-slate mt-0.5">
+              Close the month and send statements from the Production board — checks,
+              attestation, and verification happen there.
+            </p>
+          </div>
+          <Link
+            href="/production"
+            className="text-xs font-bold text-teal border border-teal/30 hover:bg-teal/5 rounded-lg px-3 py-2 flex-shrink-0"
+          >
+            Open Production board →
+          </Link>
+        </section>
       )}
 
       {/* Statements — bookkeeper-uploaded (and client-uploaded) bank/CC/loan

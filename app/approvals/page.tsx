@@ -3,10 +3,10 @@ import { TopBar } from "@/components/TopBar";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { getApprovalQueues } from "@/lib/approvals-data";
-import { ManagerReviewWidget } from "../today/manager-review-widget";
-import { StatementApprovalsWidget } from "../today/statement-approvals-widget";
-import { StatementEscalationsWidget } from "../today/statement-escalations-widget";
-import { ScoreOverridesWidget } from "../today/score-overrides-widget";
+import { ManagerReviewWidget } from "./manager-review-widget";
+import { StatementApprovalsWidget } from "./statement-approvals-widget";
+import { ScoreOverridesWidget } from "./score-overrides-widget";
+import { EscalationStrip } from "@/components/escalations-ui";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +32,10 @@ export default async function ApprovalsPage({
   const params = await searchParams;
   const viewAs = params?.viewas ? String(params.viewas) : null;
 
-  const { managerReviewRows, statementApprovals, statementEscalations, scoreOverrides } =
+  const { managerReviewRows, statementApprovals, openEscalationCount, scoreOverrides } =
     await getApprovalQueues(service, { isSenior, viewAs });
 
-  const total = managerReviewRows.length + statementApprovals.length + statementEscalations.length;
+  const total = managerReviewRows.length + statementApprovals.length + openEscalationCount;
 
   return (
     <AppShell>
@@ -48,20 +48,21 @@ export default async function ApprovalsPage({
         }
       />
       <div className="px-8 py-6 space-y-5 max-w-4xl">
-        {total === 0 ? (
+        {managerReviewRows.length === 0 && statementApprovals.length === 0 ? (
           <div className="bg-white rounded-2xl border border-gray-100 px-6 py-12 text-center text-sm text-ink-slate">
-            You&apos;re all caught up — no files awaiting review, no statements to approve, and no
-            escalations.
+            No files awaiting review and no statements to approve.
           </div>
         ) : (
           <>
             {managerReviewRows.length > 0 && <ManagerReviewWidget rows={managerReviewRows} />}
             {statementApprovals.length > 0 && <StatementApprovalsWidget rows={statementApprovals} />}
-            {statementEscalations.length > 0 && (
-              <StatementEscalationsWidget rows={statementEscalations} />
-            )}
           </>
         )}
+        {/* Client escalations — THE one queue for "a senior needs to look at
+            this client" (all kinds, incl. statements flagged as wrong). The
+            strip owns the resolve lifecycle and shows last week's answers. */}
+        <EscalationStrip clientIds={null} alwaysOpen />
+
         {/* Transparency ledger, not a work queue — shown even when the queues are clear. */}
         <ScoreOverridesWidget rows={scoreOverrides} />
       </div>

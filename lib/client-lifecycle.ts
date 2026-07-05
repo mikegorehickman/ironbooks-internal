@@ -9,6 +9,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { previousMonthPeriod } from "./monthly-rec";
 
 export type LifecycleStatus =
   | "onboarding"        // new sale, not yet connected / no cleanup work
@@ -97,14 +98,6 @@ export function deriveLifecycleStatus(c: LifecycleInput): LifecycleStatus {
 
 const ACTIVE_JOB_STATUSES = ["pending", "executing", "in_review", "failed"];
 
-/** Current month-end close period ("YYYY-MM" = previous calendar month). */
-function currentClosePeriod(): string {
-  const d = new Date();
-  d.setDate(1);
-  d.setMonth(d.getMonth() - 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
 /**
  * Derive the lifecycle status for ONE client (profile header, etc.). Mirrors the
  * batch derivation in app/clients/page.tsx but self-contained. Best-effort —
@@ -120,7 +113,6 @@ export async function deriveLifecycleForClient(
     qbo_realm_id?: string | null;
     cleanup_completed_at?: string | null;
     cleanup_review_state?: string | null;
-    manual_cleanup_needed?: boolean | null;
     daily_recon_enabled?: boolean | null;
     bs_enabled?: boolean | null;
   }
@@ -148,7 +140,7 @@ export async function deriveLifecycleForClient(
         .select("status, board_status")
         .eq("client_link_id", id)
         .eq("kind", "production_me")
-        .eq("period", currentClosePeriod())
+        .eq("period", previousMonthPeriod().period)
         .maybeSingle();
       if ((data as any)?.status === "complete") month_done = true;
       else if ((data as any)?.status === "pending_review") month_review = true;
@@ -176,7 +168,6 @@ export async function deriveLifecycleForClient(
     qbo_connected: !!client.qbo_realm_id,
     cleanup_completed_at: client.cleanup_completed_at,
     cleanup_review_state: client.cleanup_review_state,
-    manual_cleanup_needed: client.manual_cleanup_needed,
     daily_recon_enabled: client.daily_recon_enabled,
     bs_deferred: client.bs_enabled === false,
     has_active_coa: anyActive(coa),

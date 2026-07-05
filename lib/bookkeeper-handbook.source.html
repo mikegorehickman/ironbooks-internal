@@ -114,6 +114,8 @@
       <div class="phase">Playbooks</div>
       <ol>
         <li><span class="n">15</span><a href="#s15">Daily Recon — Cleanup → Monthly Statements</a></li>
+        <li><span class="n">16</span><a href="#s16">Escalating a Client (and Getting Your Answer)</a></li>
+        <li><span class="n">17</span><a href="#s17">Board Badges — What They Mean</a></li>
       </ol>
     </div>
 
@@ -401,14 +403,17 @@
         <div class="box"><div class="lbl">Purpose</div><div class="val">Close each production client's books every month.</div></div>
         <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · monthly, per production client.</div></div>
       </div>
+      <div class="note warn"><span class="ic">⚠️</span><div><strong>There is exactly ONE way to close a month:</strong> the client's close card on the Production board. Sending statements is client-facing and can't be unsent, so every close goes through the same gates — checks, statement review, attestation. There is no bulk send and no shortcut; picking "✓ Completed" on a board card simply opens the close card.</div></div>
       <h3 class="step-h">Steps</h3>
       <ol class="steps">
-        <li>Track month-end status on the <strong>Clients</strong> manager dashboard — each production client shows its month-end state (done / in review / waiting on client).</li>
-        <li>Run the close for the period: clear the queue, reconcile, and finish the month-end.</li>
-        <li><strong>Finish month-end</strong> and notify the client their books are ready.</li>
+        <li>Sidebar → <strong>Production board</strong> (<code>/production</code>). Pick the close period — each production client is a card. Use the columns to track the month: Not Started → In Progress → Blocked (this month) → Waiting on Client → Completed.</li>
+        <li>Click a client's card to open their <strong>close card</strong>. <strong>Run checks</strong> (uncategorized, undeposited funds, bank tie-outs, A/R…) and fix anything flagged — each failed check links to the right tool.</li>
+        <li><strong>Review the statements</strong> (P&amp;L / BS / CFS preview + AI spot check). If something looks wrong and you can't fix it, use <strong>Escalate</strong> (SOP 16) instead of sending.</li>
+        <li>Submit for review, or (seniors) <strong>close &amp; send</strong>: tick the <strong>attestation box</strong> — "I have reviewed these statements and they're accurate" — and confirm. That publishes to the portal, emails the client, and closes the QuickBooks period.</li>
+        <li>Moving a Completed card to any other column <strong>reopens</strong> the month.</li>
       </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Month-end states</div><div class="d">The Clients dashboard showing production clients' month-end states + the finish action.</div><div class="path">/clients</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Tip:</strong> The manager dashboard is the at-a-glance view of who's closed and who isn't — work from it each month-end.</div></div>
+      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Production board + close card</div><div class="d">The period board with a client's close card open: checks, statements review, attestation.</div><div class="path">/production</div></div>
+      <div class="note tip"><span class="ic">💡</span><div><strong>Tip:</strong> "Blocked (this month)" is a status for <em>this month's close</em> only (waiting on statements, feed broken…). A client-level problem that needs a senior is an <strong>escalation</strong> — see SOP 16.</div></div>
     </section>
 
     <div class="phase-divider">Ongoing</div>
@@ -507,7 +512,7 @@
         <li>Sidebar → <strong>Production → Production board</strong>. Pick the close period; each production client is a card.</li>
         <li>For each client: <strong>Run checks</strong> (uncategorized, undeposited funds, A/R…) → review the <strong>Statements</strong> preview → fix anything a check flags (it links you to the tool) → submit / complete.</li>
         <li>Sidebar → <strong>Production → Approvals</strong> — your queue of files awaiting review + statements awaiting approval. Review and <strong>Approve</strong>.</li>
-        <li>Approving automatically <strong>publishes the statements to the client portal, emails the PDF statements + login instructions, and closes the QuickBooks period.</strong> The client is done for the month.</li>
+        <li>The final send always asks for the <strong>attestation checkbox</strong> ("I have reviewed these statements…"). Confirming <strong>publishes the statements to the client portal, emails the PDF statements + login instructions, and closes the QuickBooks period.</strong> The client is done for the month.</li>
       </ol>
 
       <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Daily Recon · Today · Approvals</div><div class="d">The Production sidebar group: Daily Recon (enroll / dry-run / run), the Today review queue, and the Approvals page.</div><div class="path">/admin/daily-recon · /today · /production · /approvals</div></div>
@@ -523,8 +528,59 @@
       <div class="note tip"><span class="ic">💡</span><div><strong>Troubleshooting.</strong> No daily activity for a production client → confirm they're enrolled and the nightly run fired (if it's empty for everyone, it's the cron — escalate); force a catch-up with <strong>"Run all now"</strong> on the Daily Recon page. Engine miscategorized a vendor → fix the account before approving (it teaches the corrected rule). Too many flags → keep approving with "Teach rule" on; within a couple of weeks the regulars are covered.</div></div>
     </section>
 
+
+    <!-- 16 -->
+    <section class="sop" id="s16">
+      <div class="sop-head"><div class="sop-num">16</div><div><div class="sub">Playbook</div><h2>Escalating a Client (and Getting Your Answer)</h2></div></div>
+      <div class="meta">
+        <div class="box"><div class="lbl">Purpose</div><div class="val">One way to say "a senior needs to look at this client" — and one place the answer comes back.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Anyone on the team · the moment you're blocked on a judgment call.</div></div>
+      </div>
+      <h3 class="step-h">Raising one (two clicks)</h3>
+      <ol class="steps">
+        <li>On any board card (Cleanup, Production, Clients dashboard), click the <strong>flag</strong> button.</li>
+        <li>Optionally type a line of context, then <strong>pick a reason</strong> — Needs senior review · Billing issue · Client relationship. Picking the reason sends it. Done — keep working.</li>
+        <li>If someone already escalated that client for the same thing, your note is <strong>added to the existing escalation</strong> (you'll see "Already escalated — your note was added"). Nothing is lost.</li>
+      </ol>
+      <h3 class="step-h">Where it goes</h3>
+      <ol class="steps">
+        <li>The client gets a red <strong>ESCALATED</strong> badge on every board, and a red strip appears at the top of the board listing open escalations (oldest first — reds over 3 days old are overdue).</li>
+        <li>Seniors work the full queue on <strong>Approvals</strong> (<code>/approvals</code>): who raised it, why, how old. <strong>Resolve</strong> is one click + an optional note.</li>
+      </ol>
+      <h3 class="step-h">Getting your answer</h3>
+      <ol class="steps">
+        <li>When it's resolved, it doesn't vanish — it stays on the board strip for <strong>7 days</strong>, greyed out, with the <strong>resolution note</strong> ("→ Talked to the client — proceeding as planned") and who resolved it.</li>
+        <li>Flagged statements ("statements look wrong" during review) ride this same queue automatically.</li>
+      </ol>
+      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Escalate menu + board strip</div><div class="d">The flag popover on a card, and the red escalation strip with a resolved row showing its answer.</div><div class="path">/cleanup · /production · /approvals</div></div>
+      <div class="note tip"><span class="ic">💡</span><div><strong>When to escalate vs. message:</strong> escalate when work on the client is blocked on a decision or a senior's eyes. Day-to-day questions still go through normal channels — an escalation is a visible, tracked "this client needs intervention."</div></div>
+    </section>
+
+    <!-- 17 -->
+    <section class="sop" id="s17">
+      <div class="sop-head"><div class="sop-num">17</div><div><div class="sub">Playbook</div><h2>Board Badges — What They Mean</h2></div></div>
+      <div class="meta">
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Read a client's attention state at a glance. Badges are automatic — nobody maintains them.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Everyone · whenever you look at a board.</div></div>
+      </div>
+      <h3 class="step-h">The badges (worst first — cards show the top 2 + a "+N")</h3>
+      <ol class="steps">
+        <li><strong>ESCALATED</strong> (red) — someone flagged this client for a senior (SOP 16). Darker red = open more than 3 days. Hover for the reason.</li>
+        <li><strong>DISCONNECTED</strong> (red) — the QuickBooks connection is dead; nothing syncs until the client reconnects. Get the reconnect link sent before anything else.</li>
+        <li><strong>BILLING HOLD / PAST DUE / UNBILLED</strong> — billing state (seniors see all of these; bookkeepers only see HOLD). UNBILLED in production = flag to Mike.</li>
+        <li><strong>BS OWED</strong> (amber) — the client is on P&amp;L-only service; the balance-sheet cleanup is still owed. Finish the BS cleanup, then flip BS back on.</li>
+        <li><strong>RECLASS PAUSED</strong> (grey) — an AI categorization job is paused mid-run; use <strong>Get unstuck</strong> on the Clients dashboard.</li>
+      </ol>
+      <h3 class="step-h">The "⚠ Flagged only" filter</h3>
+      <ol class="steps">
+        <li>Every board has a <strong>Flagged only</strong> chip — it hides everything except clients needing intervention. Use it as your triage view on a fat board.</li>
+      </ol>
+      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Badges on cards</div><div class="d">Board cards showing the severity-ordered badge stack and the Flagged-only filter chip.</div><div class="path">/cleanup · /production · /clients</div></div>
+      <div class="note tip"><span class="ic">💡</span><div><strong>Rule of thumb:</strong> a badge is a <em>state</em>, not a task. If a badge needs a decision you can't make, that's exactly what the flag button is for.</div></div>
+    </section>
+
     <footer>
-      <b>Ironbooks</b> · SNAP Bookkeeper Handbook · 15 SOPs across the client lifecycle<br/>
+      <b>Ironbooks</b> · SNAP Bookkeeper Handbook · 17 SOPs across the client lifecycle<br/>
       Questions? <a href="mailto:admin@ironbooks.com">admin@ironbooks.com</a>
     </footer>
 

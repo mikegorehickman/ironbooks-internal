@@ -80,9 +80,9 @@ export function PulseBar({
 
       {totalClients > 0 && (
         <Link
-          href="/month-end"
+          href="/production"
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:border-gray-300"
-          title="Month-end close progress"
+          title="Monthly close board"
         >
           <CheckCircle2 size={13} className="text-emerald-600" />
           <span className="tabular-nums">

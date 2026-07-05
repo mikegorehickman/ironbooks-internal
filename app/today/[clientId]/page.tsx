@@ -102,7 +102,7 @@ export default async function TodayClientPage({
   return (
     <AppShell>
       <TopBar title={c.client_name} subtitle="Daily review queue" />
-      <div className="px-8 py-6 max-w-6xl space-y-5">
+      <div className="px-8 py-6 space-y-5">
         <Link
           href="/today"
           className="inline-flex items-center gap-1 text-sm text-ink-slate hover:text-navy"

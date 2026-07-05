@@ -11,6 +11,9 @@ import {
   type EligibleClient, type ProdClient, type Bookkeeper,
 } from "./rec-card";
 import { CoaUpdatesBanner } from "./coa-updates-banner";
+import { ClientBadges } from "@/components/ClientBadges";
+import { EscalateMenu, EscalationStrip } from "@/components/escalations-ui";
+import { type AttentionState } from "@/lib/client-attention-state";
 
 /**
  * /production — the month-by-month board for graduated clients.
@@ -21,12 +24,11 @@ import { CoaUpdatesBanner } from "./coa-updates-banner";
  * with no run row for the month is Not Started — which is exactly how a
  * finished month "resets": next month has no row yet.
  *
- * A month reaches Completed two ways: the full SNAP close ("send" — review,
- * attest, email statements, close QBO) OR the board's Completed status, which
- * runs the SAME full close. Both are client-facing sends, so both require the
- * explicit verification popup (attested: true) — the board path mis-fired
- * real statement emails on 2026-07-04 when it only had a browser confirm.
- * Picking another status on a completed card reopens it.
+ * A month reaches Completed ONE way: the rec-card close flow (run checks →
+ * review statements → attest → send). Picking "✓ Completed" on a card just
+ * opens its rec-card — after the 2026-07-04 incident (the board's own
+ * Completed path mis-fired real statement emails), the board no longer has
+ * a second close path. Picking another status on a completed card reopens it.
  *
  * "Ready for manager review" is not a stored status — submitting the
  * statement review (the rec-card flow) moves the run to pending_review,
@@ -44,7 +46,9 @@ type BoardStatus = "not_started" | "in_progress" | "stuck" | "waiting_client";
 const COLUMNS: { id: BoardStatus; title: string; icon: any; tone: string }[] = [
   { id: "not_started", title: "Not Started", icon: CircleDashed, tone: "border-gray-200" },
   { id: "in_progress", title: "In Progress", icon: PlayCircle, tone: "border-teal/40" },
-  { id: "stuck", title: "Stuck", icon: OctagonAlert, tone: "border-red-300" },
+  // "Blocked (this month)" — month-state, deliberately NOT the client-level
+  // STUCK JOB badge. A client can be blocked this month and fine as a client.
+  { id: "stuck", title: "Blocked (this month)", icon: OctagonAlert, tone: "border-red-300" },
   { id: "waiting_client", title: "Waiting on Client", icon: MailQuestion, tone: "border-amber-300" },
 ];
 
@@ -57,12 +61,18 @@ export function ProductionBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Attention states (escalated / billing / BS owed / disconnected / stuck).
+  const [attention, setAttention] = useState<Record<string, AttentionState>>({});
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
 
   async function load(p?: string) {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/monthly-rec${p ? `?period=${p}` : ""}`);
+      const [res, attRes] = await Promise.all([
+        fetch(`/api/monthly-rec?scope=production${p ? `&period=${p}` : ""}`),
+        fetch("/api/attention"),
+      ]);
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
       setPeriod(body.period);
@@ -70,6 +80,10 @@ export function ProductionBoard() {
       setEligible(body.eligible || []);
       setBookkeepers(body.bookkeepers || []);
       setIsSenior(!!body.is_senior);
+      if (attRes.ok) {
+        const att = await attRes.json();
+        setAttention(att.clients || {});
+      }
     } catch (e: any) {
       setError(e?.message || "Failed to load");
     } finally {
@@ -139,6 +153,17 @@ export function ProductionBoard() {
           </button>
         </div>
         <div className="flex-1" />
+        <button
+          onClick={() => setFlaggedOnly((f) => !f)}
+          className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
+            flaggedOnly
+              ? "bg-red-100 text-red-800 border-red-300 ring-2 ring-navy/40"
+              : "bg-white text-ink-slate border-gray-200 hover:border-red-200"
+          }`}
+          title="Show only clients needing intervention (escalated, billing, disconnected, reclass paused)"
+        >
+          ⚠ Flagged only
+        </button>
         {production.length > 0 && (
           <span className="text-sm text-ink-slate">
             <strong className="text-navy">{done.length}</strong> of{" "}
@@ -147,6 +172,11 @@ export function ProductionBoard() {
           </span>
         )}
       </div>
+
+      {/* Escalations — triage on the board. */}
+      {!loading && (
+        <EscalationStrip clientIds={production.map((c) => c.id)} onChanged={() => load(period)} />
+      )}
 
       {/* BS-owed banner — production clients on P&L-only service still owe
           a finished balance sheet. Don't let "in production" hide that. */}
@@ -205,11 +235,24 @@ export function ProductionBoard() {
                 tone: "border-emerald-300",
                 cards: done,
               },
-            ].map((col) => {
+            ]
+              .map((col) => ({
+                ...col,
+                // Intervention states only — bs_owed is a chronic service
+                // mode with its own banner here, not a flag to triage.
+                cards: flaggedOnly
+                  ? col.cards.filter((c) => {
+                      const a = attention[c.id];
+                      return a && (a.escalations.length > 0 || !!a.billing || a.disconnected || a.stuck_job);
+                    })
+                  : col.cards,
+              }))
+              .map((col) => {
               const Icon = col.icon;
               const isCompletedCol = col.id === "completed";
+              // no overflow-hidden on the column shell — it clips the Escalate popover
               return (
-                <div key={col.id} className={`bg-white rounded-2xl border-2 ${col.tone} overflow-hidden`}>
+                <div key={col.id} className={`bg-white rounded-2xl border-2 ${col.tone}`}>
                   <div className="px-3 py-2.5 border-b border-gray-100 flex items-center gap-2">
                     <Icon size={14} className={isCompletedCol ? "text-emerald-600" : "text-ink-slate"} />
                     <span className="text-sm font-bold text-navy">{col.title}</span>
@@ -226,6 +269,7 @@ export function ProductionBoard() {
                         period={period}
                         isSenior={isSenior}
                         bookkeepers={bookkeepers}
+                        attention={attention[c.id]}
                         selected={selectedId === c.id}
                         onSelect={() => setSelectedId(selectedId === c.id ? null : c.id)}
                         onChanged={() => load(period)}
@@ -294,6 +338,7 @@ function BoardCard({
   period,
   isSenior,
   bookkeepers,
+  attention,
   selected,
   onSelect,
   onChanged,
@@ -302,6 +347,7 @@ function BoardCard({
   period: string;
   isSenior: boolean;
   bookkeepers: Bookkeeper[];
+  attention?: AttentionState;
   selected: boolean;
   onSelect: () => void;
   onChanged: () => void;
@@ -380,39 +426,6 @@ function BoardCard({
     }
   }
 
-  // Mark the month complete — this runs the FULL close: publishes the
-  // statements to the client's portal, EMAILS them, and sets the QuickBooks
-  // closing date. Client-facing, so it opens the verification popup; the
-  // actual send only fires from the modal's attested confirm (the API also
-  // rejects any close without attested: true).
-  const [confirmingSend, setConfirmingSend] = useState(false);
-  const [sendAttested, setSendAttested] = useState(false);
-
-  function markComplete() {
-    setSendAttested(false);
-    setConfirmingSend(true);
-  }
-
-  async function doMarkComplete() {
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/clients/${client.id}/monthly-rec`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "mark_complete", period, attested: true }),
-      });
-      if (res.ok) {
-        setConfirmingSend(false);
-        onChanged();
-      } else {
-        const b = await res.json().catch(() => ({}));
-        alert(b.error || "Couldn't mark complete");
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
-
   // Reopen a completed month back into the active board, optionally landing
   // it in a target column. Reopen clears the close, then sets the column.
   async function reopenTo(target: string) {
@@ -466,20 +479,28 @@ function BoardCard({
     >
       {/* Client name links to the profile; the rest of the body opens the
           month-end detail drawer. */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <Link
-          href={`/clients/${client.id}`}
-          className="text-sm font-semibold text-navy hover:text-teal hover:underline"
-          title="Open client profile"
-        >
-          {client.client_name}
-        </Link>
-        {client.paused && (
-          <span className="text-[9px] font-bold bg-gray-100 text-ink-slate px-1 py-0.5 rounded">PAUSED</span>
-        )}
-        {bsOff && (
-          <span className="text-[9px] font-bold bg-sky-100 text-sky-800 px-1 py-0.5 rounded">P&L ONLY</span>
-        )}
+      <div className="flex items-start gap-1">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Link
+              href={`/clients/${client.id}`}
+              className="text-sm font-semibold text-navy hover:text-teal hover:underline"
+              title="Open client profile"
+            >
+              {client.client_name}
+            </Link>
+            {client.paused && (
+              <span className="text-[9px] font-bold bg-gray-100 text-ink-slate px-1 py-0.5 rounded">PAUSED</span>
+            )}
+            <ClientBadges attention={attention} stage="production" max={2} />
+          </div>
+        </div>
+        <EscalateMenu
+          clientLinkId={client.id}
+          clientName={client.client_name}
+          onRaised={onChanged}
+          small
+        />
       </div>
       <button onClick={onSelect} className="w-full text-left" title="Open month-end detail">
         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -547,7 +568,10 @@ function BoardCard({
             const v = e.target.value;
             if (v === currentStatus) return;
             if (v === "completed") {
-              markComplete();
+              // The close lives in the rec-card flow (checks -> review ->
+              // attest -> send). Opening the card IS the action here.
+              if (!selected) onSelect();
+              return;
             } else if (isComplete) {
               // Leaving the Completed column = reopen, then land the column.
               reopenTo(v);
@@ -561,7 +585,7 @@ function BoardCard({
         >
           <option value="not_started">Not started</option>
           <option value="in_progress">In progress</option>
-          <option value="stuck">Stuck</option>
+          <option value="stuck">Blocked (this month)</option>
           <option value="waiting_client">Waiting on client</option>
           <option value="completed">✓ Completed</option>
         </select>
@@ -673,72 +697,6 @@ function BoardCard({
         </div>
       )}
 
-      {/* ── VERIFICATION POPUP ── every client-facing send goes through this.
-          The Send button stays locked until the attestation box is ticked;
-          the API independently rejects any close without attested: true. */}
-      {confirmingSend && (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-          onClick={() => !saving && setConfirmingSend(false)}
-        >
-          <div
-            className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-4 cursor-default"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start gap-2.5">
-              <div className="p-2 rounded-lg bg-red-50 flex-shrink-0">
-                <Send size={16} className="text-red-600" />
-              </div>
-              <div>
-                <h3 className="font-bold text-navy text-sm">
-                  Send {client.client_name}&apos;s {periodLabel(period)} statements?
-                </h3>
-                <p className="text-xs text-ink-slate mt-0.5">
-                  This is client-facing and can&apos;t be unsent.
-                </p>
-              </div>
-            </div>
-
-            <ul className="text-xs text-navy space-y-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
-              <li>• Publishes the {periodLabel(period)} statements to their portal</li>
-              <li>• <strong>Emails the client</strong> that their books are ready</li>
-              <li>• Closes the period in QuickBooks</li>
-            </ul>
-
-            <label className="flex items-start gap-2.5 cursor-pointer bg-white border-2 border-red-200 rounded-lg px-3 py-2.5">
-              <input
-                type="checkbox"
-                checked={sendAttested}
-                onChange={(e) => setSendAttested(e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded border-2 border-gray-300 text-red-600 focus:ring-red-500"
-              />
-              <span className="text-xs text-navy leading-relaxed">
-                I have reviewed {client.client_name}&apos;s {periodLabel(period)} statements and
-                they are accurate and ready to send to the client.
-              </span>
-            </label>
-
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setConfirmingSend(false)}
-                disabled={saving}
-                className="px-3.5 py-2 text-sm font-semibold rounded-lg border border-gray-200 text-ink-slate hover:text-navy hover:border-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={doMarkComplete}
-                disabled={saving || !sendAttested}
-                title={!sendAttested ? "Tick the verification box first" : undefined}
-                className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40"
-              >
-                {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                Close &amp; send to client
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

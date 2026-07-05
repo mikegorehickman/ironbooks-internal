@@ -52,7 +52,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const action = body.action;
-  if (!["enable", "pause", "unpause", "disable", "bs_on", "bs_off", "promote_pl_only", "push_balance_sheet"].includes(action || "")) {
+  if (!["enable", "pause", "unpause", "disable", "bs_on", "bs_off", "promote_pl_only"].includes(action || "")) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
@@ -108,17 +108,12 @@ export async function POST(
       break;
     // Balance Sheet toggle — bs_off puts the client on P&L-only monthly
     // service (BS checks + BS/CFS statements skipped) while their balance
-    // sheet cleanup finishes; bs_on restores full service.
+    // sheet cleanup finishes; bs_on restores full service. Also sent by the
+    // BS Cleanup wizard's Publish button (reveals portal BS + Cash Flow).
     case "bs_off":
       updates.bs_enabled = false;
       break;
     case "bs_on":
-      updates.bs_enabled = true;
-      break;
-    // "Publish Balance Sheet to client portal" from the BS Cleanup wizard —
-    // the balance sheet is cleaned + approved on our end, so reveal it to the
-    // client (their portal BS + Cash Flow stop showing the placeholder).
-    case "push_balance_sheet":
       updates.bs_enabled = true;
       break;
     // One-shot from the BS Cleanup wizard: "P&L ready, BS waiting on

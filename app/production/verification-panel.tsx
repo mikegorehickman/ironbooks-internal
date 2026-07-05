@@ -53,7 +53,7 @@ const BAND = {
   not_ready: { label: "Not ready to send", color: "text-red-600", stroke: "#dc2626", chip: "bg-red-50 text-red-700 border-red-200" },
 };
 
-function vFixLink(fix: string | undefined, clientId: string): { href: string; label: string } | null {
+export function vFixLink(fix: string | undefined, clientId: string): { href: string; label: string } | null {
   switch (fix) {
     case "reclass": return { href: `/reclass/new?client=${clientId}`, label: "Open Reclassify" };
     case "uf_audit": return { href: `/balance-sheet/${clientId}/uf-audit`, label: "Open UF Audit" };

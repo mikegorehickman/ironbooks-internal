@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -8,6 +8,9 @@ import {
   CheckCircle2, Circle, AlertTriangle, PlayCircle,
 } from "lucide-react";
 import { LIFECYCLE_META, type LifecycleStatus } from "@/lib/client-lifecycle";
+import { ClientBadges } from "@/components/ClientBadges";
+import { EscalateMenu } from "@/components/escalations-ui";
+import type { AttentionState } from "@/lib/client-attention-state";
 
 export interface ManagerRow {
   id: string;
@@ -78,6 +81,18 @@ export function ManagerDashboard({
   const router = useRouter();
   const [open, setOpen] = useState(true);
   const [rows, setRows] = useState(initialRows);
+  // Attention badge feed (escalated / billing / BS owed / disconnected).
+  const [attention, setAttention] = useState<Record<string, AttentionState>>({});
+  useEffect(() => {
+    fetch("/api/attention")
+      .then((r) => r.json())
+      .then((j) => setAttention(j.clients || {}))
+      .catch(() => {});
+  }, []);
+  const escalatedCount = useMemo(
+    () => Object.values(attention).filter((a) => a.escalations.length > 0).length,
+    [attention]
+  );
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<LifecycleStatus | "all">("all");
   const [bsOnly, setBsOnly] = useState(false);
@@ -204,6 +219,16 @@ export function ManagerDashboard({
                 <span className="text-[11px] font-semibold uppercase tracking-wide">{g}</span>
               </div>
             ))}
+            {escalatedCount > 0 && (
+              <Link
+                href="/approvals"
+                className="flex items-baseline gap-1.5 px-3 py-1.5 rounded-lg text-red-700 bg-red-50 hover:bg-red-100"
+                title="Open the escalation queue on Approvals"
+              >
+                <span className="text-lg font-black tabular-nums">{escalatedCount}</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide">Escalated →</span>
+              </Link>
+            )}
           </div>
 
           {/* Filters */}
@@ -296,14 +321,18 @@ export function ManagerDashboard({
                       <span className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full ${LIFECYCLE_META[r.status].tone}`}>
                         {LIFECYCLE_META[r.status].label}
                       </span>
-                      {r.bs_owed && (
-                        <span
-                          className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800"
-                          title="Balance-sheet cleanup deferred — still owed"
-                        >
-                          <AlertTriangle size={9} /> BS owed
-                        </span>
-                      )}
+                      {/* Unified attention badges (wide table → show all); the
+                          stuck-job state keeps its richer Get-unstuck ACTION
+                          below instead of a passive badge. */}
+                      <span className="ml-1.5">
+                        <ClientBadges
+                          attention={
+                            attention[r.id] ? { ...attention[r.id], stuck_job: false } : attention[r.id]
+                          }
+                          stage="dashboard"
+                          max={5}
+                        />
+                      </span>
                       {r.paused_job_id && (
                         <button
                           onClick={() => selfFix(r.id, r.paused_job_id!)}
@@ -351,6 +380,19 @@ export function ManagerDashboard({
                           <SkipForward size={11} /> Defer BS
                         </button>
                       )}
+                      <span className="mr-1.5">
+                        <EscalateMenu
+                          clientLinkId={r.id}
+                          clientName={r.client_name}
+                          onRaised={() =>
+                            fetch("/api/attention")
+                              .then((res) => res.json())
+                              .then((j) => setAttention(j.clients || {}))
+                              .catch(() => {})
+                          }
+                          small
+                        />
+                      </span>
                       {/* Mark BS done — whenever it's owed (cleanup OR production) */}
                       {canEdit && r.bs_owed && (
                         <button

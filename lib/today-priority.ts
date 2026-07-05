@@ -7,8 +7,8 @@
  * pulse-bar counts, so the page can lead with what matters instead of a
  * flat widget stack.
  *
- * Honest constraint: only cleanup (client_links.due_date) and manager
- * escalations (today_item_overrides.due_date) carry a REAL due date. Flags,
+ * Honest constraint: only cleanup (client_links.due_date) carries a REAL
+ * due date. Flags,
  * reclass requests, and client messages have no due/SLA column, so their
  * urgency is age-based (oldest first) and is always surfaced with a plain
  * "why-now" string — never a fabricated deadline.
@@ -43,15 +43,12 @@ export interface TodayCounts {
 export interface TodayPriorityResult {
   hero: TodayHero | null;
   counts: TodayCounts;
-  /** Total items in the user's "Your work" band (drives the header count). */
-  workCount: number;
 }
 
 interface DatedItem {
   due: string; // YYYY-MM-DD
   name: string;
   clientId: string;
-  kind: "cleanup" | "escalation";
 }
 
 interface WaitingItem {
@@ -72,7 +69,6 @@ export interface TodayPriorityInput {
   pendingReclassRequests: Array<{ client_link_id: string; client_name?: string; requested_at?: string | null }>;
   inboundComms: Array<{ client_link_id: string; client_name?: string; created_at?: string | null }>;
   cleanupDeadlines: Array<{ client_link_id: string; client_name: string; due_date: string | null }>;
-  statementEscalations: Array<{ client_link_id: string; client_name: string; due_date: string | null }>;
   pendingByClient: Map<string, number>;
   anomaliesByClient: Map<string, number>;
   clientNameById: Map<string, string>;
@@ -104,7 +100,6 @@ export function computeTodayPriority(input: TodayPriorityInput): TodayPriorityRe
     pendingReclassRequests,
     inboundComms,
     cleanupDeadlines,
-    statementEscalations,
     pendingByClient,
     anomaliesByClient,
     clientNameById,
@@ -112,13 +107,10 @@ export function computeTodayPriority(input: TodayPriorityInput): TodayPriorityRe
     todayStr,
   } = input;
 
-  // ── Due-date buckets (only cleanup + escalations have real due dates) ──
+  // ── Due-date buckets (only cleanup deadlines have real due dates) ──
   const dated: DatedItem[] = [];
   for (const c of cleanupDeadlines || []) {
-    if (c?.due_date) dated.push({ due: c.due_date, name: c.client_name, clientId: c.client_link_id, kind: "cleanup" });
-  }
-  for (const e of statementEscalations || []) {
-    if (e?.due_date) dated.push({ due: e.due_date, name: e.client_name, clientId: e.client_link_id, kind: "escalation" });
+    if (c?.due_date) dated.push({ due: c.due_date, name: c.client_name, clientId: c.client_link_id });
   }
   const soonCutoff = addDaysISO(todayStr, 3);
   let overdue = 0;
@@ -139,12 +131,6 @@ export function computeTodayPriority(input: TodayPriorityInput): TodayPriorityRe
 
   const counts: TodayCounts = { blocked, overdue, dueToday, dueSoon, needsYou };
 
-  const workCount =
-    (pendingFlags?.length || 0) +
-    (pendingReclassRequests?.length || 0) +
-    (inboundComms?.length || 0) +
-    (cleanupDeadlines?.length || 0);
-
   // ── Hero precedence ──
 
   // 1. BLOCKED
@@ -159,7 +145,6 @@ export function computeTodayPriority(input: TodayPriorityInput): TodayPriorityRe
         ctaLabel: "Resolve",
       },
       counts,
-      workCount,
     };
   }
 
@@ -172,12 +157,11 @@ export function computeTodayPriority(input: TodayPriorityInput): TodayPriorityRe
       hero: {
         tone: "red",
         client: top.name,
-        whyNow: `${top.kind === "cleanup" ? "Cleanup" : "Statements"} ${plural(days, "day")} overdue`,
-        ctaHref: top.kind === "cleanup" ? `/clients/${top.clientId}` : `/balance-sheet/${top.clientId}/cleanup`,
-        ctaLabel: top.kind === "cleanup" ? "Continue cleanup" : "Open",
+        whyNow: `Cleanup ${plural(days, "day")} overdue`,
+        ctaHref: `/clients/${top.clientId}`,
+        ctaLabel: "Continue cleanup",
       },
       counts,
-      workCount,
     };
   }
 
@@ -200,7 +184,6 @@ export function computeTodayPriority(input: TodayPriorityInput): TodayPriorityRe
         ctaLabel: "Review",
       },
       counts,
-      workCount,
     };
   }
 
@@ -222,7 +205,6 @@ export function computeTodayPriority(input: TodayPriorityInput): TodayPriorityRe
         ctaLabel: "Respond",
       },
       counts,
-      workCount,
     };
   }
 
@@ -245,10 +227,9 @@ export function computeTodayPriority(input: TodayPriorityInput): TodayPriorityRe
         ctaLabel: "Review",
       },
       counts,
-      workCount,
     };
   }
 
   // Calm state
-  return { hero: null, counts, workCount };
+  return { hero: null, counts };
 }

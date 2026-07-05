@@ -59,10 +59,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
   }
 
-  // Mark client as pending Stripe connection (so the rest of the app knows)
+  // Mark client as pending Stripe connection (so the rest of the app knows).
+  // stripe_request_sent_at drives the cleanup board's Awaiting-Stripe sort +
+  // the fleet-health stale-link warning.
   await service
     .from("client_links")
-    .update({ stripe_connection_status: "pending" } as any)
+    .update({
+      stripe_connection_status: "pending",
+      stripe_request_sent_at: new Date().toISOString(),
+    } as any)
     .eq("id", client_link_id);
 
   // Audit log entry

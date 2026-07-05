@@ -62,5 +62,35 @@ export async function POST(
     } as any,
   });
 
+  // Also raise a first-class client escalation (kind=statement) — this IS
+  // the queue (badges + strip + /approvals); the audit_log row above is the
+  // append-only trail. A second flag while one is open appends its note to
+  // the existing escalation rather than vanishing. Best-effort: environments
+  // without migration 105 still keep the audit trail.
+  try {
+    const { data: existing } = await (service as any)
+      .from("client_escalations")
+      .select("id, note")
+      .eq("client_link_id", id)
+      .eq("kind", "statement")
+      .eq("status", "open")
+      .maybeSingle();
+    if (existing) {
+      const who = (actor as any).full_name || (actor as any).email;
+      const merged = [existing.note, `${who}: ${note}`].filter(Boolean).join("\n").slice(0, 4000);
+      await (service as any).from("client_escalations").update({ note: merged }).eq("id", existing.id);
+    } else {
+      await (service as any).from("client_escalations").insert({
+        client_link_id: id,
+        kind: "statement",
+        reason: "Statements look wrong",
+        note,
+        raised_by: user.id,
+      });
+    }
+  } catch {
+    /* table missing — audit trail above still recorded */
+  }
+
   return NextResponse.json({ ok: true });
 }

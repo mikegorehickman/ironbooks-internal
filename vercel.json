@@ -17,10 +17,6 @@
       "schedule": "0 8 * * *"
     },
     {
-      "path": "/api/cron/month-end-reminder",
-      "schedule": "0 14 1 * *"
-    },
-    {
       "path": "/api/cron/stripe-connection-reminder",
       "schedule": "0 13 * * *"
     },
