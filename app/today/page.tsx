@@ -46,6 +46,7 @@ export async function TodayContent({
     .eq("id", user.id)
     .single();
   const isSenior = ["admin", "lead"].includes((actor as any)?.role || "");
+  const isAdmin = (actor as any)?.role === "admin";
 
   // Seniors can view /today AS any bookkeeper (?viewas=<user_id>) — every
   // client-scoped widget below narrows to that bookkeeper's clients.
@@ -309,7 +310,7 @@ export async function TodayContent({
               can enable pilot clients from the admin panel — once enrolled, their daily AI
               categorizations + flagged items will appear here.
             </p>
-            {isSenior && (
+            {isAdmin && (
               <Link
                 href="/admin/daily-recon"
                 className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white font-semibold px-5 py-2.5 rounded-lg"

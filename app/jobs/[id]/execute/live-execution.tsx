@@ -479,8 +479,8 @@ export function LiveExecution({
 
       {/* Action buttons */}
       <div className="flex justify-between items-center">
-        <Link href="/dashboard" className="text-sm font-semibold text-ink-slate hover:text-navy">
-          ← Back to Dashboard
+        <Link href="/today" className="text-sm font-semibold text-ink-slate hover:text-navy">
+          ← Back to Today
         </Link>
         {isComplete && (
           <Link

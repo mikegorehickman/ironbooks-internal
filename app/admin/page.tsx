@@ -2,7 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone } from "lucide-react";
+import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone, Repeat, Video } from "lucide-react";
 
 export default async function AdminOverviewPage() {
   const supabase = await createServerSupabase();
@@ -38,6 +38,13 @@ export default async function AdminOverviewPage() {
             >
               <Mail size={16} />
               Invite client
+            </Link>
+            <Link
+              href="/admin/billing"
+              className="inline-flex items-center gap-2 bg-white border-2 border-slate-200 text-ink-slate hover:border-teal hover:text-teal text-sm font-semibold px-4 py-2 rounded-lg"
+            >
+              <CreditCard size={16} />
+              Billing
             </Link>
             <Link
               href="/admin/billing-backfill"
@@ -114,22 +121,56 @@ export default async function AdminOverviewPage() {
           </div>
         </div>
 
-        {/* Maintenance utilities */}
-        <Link
-          href="/admin/resync-logins"
-          className="group flex items-center justify-between rounded-xl bg-white border border-gray-200 px-5 py-3 mb-6 hover:border-teal hover:bg-teal-lighter/40 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg flex items-center justify-center w-9 h-9 bg-teal-light">
-              <RefreshCw size={16} className="text-teal" />
-            </div>
-            <div>
-              <h3 className="font-bold text-sm text-navy">Re-sync portal logins</h3>
-              <p className="text-xs text-ink-slate">Repoint client login emails that drifted from their contact email</p>
-            </div>
-          </div>
-          <ArrowRight size={16} className="text-ink-light group-hover:text-teal" />
-        </Link>
+        {/* Admin tools — everything that used to have its own sidebar row.
+            One hub, one click deeper; these are enter-rarely surfaces. */}
+        <div className="space-y-2 mb-6">
+          {[
+            {
+              href: "/admin/daily-recon",
+              icon: Repeat,
+              title: "Daily recon engine",
+              desc: "Enroll / dry-run / pause clients · nightly run history · run all now",
+            },
+            {
+              href: "/admin/bulk-email",
+              icon: Mail,
+              title: "Bulk email",
+              desc: "Email some or all clients · rich text · unsubscribe-aware",
+            },
+            {
+              href: "/admin/call-matching",
+              icon: Video,
+              title: "Call matching",
+              desc: "Match Grain call recordings to clients · manual matches teach auto-matching",
+            },
+            {
+              href: "/admin/resync-logins",
+              icon: RefreshCw,
+              title: "Re-sync portal logins",
+              desc: "Repoint client login emails that drifted from their contact email",
+            },
+          ].map((t) => {
+            const Icon = t.icon;
+            return (
+              <Link
+                key={t.href}
+                href={t.href}
+                className="group flex items-center justify-between rounded-xl bg-white border border-gray-200 px-5 py-3 hover:border-teal hover:bg-teal-lighter/40 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg flex items-center justify-center w-9 h-9 bg-teal-light">
+                    <Icon size={16} className="text-teal" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-navy">{t.title}</h3>
+                    <p className="text-xs text-ink-slate">{t.desc}</p>
+                  </div>
+                </div>
+                <ArrowRight size={16} className="text-ink-light group-hover:text-teal" />
+              </Link>
+            );
+          })}
+        </div>
 
         <div className="grid grid-cols-2 gap-6">
           {/* Team leaderboard */}

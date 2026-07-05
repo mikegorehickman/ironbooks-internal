@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ClipboardCheck, Shuffle, Zap, KanbanSquare, CreditCard, ArrowRight } from "lucide-react";
+import { ClipboardCheck, Shuffle, Zap, KanbanSquare, CreditCard, Wallet, ArrowRight } from "lucide-react";
 
 /**
  * Client-profile "Cleanup" tab (SNAP V2) — the single place to launch any
@@ -20,6 +20,7 @@ const ENGINES: {
   { label: "Bank Rules", desc: "Auto-categorization rules", icon: Zap, href: (id) => `/rules/new?client=${id}` },
   { label: "Balance Sheet Cleanup", desc: "Reconcile bank / CC / loan + A/R", icon: KanbanSquare, href: (id) => `/balance-sheet/${id}/cleanup` },
   { label: "Stripe Reconciliation", desc: "Match Stripe payouts to QBO", icon: CreditCard, href: (id) => `/stripe-recon/new?client=${id}` },
+  { label: "UF Audit", desc: "Clear stuck Undeposited Funds — duplicates, CRM double-counts", icon: Wallet, href: (id) => `/balance-sheet/${id}/uf-audit` },
 ];
 
 export function CleanupTab({
@@ -34,8 +35,8 @@ export function CleanupTab({
       <p className="text-sm text-ink-slate">
         Launch any cleanup engine for <strong className="text-navy">{clientName}</strong> in
         context. Live step status and the manager sign-off live on the{" "}
-        <Link href="/workflow?view=cleanup" className="text-teal font-semibold hover:underline">
-          Workflow board
+        <Link href="/cleanup" className="text-teal font-semibold hover:underline">
+          Cleanup board
         </Link>
         .
       </p>

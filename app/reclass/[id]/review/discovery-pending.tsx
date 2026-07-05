@@ -320,10 +320,10 @@ export function ReclassDiscoveryPending({
             Start a fresh reclass for this client
           </Link>
           <Link
-            href="/dashboard"
+            href="/today"
             className="text-sm font-semibold text-ink-slate hover:text-navy"
           >
-            Back to dashboard
+            Back to Today
           </Link>
           <a
             href={`/api/jobs/${jobId}/error-report`}

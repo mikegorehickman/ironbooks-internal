@@ -50,5 +50,37 @@ export async function GET() {
   const reclassCount = (reclassQ.data || []).filter((r: any) => r.reclass_jobs).length;
   const stripeCount = (stripeQ.data || []).filter((r: any) => r.stripe_recon_jobs).length;
 
-  return NextResponse.json({ count: coaCount + reclassCount + stripeCount });
+  // The badge sits on the Approvals nav row, so it counts the WHOLE senior
+  // queue: flagged items + files in manager review + statements pending
+  // approval + open escalations. Best-effort head-counts; a missing table
+  // (pre-migration env) just contributes 0.
+  let reviewCount = 0;
+  let statementCount = 0;
+  let escalationCount = 0;
+  try {
+    const [rev, stmt, esc] = await Promise.all([
+      (service as any)
+        .from("client_links")
+        .select("id", { count: "exact", head: true })
+        .eq("is_active", true)
+        .eq("cleanup_review_state", "in_review"),
+      (service as any)
+        .from("monthly_rec_runs")
+        .select("client_link_id", { count: "exact", head: true })
+        .eq("status", "pending_review"),
+      (service as any)
+        .from("client_escalations")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "open"),
+    ]);
+    reviewCount = rev.count || 0;
+    statementCount = stmt.count || 0;
+    escalationCount = esc.count || 0;
+  } catch {
+    /* best-effort */
+  }
+
+  return NextResponse.json({
+    count: coaCount + reclassCount + stripeCount + reviewCount + statementCount + escalationCount,
+  });
 }

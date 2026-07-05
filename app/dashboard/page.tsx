@@ -15,7 +15,6 @@ import {
   Clock,
 } from "lucide-react";
 import { DashboardCharts, type WeeklyPoint, type BookkeeperPoint } from "./dashboard-charts";
-import { StripeInviteSuggestions, type StripeInviteSuggestion } from "./stripe-invite-suggestions";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +66,6 @@ export default async function DashboardPage() {
     recentStripeConnectionsRes,
     readyForCleanupRes,
     activeCleanupClientsRes,
-    stripeInviteSuggestionsRes,
   ] = await Promise.all([
     service.from("users").select("role, full_name").eq("id", user!.id).single(),
 
@@ -178,23 +176,6 @@ export default async function DashboardPage() {
       .select("client_link_id, status")
       .in("status", ["draft", "in_review", "pending_lisa", "approved", "executing", "failed"]),
 
-    // Stripe-invite detector results: clients with Stripe-tagged deposits
-    // in QBO over the last 3 months who haven't been connected yet. The
-    // nightly cron populates these columns; we just read them here. We
-    // also exclude already-connected clients defensively (the detector
-    // skips them but a client might have connected since the last scan)
-    // AND clients flagged as "doesn't use Stripe" by a bookkeeper.
-    service
-      .from("client_links")
-      .select(
-        "id, client_name, jurisdiction, state_province, stripe_connection_status, stripe_invite_suggested_at, stripe_invite_deposit_count, stripe_invite_deposit_total"
-      )
-      .eq("is_active", true)
-      .not("stripe_invite_suggested_at", "is", null)
-      .is("stripe_invite_dismissed_at", null)
-      .neq("stripe_connection_status", "connected")
-      .eq("stripe_not_required" as any, false)
-      .order("stripe_invite_suggested_at", { ascending: false }),
   ]);
 
   const profile = profileRes.data;
@@ -402,30 +383,6 @@ export default async function DashboardPage() {
       hasPriorCleanup: !!c.cleanup_completed_at,
     }));
 
-  // Stripe-invite detector findings → dashboard widget cards.
-  // Cast through unknown because the new columns from migration 22
-  // aren't in the regenerated supabase types yet.
-  const stripeInviteSuggestions: StripeInviteSuggestion[] = (
-    ((stripeInviteSuggestionsRes.data || []) as unknown) as Array<{
-      id: string;
-      client_name: string;
-      jurisdiction: string;
-      state_province: string | null;
-      stripe_invite_suggested_at: string;
-      stripe_invite_deposit_count: number | null;
-      stripe_invite_deposit_total: number | null;
-    }>
-  )
-    .filter((r) => (r.stripe_invite_deposit_count || 0) > 0)
-    .map((r) => ({
-      client_link_id: r.id,
-      client_name: r.client_name,
-      jurisdiction: r.jurisdiction,
-      state_province: r.state_province,
-      deposit_count: r.stripe_invite_deposit_count || 0,
-      deposit_total: Number(r.stripe_invite_deposit_total || 0),
-      suggested_at: r.stripe_invite_suggested_at,
-    }));
 
   // Avg minutes per cleanup = (execution_completed_at - created_at) in minutes
   function elapsedMinutes(job: { created_at: string | null; execution_completed_at: string | null }): number | null {
@@ -560,16 +517,6 @@ export default async function DashboardPage() {
 
         {/* ─── Charts ─── */}
         <DashboardCharts weeklyData={weeklyData} bookkeepersData={bookkeepersData} />
-
-        {/* ─── Pending Stripe Invites Detected ───
-            Background detector found Stripe-tagged QBO deposits over
-            the last 3 months on clients who haven't connected Stripe
-            yet. Each row is a one-click "Send invite" — collapses the
-            multi-step manual flow (sidebar → search → generate →
-            copy → Double) into two clicks. */}
-        {stripeInviteSuggestions.length > 0 && (
-          <StripeInviteSuggestions suggestions={stripeInviteSuggestions} />
-        )}
 
         {/* ─── New Stripe Connections — Ready for Cleanup ───
             Surfaces every client who has connected Stripe AND doesn't
@@ -949,7 +896,7 @@ export default async function DashboardPage() {
               </div>
               {totalFlagged > 0 && (
                 <Link
-                  href="/flagged"
+                  href="/approvals"
                   className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-800 hover:text-amber-900"
                 >
                   Review All <ArrowRight size={14} />

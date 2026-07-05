@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Home, Sparkles, Flag, Users, LogOut, BookOpen, Clock,
-  Zap, Shield, Shuffle, CreditCard, ChevronDown, ChevronRight, Receipt, KanbanSquare, Sun,
-  FileSpreadsheet, Wallet, HeartPulse, Gauge, Repeat, BadgeCheck,
-  ClipboardCheck, ListChecks, UserPlus, Video, GraduationCap, Settings as SettingsIcon, Mail, Inbox, ListTodo, LifeBuoy, ExternalLink,
+  Sparkles, Users, LogOut, BookOpen, Clock,
+  Shield, CreditCard, ChevronDown, ChevronRight, Sun,
+  HeartPulse, Gauge, BadgeCheck, Home, KanbanSquare, Mail, Video,
+  ClipboardCheck, ListChecks, UserPlus, GraduationCap, Settings as SettingsIcon, Inbox, ListTodo, LifeBuoy, ExternalLink,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -14,7 +14,11 @@ import type { Database } from "@/lib/database.types";
 import { StripeConnectModal } from "./StripeConnectModal";
 import { isV2For } from "@/lib/feature-flags";
 
-/** Daily work surface — the whole job in five stops. */
+/** Daily work surface — the whole job, one flat list, no sub-menus.
+ *  Client-scoped tools (Reclassify, Bank Rules, Stripe Recon, COA Editor,
+ *  UF Audit, BS Wizard, GST/HST Audit) deliberately have NO nav entries:
+ *  you start them from the client — cleanup-board card steps, the /clients
+ *  row quick-actions, or the profile Cleanup tab — already scoped. */
 const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newTab?: boolean }[] = [
   { href: "/today", label: "Today", icon: Sun },
   { href: "/inbox", label: "Inbox", icon: Inbox },
@@ -26,41 +30,27 @@ const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newT
   { href: "/history", label: "History", icon: Clock },
 ];
 
-/** Production — clients live on daily recon. The board, the daily-recon engine,
- *  and the manager's approval queue. */
+/** Production — the board and the senior approval queue (statements,
+ *  files, escalations, flagged transactions — one queue). The daily-recon
+ *  engine controls live on the /admin hub. */
 const productionNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
   { href: "/production", label: "Production board", icon: ListChecks },
-  { href: "/admin/daily-recon", label: "Daily Recon", icon: Repeat, senior: true },
   { href: "/approvals", label: "Approvals", icon: BadgeCheck, senior: true },
 ];
 
-/** Everything else — standalone tools, tucked under Tools, senior+ only. */
+/** Fleet-wide views only — anything client-scoped starts from the client. */
 const toolsNav = [
-  { href: "/balance-sheet/uf-audit", label: "UF Audit", icon: Wallet },
-  { href: "/balance-sheet/cleanup", label: "BS Cleanup Wizard", icon: KanbanSquare },
-  { href: "/flagged", label: "Flagged", icon: Flag },
   { href: "/fleet", label: "Fleet Health", icon: Gauge },
-  { href: "/fleet/qbo-health", label: "QBO Connections", icon: Shield },
-  { href: "/dashboard", label: "Dashboard", icon: Home },
-  { href: "/templates", label: "Master COA", icon: BookOpen },
   { href: "/advisor", label: "Advisor", icon: HeartPulse },
-  { href: "/reclass/new", label: "Reclassify", icon: Shuffle },
-  { href: "/rules/new", label: "Bank Rules", icon: Zap },
-  { href: "/stripe-recon/new", label: "Stripe Recon", icon: CreditCard },
-  { href: "/balance-sheet/coa", label: "COA Editor", icon: FileSpreadsheet },
-  { href: "/tax-audit", label: "GST/HST Audit (CA)", icon: Receipt },
+  { href: "/templates", label: "Master COA", icon: BookOpen },
 ];
 
-const adminItems = [
-  { href: "/admin", label: "Admin", icon: Shield },
-  { href: "/admin/billing", label: "Billing", icon: CreditCard },
-  { href: "/admin/bulk-email", label: "Bulk Email", icon: Mail },
-  { href: "/admin/call-matching", label: "Call Matching", icon: Video },
-  { href: "/admin/audit", label: "Audit Log", icon: BookOpen },
-];
+/** One row: the /admin hub links onward to Billing, Bulk Email, Call
+ *  Matching, Daily Recon, and the Audit Log. */
+const adminItems = [{ href: "/admin", label: "Admin", icon: Shield }];
 
 /** SNAP how-to handbook — pinned to the very bottom for the WHOLE internal
- *  team (admin, lead, bookkeeper). For admins it sits just below Audit Log. */
+ *  team (admin, lead, bookkeeper). */
 const handbookNav = { href: "/handbook", label: "Handbook", icon: GraduationCap };
 
 // ── V2 navigation (SNAP site simplification, behind the V2 flag) ──
@@ -252,7 +242,12 @@ export function Sidebar() {
             {productionNav
               .filter((item) => !item.senior || isSenior)
               .map((item) => (
-                <NavItem key={item.href} item={item} pathname={pathname} />
+                <NavItem
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  badgeCount={item.href === "/approvals" ? flaggedCount : undefined}
+                />
               ))}
 
             {isSenior && (
@@ -263,22 +258,11 @@ export function Sidebar() {
                 >
                   {toolsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                   Tools
-                  {flaggedCount > 0 && (
-                    <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/90 text-white tabular-nums">
-                      {flaggedCount}
-                    </span>
-                  )}
                 </button>
                 {toolsOpen && (
                   <div className="space-y-0.5">
                     {toolsNav.map((item) => (
-                      <NavItem
-                        key={item.href}
-                        item={item}
-                        pathname={pathname}
-                        dim
-                        badgeCount={item.href === "/flagged" ? flaggedCount : undefined}
-                      />
+                      <NavItem key={item.href} item={item} pathname={pathname} dim />
                     ))}
                     <button
                       onClick={() => setStripeModalOpen(true)}
@@ -344,8 +328,7 @@ export function Sidebar() {
           </>
         )}
 
-        {/* Handbook — whole team, pinned to the very bottom of the nav (just
-            below Audit Log for admins; bottom of the list for everyone else). */}
+        {/* Handbook — whole team, pinned to the very bottom of the nav. */}
         <div className="mt-4 pt-3 border-t border-white/10">
           <NavItem item={handbookNav} pathname={pathname} />
         </div>

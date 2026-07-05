@@ -7,6 +7,7 @@ import { ClientsList } from "./clients-list";
 import { CompletedAccounts } from "./completed-accounts";
 import { InReviewAccounts } from "./in-review-accounts";
 import { ManagerDashboard, type ManagerRow } from "./manager-dashboard";
+import { StripeInviteSuggestions, type StripeInviteSuggestion } from "./stripe-invite-suggestions";
 import { deriveLifecycleStatus } from "@/lib/client-lifecycle";
 import { previousMonthPeriod } from "@/lib/monthly-rec";
 
@@ -32,6 +33,27 @@ export default async function ClientsPage() {
     : { data: null };
 
   const canEdit = profile && ["admin", "lead"].includes(profile.role);
+
+  // Stripe-invite suggestions (senior banner) — same query the old
+  // /dashboard used; the nightly detector cron writes the columns.
+  // Promise.resolve() subscribes the lazy builder NOW so the query runs
+  // concurrently with the page's main parallel batch below.
+  let stripeInviteSuggestions: StripeInviteSuggestion[] = [];
+  const stripeInviteQ = !canEdit
+    ? null
+    : Promise.resolve(
+        service
+      .from("client_links")
+      .select(
+        "id, client_name, jurisdiction, state_province, stripe_invite_suggested_at, stripe_invite_deposit_count, stripe_invite_deposit_total"
+      )
+      .eq("is_active", true)
+      .not("stripe_invite_suggested_at", "is", null)
+      .is("stripe_invite_dismissed_at", null)
+      .neq("stripe_connection_status", "connected")
+      .eq("stripe_not_required" as any, false)
+      .order("stripe_invite_suggested_at", { ascending: false })
+      );
 
   const [
     clientsRes,
@@ -75,6 +97,21 @@ export default async function ClientsPage() {
       .select("client_link_id, created_at")
       .order("created_at", { ascending: false }),
   ]);
+
+  if (stripeInviteQ) {
+    const { data: sugg } = await stripeInviteQ;
+    stripeInviteSuggestions = ((sugg as any[]) || [])
+      .filter((r) => (r.stripe_invite_deposit_count || 0) > 0)
+      .map((r) => ({
+        client_link_id: r.id,
+        client_name: r.client_name,
+        jurisdiction: r.jurisdiction,
+        state_province: r.state_province,
+        deposit_count: r.stripe_invite_deposit_count || 0,
+        deposit_total: Number(r.stripe_invite_deposit_total || 0),
+        suggested_at: r.stripe_invite_suggested_at,
+      }));
+  }
 
   const linksData = linksRes.data || [];
 
@@ -535,6 +572,12 @@ export default async function ClientsPage() {
         }
       />
       <div className="px-8 py-6 space-y-8">
+        {/* Nightly stripe-invite-detector results — clients with Stripe-tagged
+            QBO deposits but no connection. Rehomed from the retired /dashboard
+            nav entry; one-click Send invite. Senior-only. */}
+        {canEdit && stripeInviteSuggestions.length > 0 && (
+          <StripeInviteSuggestions suggestions={stripeInviteSuggestions} />
+        )}
         <ManagerDashboard
           rows={managerRows}
           bookkeepers={(bookkeepersRes.data || []).map((b: any) => ({ id: b.id, full_name: b.full_name }))}

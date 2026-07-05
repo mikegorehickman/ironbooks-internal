@@ -370,7 +370,7 @@ export function ExecuteLive({
                 Or stop here if this client doesn't need older books cleaned up
               </span>
               <Link
-                href="/dashboard"
+                href="/today"
                 className="font-semibold text-amber-700 hover:text-amber-900"
               >
                 I'm done with this client

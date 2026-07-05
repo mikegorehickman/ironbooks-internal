@@ -372,10 +372,10 @@ export function BankRulesFromReclassClient({
         </div>
         <div>
           <Link
-            href="/dashboard"
+            href="/today"
             className="text-sm text-ink-slate underline hover:text-navy"
           >
-            Back to dashboard
+            Back to Today
           </Link>
         </div>
       </>

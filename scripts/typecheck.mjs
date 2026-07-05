@@ -48,8 +48,16 @@ function runTsc() {
 }
 
 // "path(12,34): error TS2339: msg"  ->  "path: error TS2339: msg"
+// Also sorts quoted-union listings ('"a" | "b"') inside the message: tsc
+// emits union members in nondeterministic order between runs, which made
+// identical pre-existing errors flap in and out of the exact-string baseline.
 function toSignature(line) {
-  return line.replace(/\(\d+,\d+\):/, ":").trim();
+  return line
+    .replace(/\(\d+,\d+\):/, ":")
+    .replace(/"[^"]+"(?:\s*\|\s*"[^"]+")+/g, (m) =>
+      (m.match(/"[^"]+"/g) || []).sort().join(" | ")
+    )
+    .trim();
 }
 
 function collectSignatures(output) {

@@ -217,7 +217,7 @@ export function FleetDashboardClient({
         <div className="space-y-4">
           <PanelA failures={snapshot.panel_a_job_failures} />
           <PanelB stuck={snapshot.panel_b_stuck_workflows} />
-          <PanelC integrations={snapshot.panel_c_integration_health} />
+          <PanelC integrations={snapshot.panel_c_integration_health} isSenior={isSenior} />
           <PanelD drift={snapshot.panel_d_pipeline_drift} />
           <PanelE workload={snapshot.panel_e_bookkeeper_workload} />
         </div>
@@ -263,6 +263,7 @@ function PanelShell({
   icon: Icon,
   children,
   emptyMessage,
+  action,
 }: {
   title: string;
   subtitle: string;
@@ -271,6 +272,7 @@ function PanelShell({
   icon: any;
   children: React.ReactNode;
   emptyMessage: string;
+  action?: React.ReactNode;
 }) {
   const palette = {
     red: { color: "text-red-700", bg: "bg-red-50", border: "border-red-200" },
@@ -304,6 +306,7 @@ function PanelShell({
               </div>
             </div>
           </div>
+          {action}
           <span
             className={`text-xs font-bold px-2 py-0.5 rounded-full bg-white border ${palette.border} ${palette.color}`}
           >
@@ -461,11 +464,21 @@ function PanelB({ stuck }: { stuck: StuckItem[] }) {
 }
 
 // ─── Panel C — Integration health ───
-function PanelC({ integrations }: { integrations: IntegrationIssue[] }) {
+function PanelC({ integrations, isSenior }: { integrations: IntegrationIssue[]; isSenior: boolean }) {
   return (
     <PanelShell
       title="C · Integration health"
       subtitle="QBO tokens, Stripe links, bank rules — fix before they fail"
+      action={
+        isSenior ? (
+          <Link
+            href="/fleet/qbo-health"
+            className="text-xs font-semibold text-teal hover:text-teal-dark"
+          >
+            QBO Connections →
+          </Link>
+        ) : undefined
+      }
       count={integrations.length}
       accent="purple"
       icon={Plug}
