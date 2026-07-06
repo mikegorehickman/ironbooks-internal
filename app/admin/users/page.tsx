@@ -98,6 +98,11 @@ export default async function AdminUsersPage() {
     portal_provisioned: provisioned.has(c.id),
     last_login_at: lastLogin.get(c.id) || null,
     created_at: c.created_at,
+    // Reminder tracking (migration 106) — undefined pre-migration, read via select("*").
+    reminder_last_sent_at: c.login_reminder_last_sent_at ?? null,
+    reminder_count: c.login_reminder_count ?? 0,
+    email_bounced: c.email_hard_bounced === true,
+    last_email_opened_at: c.last_email_opened_at ?? null,
   }));
 
   return (

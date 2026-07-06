@@ -15,6 +15,7 @@ import {
   Ban,
   RotateCcw,
   AlertTriangle,
+  MailX, MailOpen, MailQuestion,
 } from "lucide-react";
 
 export interface ClientRow {
@@ -32,12 +33,33 @@ export interface ClientRow {
   portal_provisioned: boolean;
   last_login_at: string | null;
   created_at: string | null;
+  /** Login-reminder tracking (migration 106). */
+  reminder_last_sent_at: string | null;
+  reminder_count: number;
+  email_bounced: boolean;
+  last_email_opened_at: string | null;
 }
 
 type FilterMode = "all" | "in_portal" | "not_in_portal" | "missing_email" | "never_logged_in";
 
-// checkbox · client · email · status · portal · last login · actions
-const GRID = "32px 1.6fr 1.55fr 0.85fr 0.95fr 0.85fr 1.6fr";
+// checkbox · client · email · status · portal · last login · reminded · actions
+const GRID = "32px 1.5fr 1.45fr 0.8fr 0.9fr 0.8fr 1.05fr 1.6fr";
+
+/** Reminder cell state for a never-logged-in client. */
+function reminderState(c: ClientRow): {
+  label: string;
+  days: number | null;
+  stale: boolean; // reminded 7+ days ago and STILL no login — chase again
+} {
+  if (!c.reminder_last_sent_at) return { label: "never reminded", days: null, stale: false };
+  const days = Math.floor((Date.now() - new Date(c.reminder_last_sent_at).getTime()) / 86_400_000);
+  const d = new Date(c.reminder_last_sent_at);
+  return {
+    label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    days,
+    stale: days >= 7,
+  };
+}
 
 interface BulkResult {
   invited: number;
@@ -88,6 +110,18 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
       if (!res.ok) throw new Error(b.error || `HTTP ${res.status}`);
       setReminderMsg(
         `Sent ${b.sent || 0} login reminder${(b.sent || 0) === 1 ? "" : "s"}${b.failed ? ` · ${b.failed} failed` : ""}.`
+      );
+      // Optimistic: stamp the rows so the red 7-day state resets immediately.
+      const now = new Date().toISOString();
+      setRows((prev) =>
+        prev.map((c) => {
+          const hit = isAll
+            ? c.client_email && !c.last_login_at && c.is_active && !c.email_bounced
+            : c.id === (target as ClientRow).id;
+          return hit
+            ? { ...c, reminder_last_sent_at: now, reminder_count: (c.reminder_count || 0) + 1 }
+            : c;
+        })
       );
     } catch (e: any) {
       setReminderMsg(`Reminder failed: ${e?.message || "unknown error"}`);
@@ -554,6 +588,7 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
           <div>Status</div>
           <div>Portal</div>
           <div>Last login</div>
+          <div>Reminded</div>
           <div></div>
         </div>
 
@@ -635,14 +670,75 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
                 {formatLastLogin(c.last_login_at)}
               </div>
 
+              {/* Login reminders — only meaningful before the first login */}
+              <div className="text-xs">
+                {c.last_login_at || !c.client_email ? (
+                  <span className="text-ink-light">—</span>
+                ) : (
+                  (() => {
+                    const r = reminderState(c);
+                    return (
+                      <div className="space-y-0.5">
+                        <div
+                          className={`inline-flex items-center gap-1 ${
+                            r.stale ? "text-red-700 font-bold" : "text-ink-slate"
+                          }`}
+                          title={
+                            r.stale
+                              ? `Reminded ${r.days} days ago and still hasn't logged in — chase again`
+                              : c.reminder_last_sent_at || "No reminder sent yet"
+                          }
+                        >
+                          {r.stale && <AlertTriangle size={11} className="text-red-600" />}
+                          {r.label}
+                          {r.days !== null && <span className={r.stale ? "" : "text-ink-light"}>· {r.days}d</span>}
+                          {c.reminder_count > 1 && (
+                            <span className="font-bold text-ink-slate bg-gray-100 rounded px-1">×{c.reminder_count}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {c.email_bounced && (
+                            <span
+                              className="inline-flex items-center gap-0.5 text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded px-1"
+                              title="Email is hard-bouncing — reminders are skipped; fix the address first"
+                            >
+                              <MailX size={10} /> bouncing
+                            </span>
+                          )}
+                          {c.last_email_opened_at ? (
+                            <span
+                              className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700"
+                              title={`Last opened one of our emails ${new Date(c.last_email_opened_at).toLocaleDateString()} — mail is reaching their inbox`}
+                            >
+                              <MailOpen size={10} /> opens
+                            </span>
+                          ) : c.reminder_count > 0 && !c.email_bounced ? (
+                            <span
+                              className="inline-flex items-center gap-0.5 text-[10px] text-ink-light"
+                              title="No email opens recorded — could be landing in spam (needs Resend open tracking enabled)"
+                            >
+                              <MailQuestion size={10} /> no opens
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+
               {/* Actions */}
               <div className="flex justify-end items-center gap-1.5">
                 {busy && <Loader2 size={13} className="animate-spin text-teal" />}
                 {c.client_email && !c.last_login_at && c.is_active && (
                   <button
                     onClick={() => sendReminder(c)}
-                    disabled={reminderBusy !== null}
-                    title="Email this client a login reminder (invite if they were never invited)"
+                    disabled={reminderBusy !== null || c.email_bounced}
+                    title={
+                      c.email_bounced
+                        ? "Email is hard-bouncing — fix the address before reminding"
+                        : "Email this client a login reminder (invite if they were never invited)"
+                    }
                     className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-900 border border-amber-300 hover:border-amber-500 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
                   >
                     {reminderBusy === c.id ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
