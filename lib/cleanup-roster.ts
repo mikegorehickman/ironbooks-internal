@@ -5,8 +5,9 @@
  *   1. bs        — in production but Balance Sheet still owed (bs_enabled=false)
  *   2. completed — done + in production (or cleanup_completed_at set)
  *   3. stripe    — a connect request was sent and we're still waiting to connect
- *   4. continue  — finished ≥1 cleanup step, still before P&L send / close
- *   5. new       — never finished a step yet
+ *   4. continue  — ANY cleanup job exists (finished, mid-flight, or failed),
+ *                  still before P&L send / close
+ *   5. new       — truly untouched: no job of any kind yet
  *
  * Continue rows resume at the exact outstanding step (COA → reclass → bank
  * rules → stripe), and say which step that is. Completed rows open the closed
@@ -146,6 +147,14 @@ export async function buildCleanupRoster(service: any): Promise<CleanupRoster> {
     const reclassJobs = reclassByClient.get(c.id) || [];
     const rulesJobs = rulesByClient.get(c.id) || [];
 
+    // "Started" must count in-flight and FAILED jobs too, not just complete
+    // ones — a client with a failed COA run has absolutely started cleanup,
+    // and showing them under "no cleanup started" hides the failure. Only a
+    // cancelled-and-never-retried job counts as untouched.
+    const startedStep =
+      finishedStep ||
+      [...coaJobs, ...reclassJobs, ...rulesJobs].some((j) => j.status !== "cancelled");
+
     const base = {
       id: c.id,
       client_name: c.client_name,
@@ -199,7 +208,7 @@ export async function buildCleanupRoster(service: any): Promise<CleanupRoster> {
     }
 
     // 4. Continue cleanup — resume the outstanding step.
-    if (finishedStep) {
+    if (startedStep) {
       const step = outstandingStep(c, coaJobs, reclassJobs, rulesJobs);
       out.continueCleanup.push({
         ...base,
