@@ -54,8 +54,10 @@ function runTsc() {
 function toSignature(line) {
   return line
     .replace(/\(\d+,\d+\):/, ":")
-    .replace(/"[^"]+"(?:\s*\|\s*"[^"]+")+/g, (m) =>
-      (m.match(/"[^"]+"/g) || []).sort().join(" | ")
+    .replace(/"[^"]+"(?:\s*\|\s*(?:"[^"]+"|\.\.\. \d+ more \.\.\.))+/g, (m) =>
+      /more \.\.\./.test(m)
+        ? "<truncated-union>"
+        : (m.match(/"[^"]+"/g) || []).sort().join(" | ")
     )
     .trim();
 }
