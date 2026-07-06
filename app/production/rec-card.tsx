@@ -97,6 +97,8 @@ interface Run {
 export interface ProdClient {
   id: string;
   client_name: string;
+  /** Contact first + last name — shown under the business name on cards. */
+  contact_name?: string | null;
   paused: boolean;
   bs_enabled?: boolean;
   assigned_bookkeeper_id?: string | null;

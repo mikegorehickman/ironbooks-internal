@@ -494,6 +494,9 @@ function BoardCard({
             )}
             <ClientBadges attention={attention} stage="production" max={2} />
           </div>
+          {client.contact_name && (
+            <div className="text-[11px] text-gray-400 truncate">{client.contact_name}</div>
+          )}
         </div>
         <EscalateMenu
           clientLinkId={client.id}

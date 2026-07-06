@@ -87,6 +87,8 @@ export async function GET(request: Request) {
         return {
           id: r.client_link_id,
           client_name: (c as any)?.client_name || "Unknown",
+          contact_name:
+            [(c as any)?.contact_first_name, (c as any)?.contact_last_name].filter(Boolean).join(" ") || null,
           paused: false,
           run: r,
         };
@@ -117,6 +119,7 @@ export async function GET(request: Request) {
     production: production.map((c) => ({
       id: c.id,
       client_name: c.client_name,
+      contact_name: [c.contact_first_name, c.contact_last_name].filter(Boolean).join(" ") || null,
       paused: !!c.daily_recon_paused,
       bs_enabled: c.bs_enabled !== false,
       assigned_bookkeeper_id: c.assigned_bookkeeper_id ?? null,
