@@ -34,7 +34,7 @@ export interface ClientRow {
   created_at: string | null;
 }
 
-type FilterMode = "all" | "in_portal" | "not_in_portal" | "missing_email";
+type FilterMode = "all" | "in_portal" | "not_in_portal" | "missing_email" | "never_logged_in";
 
 // checkbox · client · email · status · portal · last login · actions
 const GRID = "32px 1.6fr 1.55fr 0.85fr 0.95fr 0.85fr 1.6fr";
@@ -60,6 +60,41 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const [reminderBusy, setReminderBusy] = useState<string | null>(null); // "all" or a client id
+  const [reminderMsg, setReminderMsg] = useState("");
+
+  // ── Login reminders (never-logged-in clients) ──
+  // Backed by /api/admin/resend-logins: idempotent provisionPortalUser under
+  // the hood (resend for existing portal users, first invite otherwise), with
+  // the same exclusions as the bulk audit (test accts, @ironbooks, bounced).
+  async function sendReminder(target: "all" | ClientRow) {
+    const isAll = target === "all";
+    const n = stats.neverLoggedIn;
+    const label = isAll
+      ? `Send a login reminder email to ALL ${n} never-logged-in client${n === 1 ? "" : "s"}?`
+      : `Send ${(target as ClientRow).client_name} a login reminder email?`;
+    if (!confirm(label)) return;
+    setReminderBusy(isAll ? "all" : (target as ClientRow).id);
+    setReminderMsg("");
+    try {
+      const res = await fetch("/api/admin/resend-logins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          isAll ? { confirm: true, include_no_account: true } : { confirm: true, client_link_id: (target as ClientRow).id }
+        ),
+      });
+      const b = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(b.error || `HTTP ${res.status}`);
+      setReminderMsg(
+        `Sent ${b.sent || 0} login reminder${(b.sent || 0) === 1 ? "" : "s"}${b.failed ? ` · ${b.failed} failed` : ""}.`
+      );
+    } catch (e: any) {
+      setReminderMsg(`Reminder failed: ${e?.message || "unknown error"}`);
+    } finally {
+      setReminderBusy(null);
+    }
+  }
 
   // ── Portal-readiness counts (the audit, surfaced live) ──
   const stats = useMemo(() => {
@@ -70,6 +105,7 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
       notInvited: active.filter((c) => !c.portal_provisioned).length,
       deactivated: active.filter((c) => c.portal_provisioned && !c.has_portal).length,
       missingEmail: active.filter((c) => !c.client_email).length,
+      neverLoggedIn: active.filter((c) => c.client_email && !c.last_login_at).length,
     };
   }, [rows]);
 
@@ -79,6 +115,7 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
       if (filter === "in_portal" && !c.has_portal) return false;
       if (filter === "not_in_portal" && c.has_portal) return false;
       if (filter === "missing_email" && c.client_email) return false;
+      if (filter === "never_logged_in" && (!c.client_email || c.last_login_at || !c.is_active)) return false;
       if (!q) return true;
       return (
         c.client_name?.toLowerCase().includes(q) ||
@@ -344,6 +381,7 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
     { id: "in_portal", label: "In portal", count: stats.inPortal },
     { id: "not_in_portal", label: "Not in portal", count: stats.total - stats.inPortal },
     { id: "missing_email", label: "Missing email", count: stats.missingEmail },
+    { id: "never_logged_in", label: "Never logged in", count: stats.neverLoggedIn },
   ];
 
   return (
@@ -395,6 +433,32 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
           Invite one…
         </Link>
       </div>
+
+      {/* ── Never-logged-in reminder bar ── */}
+      {filter === "never_logged_in" && stats.neverLoggedIn > 0 && (
+        <div className="mb-3 flex items-center gap-3 flex-wrap bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+          <span className="text-sm text-amber-900">
+            <strong>{stats.neverLoggedIn}</strong> client{stats.neverLoggedIn === 1 ? "" : "s"} with an
+            email on file {stats.neverLoggedIn === 1 ? "has" : "have"} never signed in to the portal.
+          </span>
+          <div className="flex-1" />
+          <button
+            onClick={() => sendReminder("all")}
+            disabled={reminderBusy !== null}
+            className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-3.5 py-1.5 rounded-lg disabled:opacity-50"
+          >
+            {reminderBusy === "all" ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+            Send login reminder to all never-logged-in clients
+          </button>
+        </div>
+      )}
+      {reminderMsg && (
+        <div className="mb-3 bg-teal-lighter border border-teal/30 rounded-lg px-4 py-2.5 text-sm text-navy flex items-center gap-2">
+          <Check size={15} className="text-teal flex-shrink-0" />
+          <span className="flex-1">{reminderMsg}</span>
+          <button onClick={() => setReminderMsg("")} className="text-ink-light hover:text-navy"><X size={14} /></button>
+        </div>
+      )}
 
       {/* ── Bulk action bar ── */}
       {selected.size > 0 && (
@@ -574,6 +638,17 @@ export function ClientsManagement({ clients }: { clients: ClientRow[] }) {
               {/* Actions */}
               <div className="flex justify-end items-center gap-1.5">
                 {busy && <Loader2 size={13} className="animate-spin text-teal" />}
+                {c.client_email && !c.last_login_at && c.is_active && (
+                  <button
+                    onClick={() => sendReminder(c)}
+                    disabled={reminderBusy !== null}
+                    title="Email this client a login reminder (invite if they were never invited)"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-900 border border-amber-300 hover:border-amber-500 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+                  >
+                    {reminderBusy === c.id ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
+                    Remind
+                  </button>
+                )}
                 {c.has_portal ? (
                   <>
                     <button
