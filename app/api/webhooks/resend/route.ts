@@ -6,15 +6,18 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/webhooks/resend — Resend event webhook.
  *
- * Two jobs:
+ * Three jobs:
  *  1. Update the client_email_log row's delivery status (matched on the Resend
  *     message id) for email.delivered / .bounced / .complained.
  *  2. On a hard bounce or spam complaint, suppress that address so future bulk
  *     sends skip it.
+ *  3. On email.opened, stamp last_email_opened_at — the inbox-vs-spam signal
+ *     for the Admin → Users never-logged-in view.
  * Configure the endpoint in the Resend dashboard for email.delivered,
- * email.bounced, email.complained. (Note: this endpoint does not yet verify the
- * Svix signature — set RESEND_WEBHOOK_SECRET + add verification before relying
- * on it for anything security-sensitive.)
+ * email.bounced, email.complained, email.opened, and enable open tracking on
+ * the sending domain. (Note: this endpoint does not yet verify the Svix
+ * signature — set RESEND_WEBHOOK_SECRET + add verification before relying on
+ * it for anything security-sensitive.)
  */
 export async function POST(request: Request) {
   const evt = await request.json().catch(() => ({} as any));
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
     }
   }
 
-  if (!type || !/bounced|complained/.test(type)) {
+  if (!type || !/bounced|complained|opened/.test(type)) {
     return NextResponse.json({ ok: true, status_logged: logStatus || null, ignored: type || "unknown" });
   }
   // Resend payloads put the recipient(s) under data.to (array or string).
@@ -55,6 +58,28 @@ export async function POST(request: Request) {
   if (!emails.length) return NextResponse.json({ ok: true, no_recipients: true });
 
   const service = createServiceSupabase();
+
+  // Opens: stamp the signal and stop — no suppression logic applies.
+  if (/opened/.test(type)) {
+    const stamp = { last_email_opened_at: new Date().toISOString() };
+    try {
+      await (service as any).from("client_links").update(stamp).in("client_email", emails);
+      const { data: us } = await service.from("users").select("id").in("email", emails);
+      const userIds = ((us as any[]) || []).map((u) => u.id);
+      if (userIds.length) {
+        const { data: cu } = await (service as any)
+          .from("client_users")
+          .select("client_link_id")
+          .in("user_id", userIds);
+        const linkIds = [...new Set(((cu as any[]) || []).map((m) => m.client_link_id))];
+        if (linkIds.length) await (service as any).from("client_links").update(stamp).in("id", linkIds);
+      }
+    } catch {
+      /* pre-migration-106 env — ignore */
+    }
+    return NextResponse.json({ ok: true, opened: emails.length });
+  }
+
   const reason = type === "email.complained" ? "spam complaint" : "hard bounce";
 
   // Match by profile contact email directly...

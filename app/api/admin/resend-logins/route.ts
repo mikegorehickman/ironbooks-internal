@@ -112,6 +112,24 @@ export async function POST(request: Request) {
       });
       if (r.ok) results.sent++; else results.failed++;
       results.details.push({ company: t.company, email: t.email, ok: r.ok, resend: (r as any).resend, error: (r as any).error });
+      if (r.ok) {
+        // Reminder tracking (migration 106) — best-effort so pre-migration
+        // environments still send fine.
+        try {
+          const { data: cur } = await (service as any)
+            .from("client_links")
+            .select("login_reminder_count")
+            .eq("id", t.clientLinkId)
+            .single();
+          await (service as any)
+            .from("client_links")
+            .update({
+              login_reminder_last_sent_at: new Date().toISOString(),
+              login_reminder_count: ((cur as any)?.login_reminder_count || 0) + 1,
+            })
+            .eq("id", t.clientLinkId);
+        } catch {}
+      }
     } catch (e: any) {
       results.failed++;
       results.details.push({ company: t.company, email: t.email, ok: false, error: e?.message || "threw" });
