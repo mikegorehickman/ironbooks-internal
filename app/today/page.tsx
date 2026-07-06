@@ -8,6 +8,8 @@ import { ClientFlagsWidget } from "./client-flags-widget";
 import { ReclassRequestsWidget, type PendingReclassRequest } from "./reclass-requests-widget";
 import { ClientInboxWidget, type InboundCommRow } from "./client-inbox-widget";
 import { CleanupDeadlinesWidget, type CleanupDeadlineRow } from "./cleanup-deadlines-widget";
+import { ClientAnswersWidget } from "./client-answers-widget";
+import { getClientAnswers, type ClientAnswerRow } from "@/lib/client-answers";
 import { QboHealthAlert } from "@/components/QboHealthAlert";
 import { MonthlyBsCheckButton } from "./monthly-bs-check";
 import { PulseBar } from "./pulse-bar";
@@ -68,6 +70,16 @@ export async function TodayContent({
   }
   const { data: clients } = await clientsQuery.order("client_name");
   const eligibleClients = (clients || []) as any[];
+
+  // ─── Client answers to ask-client transaction questions ───
+  // The client picked an account in their portal; the bookkeeper confirms
+  // (default) or applies an alternative. Scoped like every other widget.
+  let clientAnswers: ClientAnswerRow[] = [];
+  try {
+    clientAnswers = await getClientAnswers(service, { scopeUserId });
+  } catch {
+    clientAnswers = [];
+  }
 
   // Manager approvals, statement approvals, and escalations all moved to
   // Production → Approvals (/approvals) — no senior queues are fetched here.
@@ -296,6 +308,7 @@ export async function TodayContent({
     eligibleClients.length === 0 &&
     pendingFlags.length === 0 &&
     pendingReclassRequests.length === 0 &&
+    clientAnswers.length === 0 &&
     inboundComms.length === 0
   ) {
     return (
@@ -464,6 +477,7 @@ export async function TodayContent({
   const workCount =
     pendingFlags.length +
     pendingReclassRequests.length +
+    clientAnswers.length +
     inboundComms.length +
     (scopeUserId ? cleanupDeadlines.length : 0);
   const viewAsName = viewAs
@@ -523,6 +537,7 @@ export async function TodayContent({
               {pendingReclassRequests.length > 0 && (
                 <ReclassRequestsWidget requests={pendingReclassRequests} />
               )}
+              {clientAnswers.length > 0 && <ClientAnswersWidget rows={clientAnswers} />}
               {inboundComms.length > 0 && <ClientInboxWidget rows={inboundComms} />}
               {scopeUserId && cleanupDeadlines.length > 0 && (
                 <CleanupDeadlinesWidget rows={cleanupDeadlines} showBookkeeper={false} />
