@@ -1,26 +1,18 @@
 /**
  * Send a Stripe connection-request email to a client — the shared engine behind
-<<<<<<< HEAD
- * the Stripe Recon form's "Send connection request" button, the reminder cron,
- * and the Today-task "Resend connect link" button.
-=======
  * the StripeConnectModal's "Send email" button (and, once v2 lands, the
  * reminder cron + Today-task "Resend connect link" button).
->>>>>>> origin/main
  *
  * Unlike the legacy generate-link route (which only mints a token for the
  * bookkeeper to copy/paste), this mints a fresh token AND emails the client
  * directly via Resend, logs the send to client_email_log, and stamps the
  * automated-reminder clock on client_links.
-<<<<<<< HEAD
-=======
  *
  * Schema-tolerant on purpose: client_email_log and the stripe_connect_*
  * reminder-clock columns arrive with migration 93 — until it's applied those
  * writes fail silently (supabase-js returns the error, never throws) and the
  * send itself still goes out. client_links is read with select("*") so a
  * not-yet-migrated column can never 400 the whole request.
->>>>>>> origin/main
  */
 
 import { generateConnectToken } from "@/lib/stripe-oauth";
@@ -62,13 +54,7 @@ export async function sendStripeConnectionRequest(
 
   const { data: cl } = await service
     .from("client_links")
-<<<<<<< HEAD
-    .select(
-      "id, client_name, stripe_connection_status, is_active, client_email, email_hard_bounced, stripe_connect_requested_at, stripe_connect_reminder_count"
-    )
-=======
     .select("*")
->>>>>>> origin/main
     .eq("id", clientLinkId)
     .single();
 

@@ -1,14 +1,3 @@
-<<<<<<< HEAD
--- Migration 93: client_email_log — per-client outbound email audit trail
---
--- Backs the "Email History" tab on the client profile and the delivery-status
--- column. One row per recipient per send. Internal/bookkeeper-only (RLS allows
--- authenticated read; writes are service-role from the send routes + the Resend
--- webhook). Idempotent. Apply via the Supabase SQL editor.
---
--- Status lifecycle: 'sent' (accepted by Resend, message id stored) ->
--- 'delivered' | 'bounced' | 'complained' (set by the Resend webhook), or
-=======
 -- Migration 93: client_email_log + Stripe-connect reminder clock
 --
 -- Backs the direct-send Stripe connect email (StripeConnectModal "Send Email
@@ -22,7 +11,6 @@
 --
 -- Status lifecycle: 'sent' (accepted by Resend, message id stored) ->
 -- 'delivered' | 'bounced' | 'complained' (set by the Resend webhook, v2) or
->>>>>>> origin/main
 -- 'failed' (Resend rejected the send / no provider id).
 
 CREATE TABLE IF NOT EXISTS client_email_log (
@@ -45,14 +33,6 @@ CREATE INDEX IF NOT EXISTS idx_client_email_log_client_created
 CREATE INDEX IF NOT EXISTS idx_client_email_log_provider_msg
   ON client_email_log (provider_message_id);
 
-<<<<<<< HEAD
-ALTER TABLE client_email_log ENABLE ROW LEVEL SECURITY;
-
-DO $$ BEGIN
-  CREATE POLICY "client_email_log_read" ON client_email_log
-    FOR SELECT TO authenticated USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-=======
 -- Service-role only: portal clients are `authenticated` too, so no broad read
 -- policy — the app reads/writes this through service-role API routes.
 ALTER TABLE client_email_log ENABLE ROW LEVEL SECURITY;
@@ -62,7 +42,6 @@ ALTER TABLE client_email_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE client_links ADD COLUMN IF NOT EXISTS stripe_connect_requested_at timestamptz;
 ALTER TABLE client_links ADD COLUMN IF NOT EXISTS stripe_connect_last_reminder_at timestamptz;
 ALTER TABLE client_links ADD COLUMN IF NOT EXISTS stripe_connect_reminder_count integer NOT NULL DEFAULT 0;
->>>>>>> origin/main
 
 -- Verify
 SELECT column_name, data_type
