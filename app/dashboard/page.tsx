@@ -15,6 +15,7 @@ import {
   Clock,
 } from "lucide-react";
 import { DashboardCharts, type WeeklyPoint, type BookkeeperPoint } from "./dashboard-charts";
+import { FreshdeskBanner } from "./freshdesk-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -486,6 +487,9 @@ export default async function DashboardPage() {
       />
 
       <div className="px-8 py-6 space-y-6">
+
+        {/* ─── Unread Freshdesk tickets (renders only when count > 0) ─── */}
+        <FreshdeskBanner />
 
         {/* ─── Stats strip ─── */}
         <div className="grid grid-cols-4 gap-4">
