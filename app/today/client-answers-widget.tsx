@@ -17,7 +17,49 @@ const money = (n: number) =>
 
 export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[] }) {
   const [rows, setRows] = useState(initial);
-  if (rows.length === 0) return null;
+  const [bulk, setBulk] = useState<{ client: string; done: number; total: number } | null>(null);
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+
+  // Approve every answered row for one client, sequentially (QBO rate
+  // limits + per-row live guards). Note-only rows are skipped — they need
+  // a human account pick.
+  async function approveAll(client: string, list: ClientAnswerRow[]) {
+    const targets = list.filter((r) => r.answer_account);
+    if (targets.length === 0) return;
+    if (
+      !confirm(
+        `Approve all ${targets.length} client answer${targets.length === 1 ? "" : "s"} for ${client}?\n\n` +
+          `Each one applies the client's pick straight to QuickBooks.` +
+          (targets.length < list.length
+            ? `\n(${list.length - targets.length} note-only answer${list.length - targets.length === 1 ? "" : "s"} will stay — they need you to pick the account.)`
+            : "")
+      )
+    )
+      return;
+    setBulk({ client, done: 0, total: targets.length });
+    setBulkErrors([]);
+    const errs: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const r = targets[i];
+      try {
+        const res = await fetch(`/api/today/client-answers/${r.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "approve" }),
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+        setRows((p) => p.filter((x) => x.id !== r.id));
+      } catch (e: any) {
+        errs.push(`${r.vendor || r.description || r.id}: ${e?.message || "failed"}`);
+      }
+      setBulk({ client, done: i + 1, total: targets.length });
+    }
+    setBulkErrors(errs);
+    setBulk(null);
+  }
+
+  if (rows.length === 0 && bulkErrors.length === 0) return null;
 
   const byClient = new Map<string, ClientAnswerRow[]>();
   for (const r of rows) {
@@ -38,9 +80,34 @@ export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[]
         </span>
       </div>
       <div className="divide-y divide-gray-50">
+        {bulkErrors.length > 0 && (
+          <div className="px-5 py-2 text-xs text-red-800 bg-red-50 border-b border-red-100">
+            {bulkErrors.length} failed (still listed below): {bulkErrors.slice(0, 3).join(" · ")}
+            {bulkErrors.length > 3 ? "…" : ""}
+          </div>
+        )}
         {[...byClient.entries()].map(([client, list]) => (
           <div key={client}>
-            <div className="px-5 pt-3 pb-1 text-xs font-bold text-ink-slate">{client}</div>
+            <div className="px-5 pt-3 pb-1 flex items-center gap-2">
+              <span className="text-xs font-bold text-ink-slate">{client}</span>
+              {list.filter((r) => r.answer_account).length > 1 && (
+                <button
+                  onClick={() => approveAll(client, list)}
+                  disabled={!!bulk}
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-teal border border-teal/30 hover:bg-teal/5 rounded-md px-2 py-0.5 disabled:opacity-50"
+                >
+                  {bulk?.client === client ? (
+                    <>
+                      <Loader2 size={10} className="animate-spin" /> {bulk.done}/{bulk.total}…
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={10} /> Approve all {list.filter((r) => r.answer_account).length}
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
             {list.map((r) => (
               <AnswerRow key={r.id} row={r} onDone={(id) => setRows((p) => p.filter((x) => x.id !== id))} />
             ))}

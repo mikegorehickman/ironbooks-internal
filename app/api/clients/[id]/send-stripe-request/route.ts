@@ -24,6 +24,17 @@ export async function POST(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const service = createServiceSupabase();
+  // Internal-only: this emails the client directly, so portal users can't hit it.
+  const { data: actor } = await service
+    .from("users")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  if (!["admin", "lead", "bookkeeper"].includes((actor as any)?.role || "")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   let body: any = {};
   try {
     body = await request.json();
@@ -31,7 +42,6 @@ export async function POST(
     /* empty body is fine */
   }
 
-  const service = createServiceSupabase();
   const result = await sendStripeConnectionRequest(service, {
     clientLinkId,
     createdByUserId: user.id,

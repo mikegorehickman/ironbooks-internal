@@ -181,10 +181,25 @@ export async function runDailyRecon(
       throw new Error(`Client ${clientLinkId} is paused: ${c.daily_recon_paused_reason || "(no reason)"}.`);
     }
 
-    // 2. Compute delta window
-    const fetchedFrom = c.last_synced_at
+    // 2. Compute delta window.
+    //
+    // CRITICAL: the QBO fetch filters on TxnDate, but bank feeds deliver
+    // transactions DATED 1-3 days in the past (feed lag) — sometimes longer
+    // over weekends/holidays. A pure watermark window therefore misses
+    // almost every bank-fed transaction: by the time it lands in QBO its
+    // date is already behind last_synced_at. (This is exactly how the
+    // engine went quiet after the June 29 catch-up run: 173 of 174 runs
+    // found zero transactions while the feeds kept delivering.)
+    //
+    // Fix: always look back at least LATE_ARRIVAL_FLOOR_DAYS, regardless of
+    // the watermark. Overlapping windows are safe and cheap — the
+    // processed_qbo_lines uniqueness below makes re-scanned lines no-ops.
+    const LATE_ARRIVAL_FLOOR_DAYS = 10;
+    const watermark = c.last_synced_at
       ? new Date(c.last_synced_at)
       : new Date(Date.now() - lookbackDays * 86400000);
+    const lateFloor = new Date(Date.now() - LATE_ARRIVAL_FLOOR_DAYS * 86400000);
+    const fetchedFrom = watermark < lateFloor ? watermark : lateFloor;
     const fetchedTo = new Date();
     result.fetched_from = fetchedFrom.toISOString();
     result.fetched_to = fetchedTo.toISOString();
