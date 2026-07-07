@@ -9,6 +9,7 @@ import { ReclassRequestsWidget, type PendingReclassRequest } from "./reclass-req
 import { ClientInboxWidget, type InboundCommRow } from "./client-inbox-widget";
 import { CleanupDeadlinesWidget, type CleanupDeadlineRow } from "./cleanup-deadlines-widget";
 import { ClientAnswersWidget } from "./client-answers-widget";
+import { DuplicatesPanel } from "@/components/DuplicatesPanel";
 import { getClientAnswers, type ClientAnswerRow } from "@/lib/client-answers";
 import { QboHealthAlert } from "@/components/QboHealthAlert";
 import { MonthlyBsCheckButton } from "./monthly-bs-check";
@@ -543,6 +544,9 @@ export default async function TodayPage({
                 <ReclassRequestsWidget requests={pendingReclassRequests} />
               )}
               {clientAnswers.length > 0 && <ClientAnswersWidget rows={clientAnswers} />}
+              {/* Duplicate findings for this bookkeeper's production clients
+                  (weekly sweep + close-time scans). Hides itself when empty. */}
+              <DuplicatesPanel clientIds={scopeUserId ? eligibleClients.map((c: any) => c.id) : null} />
               {inboundComms.length > 0 && <ClientInboxWidget rows={inboundComms} />}
               {scopeUserId && cleanupDeadlines.length > 0 && (
                 <CleanupDeadlinesWidget rows={cleanupDeadlines} showBookkeeper={false} />

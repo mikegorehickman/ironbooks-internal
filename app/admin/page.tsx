@@ -3,6 +3,7 @@ import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import Link from "next/link";
 import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone, Repeat, Video } from "lucide-react";
+import { DupSweepButton } from "./dup-sweep-button";
 
 export default async function AdminOverviewPage() {
   const supabase = await createServerSupabase();
@@ -170,6 +171,7 @@ export default async function AdminOverviewPage() {
               </Link>
             );
           })}
+          <DupSweepButton />
         </div>
 
         <div className="grid grid-cols-2 gap-6">

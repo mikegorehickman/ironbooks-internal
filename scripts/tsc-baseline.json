@@ -169,6 +169,7 @@
   "lib/grain.ts: error TS2323: Cannot redeclare exported variable 'getRecordingDetail'.",
   "lib/grain.ts: error TS2323: Cannot redeclare exported variable 'listAllRecordings'.",
   "lib/grain.ts: error TS2393: Duplicate function implementation.",
+  "lib/stripe-invite-detector.ts: error TS2769: No overload matches this call.",
   "lib/supabase.ts: error TS7006: Parameter 'cookiesToSet' implicitly has an 'any' type.",
   "lib/supabase.ts: error TS7031: Binding element 'name' implicitly has an 'any' type.",
   "lib/supabase.ts: error TS7031: Binding element 'options' implicitly has an 'any' type.",
