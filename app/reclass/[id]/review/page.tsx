@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/AppShell";
+import { DuplicatesPanel } from "@/components/DuplicatesPanel";
 import { TopBar } from "@/components/TopBar";
 import { WorkflowStepper } from "@/components/WorkflowStepper";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
@@ -214,6 +215,13 @@ export default async function ReclassReviewPage({
             </ul>
           </div>
         )}
+        {/* Duplicates stage — dedupe the books BEFORE categorizing them.
+            Same engine as the production sweep; scoped to this client. */}
+        <DuplicatesPanel
+          clientLinkId={(job as any).client_link_id}
+          showScan
+          title="Duplicates — resolve before reclass"
+        />
         <ReclassReview
           job={job}
           rows={reclassifications || []}
