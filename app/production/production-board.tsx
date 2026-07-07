@@ -61,6 +61,17 @@ export function ProductionBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Picking "✓ Completed" opens the close card, which renders BELOW the
+  // columns — scroll to it and pulse it, or it reads as "nothing happened".
+  const [closePulse, setClosePulse] = useState(false);
+  function openCloseCard(id: string) {
+    setSelectedId(id);
+    setClosePulse(true);
+    setTimeout(() => {
+      document.getElementById("close-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    setTimeout(() => setClosePulse(false), 2600);
+  }
   // Attention states (escalated / billing / BS owed / disconnected / stuck).
   const [attention, setAttention] = useState<Record<string, AttentionState>>({});
   const [flaggedOnly, setFlaggedOnly] = useState(false);
@@ -272,6 +283,7 @@ export function ProductionBoard() {
                         attention={attention[c.id]}
                         selected={selectedId === c.id}
                         onSelect={() => setSelectedId(selectedId === c.id ? null : c.id)}
+                        onCloseIntent={() => openCloseCard(c.id)}
                         onChanged={() => load(period)}
                       />
                     ))}
@@ -283,7 +295,12 @@ export function ProductionBoard() {
 
           {/* ── SELECTED CLIENT: full monthly close flow ── */}
           {selected && (
-            <div className="space-y-2">
+            <div
+              id="close-card"
+              className={`space-y-2 scroll-mt-4 rounded-2xl transition-shadow duration-700 ${
+                closePulse ? "ring-4 ring-teal/50 shadow-lg" : ""
+              }`}
+            >
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-navy">
                   {selected.client_name} — {periodLabel(period)}
@@ -341,6 +358,7 @@ function BoardCard({
   attention,
   selected,
   onSelect,
+  onCloseIntent,
   onChanged,
 }: {
   client: ProdClient;
@@ -350,6 +368,8 @@ function BoardCard({
   attention?: AttentionState;
   selected: boolean;
   onSelect: () => void;
+  /** "✓ Completed" picked — open the close card and scroll to it. */
+  onCloseIntent: () => void;
   onChanged: () => void;
 }) {
   const [togglingBs, setTogglingBs] = useState(false);
@@ -572,8 +592,9 @@ function BoardCard({
             if (v === currentStatus) return;
             if (v === "completed") {
               // The close lives in the rec-card flow (checks -> review ->
-              // attest -> send). Opening the card IS the action here.
-              if (!selected) onSelect();
+              // attest -> send). Opening the card IS the action here — and
+              // it renders below the columns, so scroll the user to it.
+              onCloseIntent();
               return;
             } else if (isComplete) {
               // Leaving the Completed column = reopen, then land the column.
