@@ -2,7 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone, Repeat, Video } from "lucide-react";
+import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone, Repeat, Video, Landmark } from "lucide-react";
 import { DupSweepButton } from "./dup-sweep-button";
 
 export default async function AdminOverviewPage() {
@@ -149,6 +149,12 @@ export default async function AdminOverviewPage() {
               icon: RefreshCw,
               title: "Re-sync portal logins",
               desc: "Repoint client login emails that drifted from their contact email",
+            },
+            {
+              href: "/admin/revenue-integrity",
+              icon: Landmark,
+              title: "Revenue integrity",
+              desc: "Deposits posted straight into revenue — the invoice+deposit double-count · fleet report",
             },
           ].map((t) => {
             const Icon = t.icon;

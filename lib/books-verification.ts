@@ -27,6 +27,7 @@ import { scanUfAudit } from "./uf-audit";
 import { fetchPLDetailAll } from "./qbo-reports";
 import { fetchProfitAndLossByMonth, type PLByMonthBlock } from "./qbo-pl-by-month";
 import { findDuplicates } from "./qbo-dup-scan";
+import { analyzeDepositsToIncome } from "./revenue-integrity";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -127,14 +128,14 @@ const PILLARS_FULL: { key: PillarKey; weight: number; alloc: Record<string, numb
   { key: "reconciliation", weight: 0.35, alloc: { bank_tieout: 50, cc_tieout: 30, undeposited_funds: 20 } },
   { key: "categorization", weight: 0.25, alloc: { uncategorized: 50, daily_queue_clear: 30, suspense_ama: 20 } },
   { key: "bs_integrity", weight: 0.2, alloc: { negative_banks: 30, negative_liabilities: 25, obe: 20, ar_ap_negative: 25 } },
-  { key: "anomalies", weight: 0.15, alloc: { duplicates: 40, mom_variance: 25, large_round_jes: 20, overdue_ar: 15 } },
+  { key: "anomalies", weight: 0.15, alloc: { duplicates: 30, deposits_in_revenue: 20, mom_variance: 20, large_round_jes: 15, overdue_ar: 15 } },
   { key: "documentation", weight: 0.05, alloc: { statement_coverage: 100 } },
 ];
 
 /** P&L-only clients: no BS/reconciliation/documentation pillars. */
 const PILLARS_PL_ONLY: { key: PillarKey; weight: number; alloc: Record<string, number> }[] = [
   { key: "categorization", weight: 0.6, alloc: { uncategorized: 50, daily_queue_clear: 30, suspense_ama: 20 } },
-  { key: "anomalies", weight: 0.4, alloc: { duplicates: 40, mom_variance: 25, large_round_jes: 20, overdue_ar: 15 } },
+  { key: "anomalies", weight: 0.4, alloc: { duplicates: 30, deposits_in_revenue: 20, mom_variance: 20, large_round_jes: 15, overdue_ar: 15 } },
 ];
 
 const fmt = (n: number) =>
@@ -653,6 +654,50 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
             dismissable: true,
           }))
         ),
+      });
+    }
+
+    // Deposits posted straight into revenue accounts — the invoice+deposit
+    // double-count (Clean Your Carpets pattern). Reuses the already-fetched
+    // P&L detail + COA; pure analysis, no extra QBO call.
+    if (plDetail === null) {
+      checks.push({
+        key: "deposits_in_revenue",
+        label: "Deposits booked as revenue",
+        pillar: "anomalies",
+        status: "skipped",
+        detail: "P&L detail unavailable",
+        skipReason: "QBO P&L detail report failed — re-run verification.",
+        findings: [],
+      });
+    } else {
+      const rev = analyzeDepositsToIncome(
+        plDetail,
+        accounts.filter(active).map((a: any) => ({ name: String(a.Name || ""), accountType: String(a.AccountType || "") }))
+      );
+      checks.push({
+        key: "deposits_in_revenue",
+        label: "Deposits booked as revenue",
+        pillar: "anomalies",
+        status: "pass",
+        detail:
+          rev.depositCount === 0
+            ? "No deposits posted to income accounts"
+            : `${rev.depositCount} deposit${rev.depositCount === 1 ? "" : "s"} totaling ${fmt(rev.depositTotal)} posted to income — ${rev.flagged ? "likely double-counted (book is invoice-driven)" : "review whether these are true cash sales"}`,
+        findings: cap(
+          rev.depositRows.map((r) => ({
+            fingerprint: fingerprintFor("depinc", r.txn_id),
+            // Only a flagged (invoice-driven) book fails; a cash business
+            // recording sales via deposits is legitimate and merely warns.
+            severity: (rev.flagged && Math.abs(r.amount) >= 1000 ? "fail" : "warn") as "warn" | "fail",
+            message: `${r.date}: ${fmt(r.amount)} deposit into "${r.account}"${r.name ? ` (${r.name})` : " — no customer on the line"}. If this job was invoiced, the deposit double-counts it.`,
+            amount: Math.abs(r.amount),
+            account_name: r.account,
+            qbo_txn_ids: [r.txn_id],
+            dismissable: true, // true cash sales exist — dismissal is per-deposit
+          }))
+        ),
+        meta: { summary: rev.reason, invoiceCount: rev.invoiceCount, invoiceTotal: rev.invoiceTotal, depositTotal: rev.depositTotal, depositNoNameTotal: rev.depositNoNameTotal },
       });
     }
 

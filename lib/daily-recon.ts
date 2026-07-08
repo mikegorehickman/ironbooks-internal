@@ -471,6 +471,24 @@ export async function runDailyRecon(
           message: `Transaction dated ${String(line.transaction_date).slice(0, 10)} is on/before the QBO book-close date (${bookCloseDate}) — queued instead of auto-applied so a filed period is never silently changed.`,
         });
       }
+      // Deposit→income guard: a bank Deposit coded to an ordinary Income
+      // account double-counts revenue on invoice-driven books — the invoice
+      // already recognized the sale; the deposit is just the cash landing
+      // (Clean Your Carpets was overstated ~$35K this way). Never auto-apply:
+      // a human decides whether it's a true cash sale or a payout that
+      // belongs matched against invoices. Other Income (interest, asset
+      // sales) legitimately receives deposits and is not flagged.
+      if (/^deposit$/i.test(String(line.transaction_type || "").trim())) {
+        const suggested = d.target_account_id ? accountById.get(d.target_account_id) : undefined;
+        const current = line.current_account_id ? accountById.get(String(line.current_account_id)) : undefined;
+        const hit = [suggested, current].find((a) => a?.account_type === "Income");
+        if (hit) {
+          lineAnomalies.push({
+            code: "deposit_to_income",
+            message: `Deposit ${suggested?.account_type === "Income" ? "suggested into" : "sitting in"} revenue account "${hit.account_name}" — if this client invoices their jobs, the invoice already recorded this income and the deposit should be matched to it, not booked as new revenue. Confirm it's a true cash sale before approving.`,
+          });
+        }
+      }
       const isHardBlocked = isHardBlock(line);
       const targetValid = !!(d.target_account_id && accountById.has(d.target_account_id));
 
