@@ -100,9 +100,43 @@ export default async function ClientsPage() {
 
   if (stripeInviteQ) {
     const { data: sugg } = await stripeInviteQ;
-    stripeInviteSuggestions = ((sugg as any[]) || [])
-      .filter((r) => (r.stripe_invite_deposit_count || 0) > 0)
-      .map((r) => ({
+    const detected = ((sugg as any[]) || []).filter((r) => (r.stripe_invite_deposit_count || 0) > 0);
+    const ids = detected.map((r) => r.id);
+
+    // Enrich with send state: the latest stripe_connect email per client (so we
+    // can show "requested {date}" + delivery status) and the latest connect
+    // token's expiry (so we can flag an expired link that needs a resend). Both
+    // reads are best-effort — if client_email_log (migration 93) isn't there the
+    // panel just shows everyone as not-yet-invited.
+    const logByClient = new Map<string, any>();
+    const tokenByClient = new Map<string, any>();
+    if (ids.length) {
+      try {
+        const [logsRes, toksRes] = await Promise.all([
+          (service as any)
+            .from("client_email_log")
+            .select("client_link_id, to_address, status, created_at")
+            .eq("email_type", "stripe_connect")
+            .in("client_link_id", ids)
+            .order("created_at", { ascending: false }),
+          (service as any)
+            .from("stripe_connect_tokens")
+            .select("client_link_id, expires_at, used_at, created_at")
+            .in("client_link_id", ids)
+            .order("created_at", { ascending: false }),
+        ]);
+        for (const l of (logsRes?.data as any[]) || []) if (!logByClient.has(l.client_link_id)) logByClient.set(l.client_link_id, l);
+        for (const t of (toksRes?.data as any[]) || []) if (!tokenByClient.has(t.client_link_id)) tokenByClient.set(t.client_link_id, t);
+      } catch { /* pre-migration env — no send state */ }
+    }
+
+    const now = Date.now();
+    stripeInviteSuggestions = detected.map((r) => {
+      const log = logByClient.get(r.id);
+      const tok = tokenByClient.get(r.id);
+      const expiresAt = tok?.expires_at || null;
+      const expired = !!expiresAt && !tok?.used_at && new Date(expiresAt).getTime() < now;
+      return {
         client_link_id: r.id,
         client_name: r.client_name,
         jurisdiction: r.jurisdiction,
@@ -110,7 +144,13 @@ export default async function ClientsPage() {
         deposit_count: r.stripe_invite_deposit_count || 0,
         deposit_total: Number(r.stripe_invite_deposit_total || 0),
         suggested_at: r.stripe_invite_suggested_at,
-      }));
+        requested_at: log?.created_at || null,
+        to_address: log?.to_address || null,
+        delivery_status: log?.status || null,
+        expires_at: expiresAt,
+        expired,
+      };
+    });
   }
 
   const linksData = linksRes.data || [];

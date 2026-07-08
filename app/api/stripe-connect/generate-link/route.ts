@@ -27,10 +27,11 @@ export async function POST(request: Request) {
 
   const service = createServiceSupabase();
 
-  // Confirm the client exists and is active
-  const { data: clientLink } = await service
+  // Confirm the client exists and is active. Cast: contact_first_name isn't in
+  // the generated database.types yet, which would otherwise poison the row type.
+  const { data: clientLink } = await (service as any)
     .from("client_links")
-    .select("id, client_name, stripe_connection_status, is_active")
+    .select("id, client_name, contact_first_name, stripe_connection_status, is_active")
     .eq("id", client_link_id)
     .single();
   if (!clientLink) return NextResponse.json({ error: "Client not found" }, { status: 404 });
@@ -89,5 +90,6 @@ export async function POST(request: Request) {
     url,
     expires_at: expiresAt,
     client_name: clientLink.client_name,
+    contact_first_name: (clientLink as any).contact_first_name || null,
   });
 }

@@ -100,7 +100,13 @@ export async function sendStripeConnectionRequest(
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://internal.ironbooks.com";
   const url = `${baseUrl}/stripe-connect/${token}`;
-  const firstName = (cl.client_name || "").split(" ")[0] || "there";
+  // client_name is the BUSINESS name ("RocketPainter Kingston") — greet the
+  // human. Prefer the contact's first name, fall back to the first token of the
+  // business name only if we have nothing better.
+  const firstName =
+    (cl.contact_first_name || "").trim() ||
+    (cl.client_name || "").split(" ")[0] ||
+    "there";
   const { html, text } = buildStripeConnectEmail(firstName, url, cl.client_name, { isReminder });
   const subject = isReminder
     ? `Reminder: connect Stripe so we can finish your books — ${cl.client_name}`
