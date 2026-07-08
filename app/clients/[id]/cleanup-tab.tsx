@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ClipboardCheck, Shuffle, Zap, KanbanSquare, CreditCard, Wallet, Scale, ArrowRight } from "lucide-react";
+import { ClipboardCheck, Shuffle, Zap, KanbanSquare, CreditCard, Wallet, Scale, Landmark, ArrowRight } from "lucide-react";
 
 /**
  * Client-profile "Cleanup" tab (SNAP V2) — the single place to launch any
@@ -22,6 +22,7 @@ const ENGINES: {
   { label: "Stripe Reconciliation", desc: "Match Stripe payouts to QBO", icon: CreditCard, href: (id) => `/stripe-recon/new?client=${id}` },
   { label: "UF Audit", desc: "Clear stuck Undeposited Funds — duplicates, CRM double-counts", icon: Wallet, href: (id) => `/balance-sheet/${id}/uf-audit` },
   { label: "UF / A/R Reconciler", desc: "One button: match deposits to revenue, true A/R, step-by-step clearing plan", icon: Scale, href: (id) => `/balance-sheet/${id}/ufar-recon` },
+  { label: "Year-end Tax Export", desc: "GIFI (T2), T2125 sheet (T1), T5018 subcontractor totals", icon: Landmark, href: (id) => `/clients/${id}/tax-export` },
 ];
 
 export function CleanupTab({

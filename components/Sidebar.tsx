@@ -41,6 +41,7 @@ const productionNav: { href: string; label: string; icon: any; senior?: boolean 
 /** Fleet-wide views only — anything client-scoped starts from the client. */
 const toolsNav = [
   { href: "/fleet", label: "Fleet Health", icon: Gauge },
+  { href: "/tax-exports", label: "Tax Exports", icon: Landmark },
   { href: "/advisor", label: "Advisor", icon: HeartPulse },
   { href: "/templates", label: "Master COA", icon: BookOpen },
 ];
