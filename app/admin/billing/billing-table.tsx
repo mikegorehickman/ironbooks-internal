@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, RefreshCw, Plus, X, TrendingUp } from "lucide-react";
+import { Loader2, RefreshCw, Plus, X, TrendingUp, Trash2, Lock } from "lucide-react";
 
 type Cell = { collected: number; failed: number; manual: number; expected: number; comped: boolean; currency: string | null; note: string | null };
 type Row = {
@@ -401,7 +401,7 @@ export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected,
         </table>
       </div>
 
-      {modal && <ManualModal row={modal.row} month={modal.month} year={year} onClose={() => setModal(null)} onSaved={() => { setModal(null); router.refresh(); }} />}
+      {modal && <ManualModal row={modal.row} month={modal.month} year={year} onClose={() => setModal(null)} onSaved={() => { setModal(null); router.refresh(); }} onChanged={() => router.refresh()} />}
       {matchRow && <StripeMatchModal row={matchRow} year={year} onClose={() => setMatchRow(null)} onSaved={() => { setMatchRow(null); router.refresh(); }} />}
       {expectedRow && <ExpectedModal row={expectedRow} onClose={() => setExpectedRow(null)} onSaved={() => { setExpectedRow(null); router.refresh(); }} />}
     </div>
@@ -569,7 +569,19 @@ function Legend({ bg, t }: { bg: string; t: string }) {
   return <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded" style={{ background: bg }} />{t}</span>;
 }
 
-function ManualModal({ row, month, year, onClose, onSaved }: { row: Row; month: number; year: number; onClose: () => void; onSaved: () => void }) {
+interface CellEntry {
+  id: string;
+  amount_cents: number;
+  status: string;
+  source: string;
+  method: string | null;
+  kind: string | null;
+  currency: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+function ManualModal({ row, month, year, onClose, onSaved, onChanged }: { row: Row; month: number; year: number; onClose: () => void; onSaved: () => void; onChanged?: () => void }) {
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState(row.currency || "usd");
   const [method, setMethod] = useState("etransfer");
@@ -579,6 +591,36 @@ function ManualModal({ row, month, year, onClose, onSaved }: { row: Row; month: 
   const [cellNote, setCellNote] = useState(originalNote);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Existing entries behind this cell — so you can DELETE an incorrect amount
+  // instead of the Save button silently stacking another row on top.
+  const [entries, setEntries] = useState<CellEntry[] | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function loadEntries() {
+    try {
+      const res = await fetch(`/api/admin/billing/payment?client_link_id=${row.clientLinkId}&year=${year}&month=${month}`);
+      const j = await res.json();
+      if (res.ok) setEntries(j.entries || []);
+      else setEntries([]);
+    } catch { setEntries([]); }
+  }
+  useEffect(() => { loadEntries(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  async function deleteEntry(id: string) {
+    setDeletingId(id); setErr(null);
+    try {
+      const res = await fetch(`/api/admin/billing/payment?id=${id}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setErr(j.error || "Delete failed"); setDeletingId(null); return; }
+      await loadEntries();
+      onChanged?.();
+    } catch (e: any) { setErr(e?.message || "Network error"); }
+    finally { setDeletingId(null); }
+  }
+
+  const fmtAmt = (cents: number, cur: string | null) =>
+    `${(cur || "usd") === "cad" ? "CA" : ""}$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   // Save logs a payment (if an amount is entered) AND/OR saves the cell's
   // collection note (if changed) — so you can add a note without a payment.
@@ -619,9 +661,53 @@ function ManualModal({ row, month, year, onClose, onSaved }: { row: Row; month: 
           <button onClick={onClose} className="p-1 text-ink-light hover:text-navy"><X size={16} /></button>
         </div>
         <p className="text-xs text-ink-slate mb-3">{row.company} · {MONTHS[month - 1]} {year}</p>
+
+        {/* Existing entries — delete an incorrect amount here instead of the
+            Save button stacking another row on top. */}
+        {entries === null ? (
+          <div className="mb-3 text-xs text-ink-light flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Loading entries…</div>
+        ) : entries.length > 0 ? (
+          <div className="mb-3 rounded-lg border border-gray-200 divide-y divide-gray-100 max-h-44 overflow-y-auto">
+            {entries.map((e) => {
+              const deletable = e.source === "manual";
+              return (
+                <div key={e.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                  <span className="font-bold text-navy tabular-nums">{fmtAmt(e.amount_cents, e.currency)}</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                    e.status === "collected" ? "bg-green-100 text-green-800" :
+                    e.status === "failed" ? "bg-red-100 text-red-800" :
+                    e.status === "expected" ? "bg-blue-100 text-blue-800" :
+                    e.status === "comped" ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-700"}`}>
+                    {e.status}
+                  </span>
+                  <span className="text-ink-light truncate flex-1">
+                    {deletable ? (e.method || "manual") : e.source}{e.kind && e.kind !== "other" ? ` · ${e.kind.replace(/_/g, " ")}` : ""}
+                  </span>
+                  {deletable ? (
+                    <button
+                      onClick={() => deleteEntry(e.id)}
+                      disabled={deletingId === e.id}
+                      className="p-1 text-ink-light hover:text-red-600 disabled:opacity-50 flex-shrink-0"
+                      title="Delete this entry"
+                    >
+                      {deletingId === e.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    </button>
+                  ) : (
+                    <span className="p-1 text-ink-light flex-shrink-0" title={`Synced from ${e.source} — can't delete here. Fix it in ${e.source}.`}>
+                      <Lock size={12} />
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mb-3 text-xs text-ink-light">No entries logged for this month yet.</div>
+        )}
+
         <div className="space-y-2.5">
           <div className="flex gap-2">
-            <label className="flex-1"><span className="text-xs font-semibold text-ink-slate">Amount <span className="font-normal text-ink-light">(leave blank for note-only)</span></span>
+            <label className="flex-1"><span className="text-xs font-semibold text-ink-slate">Amount <span className="font-normal text-ink-light">(adds a new entry — to fix a wrong amount, delete it above)</span></span>
               <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" placeholder="0" className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" /></label>
             <label><span className="text-xs font-semibold text-ink-slate">Currency</span>
               <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="mt-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
