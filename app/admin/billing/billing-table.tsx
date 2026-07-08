@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, RefreshCw, Plus, X, TrendingUp, Trash2, Lock } from "lucide-react";
+import { Loader2, RefreshCw, Plus, X, TrendingUp, Trash2, Lock, CalendarClock } from "lucide-react";
 
 type Cell = { collected: number; failed: number; manual: number; expected: number; comped: boolean; currency: string | null; note: string | null };
 type Row = {
@@ -68,6 +68,26 @@ export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected,
       const j = await res.json();
       if (!res.ok) { setSyncMsg(j.error || "Sync failed"); return; }
       setSyncMsg(`Matched ${j.matched}/${j.scanned} clients · ${j.paymentsWritten} payments · ${j.unmatched?.length || 0} unmatched`);
+      router.refresh();
+    } catch (e: any) { setSyncMsg(e?.message || "Network error"); }
+    finally { setSyncing(false); }
+  }
+
+  async function deriveDays() {
+    if (!confirm(
+      "Set each client's expected billing day from when they actually get charged?\n\n" +
+      "• Stripe clients → the subscription's real billing day (authoritative)\n" +
+      "• Manual payers → the day of their most recent recorded payment (fills blanks only)\n\n" +
+      "This corrects the coverage warning that defaults everyone to the 1st. Nothing is charged."
+    )) return;
+    setSyncing(true); setSyncMsg(null);
+    try {
+      const res = await fetch("/api/admin/billing/derive-billing-days", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+      });
+      const j = await res.json();
+      if (!res.ok) { setSyncMsg(j.error || "Failed to derive billing days"); return; }
+      setSyncMsg(`Billing days: updated ${j.updated_count} of ${j.considered} clients · ${j.skipped_count} skipped (no payment history)${j.stripe_errors ? ` · ${j.stripe_errors} Stripe errors` : ""}`);
       router.refresh();
     } catch (e: any) { setSyncMsg(e?.message || "Network error"); }
     finally { setSyncing(false); }
@@ -189,6 +209,9 @@ export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected,
           </button>
           <button onClick={sync} disabled={syncing} className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-3 py-2 rounded-lg disabled:opacity-60" title="Map clients to Stripe customers + pull the year's invoices">
             {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sync mapping
+          </button>
+          <button onClick={deriveDays} disabled={syncing} className="inline-flex items-center gap-1.5 border border-navy/30 text-navy hover:bg-gray-50 text-sm font-semibold px-3 py-2 rounded-lg disabled:opacity-60" title="Set each client's expected billing day from when they actually get charged (fixes the 'defaults to the 1st' coverage warnings)">
+            <CalendarClock size={14} /> Fix billing days
           </button>
           <button onClick={runDunning} className="inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-3 py-2 rounded-lg" title="Send past-due reminders + apply/clear holds">
             Run dunning
