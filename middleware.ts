@@ -93,7 +93,9 @@ export async function middleware(request: NextRequest) {
     // separately: requireStaff rejects this role, and the billing endpoints
     // explicitly allow it.)
     if (role === "billing_admin") {
-      if (!pathname.startsWith("/admin/billing")) {
+      // Billing + the revenue-facing Upgrade Radar (same persona: revenue, no
+      // client bookkeeping). Everything else bounces to billing.
+      if (!pathname.startsWith("/admin/billing") && !pathname.startsWith("/admin/upgrades")) {
         const url = request.nextUrl.clone();
         url.pathname = "/admin/billing";
         return NextResponse.redirect(url);

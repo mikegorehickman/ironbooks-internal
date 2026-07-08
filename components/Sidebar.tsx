@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Sparkles, Users, LogOut, BookOpen, Clock,
-  Shield, CreditCard, ChevronDown, ChevronRight, Sun,
+  Shield, CreditCard, ChevronDown, ChevronRight, Sun, TrendingUp,
   HeartPulse, Gauge, BadgeCheck, Home, KanbanSquare, Mail, Video,
   ClipboardCheck, ListChecks, UserPlus, GraduationCap, Settings as SettingsIcon, Inbox, ListTodo, LifeBuoy, ExternalLink,
 } from "lucide-react";
@@ -47,7 +47,10 @@ const toolsNav = [
 
 /** One row: the /admin hub links onward to Billing, Bulk Email, Call
  *  Matching, Daily Recon, and the Audit Log. */
-const adminItems = [{ href: "/admin", label: "Admin", icon: Shield }];
+const adminItems = [
+  { href: "/admin", label: "Admin", icon: Shield },
+  { href: "/admin/upgrades", label: "Upgrade Radar", icon: TrendingUp },
+];
 
 /** SNAP how-to handbook — pinned to the very bottom for the WHOLE internal
  *  team (admin, lead, bookkeeper). */
@@ -173,6 +176,7 @@ export function Sidebar() {
         <nav className="flex-1 px-2.5 py-3">
           <NavSection label="Billing" />
           <NavItem item={{ href: "/admin/billing", label: "Billing", icon: CreditCard }} pathname={pathname} />
+          <NavItem item={{ href: "/admin/upgrades", label: "Upgrade Radar", icon: TrendingUp }} pathname={pathname} />
         </nav>
         <div className="px-2.5 py-3 border-t border-white/10">
           <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg bg-white/5">

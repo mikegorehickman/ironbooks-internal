@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, RefreshCw, Plus, X } from "lucide-react";
+import { Loader2, RefreshCw, Plus, X, TrendingUp } from "lucide-react";
 
 type Cell = { collected: number; failed: number; manual: number; expected: number; comped: boolean; currency: string | null; note: string | null };
 type Row = {
@@ -181,6 +181,9 @@ export function BillingTable({ year, rows, fxUsdToCad, totals, monthlyProjected,
           <a href={`/admin/billing?year=${year - 1}`} className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-sm">←</a>
           <span className="text-sm font-bold text-navy">{year}</span>
           <a href={`/admin/billing?year=${year + 1}`} className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-sm">→</a>
+          <a href="/admin/upgrades" className="inline-flex items-center gap-1.5 border border-teal/40 text-teal hover:bg-teal-lighter text-sm font-semibold px-3 py-2 rounded-lg" title="Clients who've outgrown their plan (run-rate over cap + healthy margin)">
+            <TrendingUp size={14} /> Upgrade Radar
+          </a>
           <button onClick={pullCharges} disabled={pulling} className="inline-flex items-center gap-1.5 bg-navy hover:bg-navy/90 text-white text-sm font-semibold px-3 py-2 rounded-lg disabled:opacity-60" title="Pull every Stripe charge for the current month and match to clients">
             {pulling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Pull this month's charges
           </button>

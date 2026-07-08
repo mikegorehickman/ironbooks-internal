@@ -14,6 +14,11 @@ export interface TierConfig {
   monthlyFee: number | null;
   firstMonthFee: number | null;
   revenueCap: string;
+  /** Numeric form of revenueCap: the top of this tier's monthly-revenue band,
+   *  in cents. A client whose sustained monthly revenue exceeds this has
+   *  outgrown the tier (see lib/upgrade-signals.ts). null = no upper bound
+   *  (scale). Insight's $25K/mo cap == the $300K/yr run-rate upgrade line. */
+  monthlyRevenueCapCents: number | null;
   onboardingCall: string;
   color: string;
 }
@@ -26,6 +31,7 @@ export const TIERS: TierConfig[] = [
     monthlyFee: 247,
     firstMonthFee: 500,
     revenueCap: "Up to $25K/mo",
+    monthlyRevenueCapCents: 25_000_00,
     onboardingCall: "1:1 (30 min)",
     color: "teal",
   },
@@ -36,6 +42,7 @@ export const TIERS: TierConfig[] = [
     monthlyFee: 497,
     firstMonthFee: 750,
     revenueCap: "Up to $85K/mo",
+    monthlyRevenueCapCents: 85_000_00,
     onboardingCall: "1:1 (30 min)",
     color: "blue",
   },
@@ -46,6 +53,7 @@ export const TIERS: TierConfig[] = [
     monthlyFee: 797,
     firstMonthFee: 1500,
     revenueCap: "Up to $250K/mo",
+    monthlyRevenueCapCents: 250_000_00,
     onboardingCall: "1:1 (60 min)",
     color: "violet",
   },
@@ -56,6 +64,7 @@ export const TIERS: TierConfig[] = [
     monthlyFee: null,
     firstMonthFee: null,
     revenueCap: "Above $3M/yr",
+    monthlyRevenueCapCents: null,
     onboardingCall: "Custom",
     color: "navy",
   },
