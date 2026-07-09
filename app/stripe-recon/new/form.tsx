@@ -79,6 +79,13 @@ export function NewStripeReconForm({
     checked_at: string | null;
   } | null>(null);
   const [rechecking, setRechecking] = useState(false);
+  // "Client doesn't use Stripe" skip — calls the (previously UI-orphaned)
+  // stripe-not-required endpoint so bookkeepers stop fighting the step
+  // during onboarding when a client simply has no Stripe.
+  const [skipReason, setSkipReason] = useState("");
+  const [skipOpen, setSkipOpen] = useState(false);
+  const [skipping, setSkipping] = useState(false);
+  const [skipError, setSkipError] = useState("");
   // When the API responds 409 with an existing_job_id, we hold it here so
   // the form can swap its generic error block for an actionable conflict
   // panel that links directly to the in-flight job.
@@ -90,6 +97,25 @@ export function NewStripeReconForm({
   const selectedClient = clientLinks.find((c) => c.id === clientLinkId);
   const isStripeConnected =
     selectedClient?.stripe_connection_status === "connected";
+
+  async function markNotRequired() {
+    if (!selectedClient) return;
+    setSkipping(true);
+    setSkipError("");
+    try {
+      const res = await fetch(`/api/clients/${selectedClient.id}/stripe-not-required`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: skipReason.trim() || "Marked from Stripe recon setup — client doesn't use Stripe" }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      router.push("/cleanup");
+    } catch (e: any) {
+      setSkipError(e?.message || "Failed to mark");
+      setSkipping(false);
+    }
+  }
 
   // Effective health values — fresh recheck wins over the page-load
   // snapshot. Allows the inline "Re-check" button to update the warning
@@ -395,6 +421,67 @@ export function NewStripeReconForm({
               </div>
             </div>
           )}
+
+        {/* "Doesn't use Stripe" skip — the legitimate exit from this step.
+            Bookkeeper feedback: with no visible skip, onboarding bookkeepers
+            were overriding through the flow every time a client simply had
+            no Stripe. Marks stripe_not_required (audit-logged, reversible
+            from the client profile) and returns to the cleanup board. */}
+        {selectedClient && !isStripeConnected && (
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-ink-slate space-y-2">
+            {!skipOpen ? (
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  <strong className="text-navy">{selectedClient.client_name}</strong> doesn&apos;t take payments
+                  through Stripe? You can skip this step for good.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSkipOpen(true)}
+                  className="shrink-0 text-xs font-semibold text-teal hover:underline"
+                >
+                  Skip — client doesn&apos;t use Stripe
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="font-semibold text-navy">
+                  Mark {selectedClient.client_name} as not using Stripe
+                </div>
+                <p>
+                  This hides every Stripe prompt for this client (invites, recon steps, reminders) and marks
+                  step 4 as skipped on the board. It&apos;s audit-logged and reversible from the client profile
+                  if they start taking Stripe payments later.
+                </p>
+                <input
+                  value={skipReason}
+                  onChange={(e) => setSkipReason(e.target.value)}
+                  placeholder="Optional note, e.g. 'client only takes cheques + e-transfer'"
+                  className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:border-teal"
+                />
+                {skipError && <p className="text-red-600">{skipError}</p>}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={markNotRequired}
+                    disabled={skipping}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-teal text-white px-3 py-1.5 text-xs font-semibold hover:bg-teal/90 disabled:opacity-50"
+                  >
+                    {skipping ? <Loader2 size={12} className="animate-spin" /> : null}
+                    Confirm — no Stripe for this client
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSkipOpen(false)}
+                    className="text-xs text-ink-light hover:text-ink-slate"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Inverse: the account has payouts. Quiet green badge so the
             bookkeeper has a positive signal that the right account is

@@ -96,6 +96,17 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /costco\s*(food court|restaurant)/i, account: "Meals (50% deductible)", confidence: 0.95, reasoning: "Costco Food Court → Meals" },
   { pattern: /costco\s*(whse|wholesale|business)/i, account: "Job Supplies", confidence: 0.85, reasoning: "Costco Wholesale → Job Supplies (default for trades)" },
 
+  // ══════════════════ GAS STATION SMALL PURCHASES → MEALS (before the fuel block: first match wins) ══════════════════
+  // A sub-$15 charge at a retail gas station is a coffee/snack, not a fill-up
+  // (bookkeeper feedback: these were all landing in Fuel and getting hand-moved
+  // to Meals one by one). Confidence 0.90 sits below the 0.95 auto-execute
+  // floor, so these QUEUE for review rather than auto-posting; promote after
+  // Lisa confirms the queue looks right. Deliberately excludes pay-at-pump-only
+  // and commercial cardlock vendors (Costco Gas, Petro-Pass, Co-op Cardlock,
+  // Hughes) where a small amount is still fuel.
+  { pattern: /\bessom?\b|\bshell\b(?!.*lube)|\bchevron\b|petro[\s\-]?canada|\bhusky\b|\bdomo\b|\bfasgas\b|\bcentex\b|\bmohawk\b|pioneer\s+(gas|station)|\b7[\s\-]?eleven\b|\bcircle\s*k\b|\brace\s*trac\b|\bspeedway\b|\bsunoco\b|\b(mobil|exxon)\b/i,
+    account: "Meals (50% deductible)", confidence: 0.90, reasoning: "Small gas-station purchase (≤$15) → likely snack/coffee, not fuel", amountRange: [0, 15] },
+
   // ══════════════════ FUEL / GAS STATIONS ══════════════════
   { pattern: /\bessom?\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Esso → Fuel" },
   { pattern: /\bshell\b(?!.*lube)/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Shell → Fuel" },
@@ -210,8 +221,12 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /blue\s+cross/i, account: "Health Insurance – Owner", confidence: 0.90, reasoning: "Blue Cross → Health Insurance" },
 
   // ══════════════════ ADVERTISING ══════════════════
-  { pattern: /google\s+ads|google\s+adwords/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.97, reasoning: "Google Ads → Online Advertising" },
-  { pattern: /\bmeta\s+(ads|platforms)|facebook\s+ads|instagram\s+ads/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.97, reasoning: "Meta/Facebook → Online Advertising" },
+  // Real bank feeds don't say "Google Ads" — they say GOOGLE*ADS4739, GOOGLEADS,
+  // FACEBK *X2A7B9, FB *ADVERTISING. Cover the descriptor forms explicitly
+  // (bookkeeper feedback: these were falling through to AI and landing in
+  // Software Subscriptions).
+  { pattern: /google\s*\*?\s*ads\w*|googleads|google\s+adwords/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.97, reasoning: "Google Ads → Online Advertising" },
+  { pattern: /\bfacebk\b|\bfb\s*\*|\bmeta\s+(ads|platforms?)\b|facebook\s*ads|instagr?am\s*ads/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.97, reasoning: "Meta/Facebook descriptor → Online Advertising" },
   { pattern: /linkedin\s+ads|tiktok\s+ads|snapchat\s+ads/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.97, reasoning: "Social ads → Online Advertising" },
   { pattern: /yelp\s+ads|\bangi\b|home\s*advisor|\bhouzz\b/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.93, reasoning: "Lead-gen platform → Online Advertising" },
 
@@ -219,7 +234,7 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /quickbooks|\bintuit\b/i, account: "Software Subscriptions", confidence: 0.97, reasoning: "QuickBooks/Intuit → Software" },
   { pattern: /\bxero\b/i, account: "Software Subscriptions", confidence: 0.97, reasoning: "Xero → Software" },
   { pattern: /microsoft|office\s+365|\bms365\b/i, account: "Software Subscriptions", confidence: 0.95, reasoning: "Microsoft → Software" },
-  { pattern: /google\s+workspace|google\s+suite/i, account: "Software Subscriptions", confidence: 0.97, reasoning: "Google Workspace → Software" },
+  { pattern: /google\s*\*?\s*(workspace|suite|gsuite)/i, account: "Software Subscriptions", confidence: 0.97, reasoning: "Google Workspace → Software" },
   { pattern: /\badobe\b/i, account: "Software Subscriptions", confidence: 0.93, reasoning: "Adobe → Software" },
   { pattern: /\bdropbox\b|\bslack\b|\bzoom\b|\bnotion\b/i, account: "Software Subscriptions", confidence: 0.95, reasoning: "Tech subscription → Software" },
   { pattern: /apple\.com|apple\s+(icloud|services)/i, account: "Software Subscriptions", confidence: 0.90, reasoning: "Apple iCloud → Software" },
@@ -249,6 +264,14 @@ const PATTERNS: VendorPattern[] = [
   // ══════════════════ ACCOUNTING / LEGAL ══════════════════
   { pattern: /\bcpa\b|chartered\s+(prof|account)|\bca\s+firm|tax\s+(service|prep)|h&r\s+block/i, account: "Accounting & Bookkeeping", confidence: 0.90, reasoning: "Accountant → Accounting & Bookkeeping" },
   { pattern: /\battorney|\blaw\s+(firm|office)|\blegal\s+services|\bllp\b/i, account: "Legal Fees", confidence: 0.85, reasoning: "Legal services → Legal Fees" },
+
+  // ══════════════════ BARE GOOGLE / FACEBOOK FALLBACKS (keep LAST: every specific form above wins first) ══════════════════
+  // For a trades contractor, a bare GOOGLE or FACEBOOK charge is almost always
+  // advertising, not software. Confidence sits below the auto-execute floor so
+  // these queue for a human instead of posting; the lookaheads keep consumer
+  // Google products (One/Play/YouTube/Fi/etc.) out of the net.
+  { pattern: /\bfacebook\b(?!\s*market)|\bmeta\b(?!\s*(quest|store))/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.87, reasoning: "Bare Facebook/Meta charge on a business account → most likely ads (queued for review)" },
+  { pattern: /\bgoogle\b(?!\s*\*?\s*(workspace|suite|gsuite|one|play|fi\b|storage|cloud|domains|voice|youtube|nest))/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.82, reasoning: "Bare Google charge on a business account → most likely ads (queued for review)" },
 ];
 
 // ─────────── Lookup function ───────────
