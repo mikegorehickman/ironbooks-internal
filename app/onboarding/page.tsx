@@ -31,8 +31,32 @@ export default async function OnboardingPage() {
       .from("onboarding_leads")
       .select("*")
       .eq("status", "active")
+      // A lead linked to a client (client_link_id set) is already a client —
+      // it isn't a "new sale" and shouldn't sit on the onboarding board, even
+      // if its status was never flipped to 'converted'.
+      .is("client_link_id", null)
       .order("won_at", { ascending: true, nullsFirst: false });
     leads = (data as OnboardingLead[]) || [];
+
+    // Insurance for already-clients created OUTSIDE the funnel (e.g. migrated
+    // from Double) whose lead was never linked: drop any lead whose email
+    // already belongs to an active client. Case-insensitive.
+    if (leads.length) {
+      const { data: activeClients } = await service
+        .from("client_links")
+        .select("client_email")
+        .eq("is_active", true);
+      const clientEmails = new Set(
+        ((activeClients as any[]) || [])
+          .map((c) => (c.client_email || "").toLowerCase().trim())
+          .filter(Boolean)
+      );
+      if (clientEmails.size) {
+        leads = leads.filter(
+          (l) => !clientEmails.has((l.email || "").toLowerCase().trim())
+        );
+      }
+    }
   } catch {
     leads = [];
   }
