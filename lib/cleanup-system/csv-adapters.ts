@@ -56,6 +56,11 @@ const ADAPTERS: Record<ImportSource, { columns: ColumnMap; dateFormat?: string }
       date: "payment_date",
       payer_raw: "lender",
       gross_amount: "payment_amount",
+      // Lender statements usually break out the interest portion — capture it
+      // in the fee_amount slot (matched fuzzily: "interest", "interest_amount",
+      // "interest_paid"). The loans module uses it for EXACT P&I splits instead
+      // of estimating. principal = gross − fee.
+      fee_amount: "interest",
       net_amount: "payment_amount",
       reference: "account_number",
     },
