@@ -7,9 +7,18 @@ import { NextResponse } from "next/server";
  * Update a single reclassification row.
  *
  * Body:
- *   - decision: "approved" | "rejected" | "auto_approve" | "needs_review" | "flagged"
+ *   - decision: "approved" | "rejected" | "auto_approve" | "needs_review" | "flagged" | "ask_client"
  *   - bookkeeper_override_target_id?: string  (admin/lead can override AI target)
  *   - bookkeeper_override_target_name?: string
+ *
+ * decision is NEVER inferred from an override target — the caller always
+ * says explicitly what state the row should end up in. This used to default
+ * to "approved" whenever an override target was supplied with no decision,
+ * which silently promoted ask_client rows the moment a bookkeeper picked a
+ * suggested account (a row named "Sandra" got stuck in Auto-Approve this
+ * way, 2026-07-10). Every real caller already sends decision explicitly, so
+ * removing the fallback changes nothing today and closes the door on any
+ * future caller reintroducing the same bug by omission.
  */
 export async function PATCH(
   request: Request,
@@ -45,14 +54,12 @@ export async function PATCH(
     updates.bookkeeper_override_target_name = body.bookkeeper_override_target_name || null;
     updates.to_account_id = body.bookkeeper_override_target_id;
     updates.to_account_name = body.bookkeeper_override_target_name || null;
-    if (!updates.decision) updates.decision = "approved";
   } else if (body.bookkeeper_override_target_name !== undefined) {
     // Name-only override from the new Map-to-Master dropdown — we don't have a
     // QBO target_id at the UI layer (it's resolved at execute time by name lookup).
     updates.bookkeeper_override = true;
     updates.bookkeeper_override_target_name = body.bookkeeper_override_target_name;
     updates.to_account_name = body.bookkeeper_override_target_name;
-    if (!updates.decision) updates.decision = "approved";
   }
 
   if (Object.keys(updates).length === 0) {

@@ -131,11 +131,15 @@ export function ReclassReview({
   //                  with a "Moved to Auto-Approved" badge so the bookkeeper
   //                  doesn't get disoriented by rows vanishing on approve).
   // - Flagged:       same rule, for flagged origin.
-  // - Ask Client:    ONLY rows whose CURRENT decision is ask_client. Moving
-  //                  to/from ask_client is a deliberate workflow gesture —
-  //                  rows should leave the tab the moment the bookkeeper
-  //                  picks a category (which flips them to approved) or
-  //                  reclassifies them. This keeps the email template clean.
+  // - Ask Client:    ONLY rows whose CURRENT decision is ask_client. Picking a
+  //                  target account from the dropdown records a best-guess
+  //                  target but does NOT move the row out of this tab — it
+  //                  stays parked (and still goes in the client email) until
+  //                  the bookkeeper explicitly clicks "Approve" on that row,
+  //                  which is the one action that promotes it to approved.
+  //                  (An "Uncategorized" pick is the one exception: that's an
+  //                  explicit escalation to a senior, so it still moves the
+  //                  row straight to Flagged.)
   const partitioned = useMemo(() => {
     const auto: Reclassification[] = [];
     const review: Reclassification[] = [];
@@ -190,7 +194,20 @@ export function ReclassReview({
   }
 
   /**
-   * Set the target account for a row + promote to "approved".
+   * Set the target account for a row.
+   *
+   * A row currently sitting in Ask Client STAYS in Ask Client — picking a
+   * target here just records a best guess (bookkeeper_override_target_name),
+   * it does not promote the row. That row still shows up in the client email
+   * batch, and only leaves ask_client when the bookkeeper clicks the row's
+   * explicit "Approve" button (bulkApprove) — a separate, deliberate action.
+   * Every other origin state (needs_review, flagged) still promotes straight
+   * to "approved" on pick, same as before.
+   *
+   * "Uncategorized" is the one universal exception: it's an explicit
+   * ESCALATION ("I can't place this, a senior needs to look"), so it always
+   * moves the row to flagged — including out of ask_client — never a bank
+   * rule, regardless of where the row started.
    *
    * Propagation: when the bookkeeper picks an account for one row, the same
    * target is applied to all OTHER unresolved rows (needs_review / flagged /
@@ -238,7 +255,11 @@ export function ReclassReview({
       }
     }
 
-    const newDecision = isEscalation ? "flagged" : "approved";
+    // Per-row: escalation always -> flagged. A row currently parked in
+    // Ask Client stays there on a normal pick (see docstring above). Anything
+    // else promotes to approved, same as always.
+    const decisionFor = (r: Reclassification) =>
+      isEscalation ? "flagged" : r.decision === "ask_client" ? "ask_client" : "approved";
 
     // Optimistic local update for all affected rows
     setRows((prev) =>
@@ -249,24 +270,28 @@ export function ReclassReview({
               bookkeeper_override: true,
               bookkeeper_override_target_name: targetAccountName,
               to_account_name: targetAccountName,
-              decision: newDecision,
+              decision: decisionFor(r),
             }
           : r
       )
     );
 
-    // Persist each row update
+    // Persist each row update — decisionFor reads each row's OWN pre-update
+    // decision (from `rows`, not the optimistic copy above) so a row that
+    // started in ask_client is correctly kept there even when it's swept in
+    // via propagation rather than being the row the bookkeeper clicked.
     await Promise.all(
-      Array.from(propagateIds).map((id) =>
-        fetch(`/api/reclass/decisions/${id}`, {
+      Array.from(propagateIds).map((id) => {
+        const propagatedRow = id === rowId ? row : rows.find((r) => r.id === id) || row;
+        return fetch(`/api/reclass/decisions/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            decision: newDecision,
+            decision: decisionFor(propagatedRow),
             bookkeeper_override_target_name: targetAccountName,
           }),
-        })
-      )
+        });
+      })
     );
 
     // Save as bank rule once for this vendor — covers all current AND future
@@ -725,8 +750,10 @@ export function ReclassReview({
                   <HelpCircle size={14} className="inline mr-1" />
                   Rows here will be sent to the client for clarification when you execute — one portal
                   message + one email listing all {partitioned.ask.length} transaction
-                  {partitioned.ask.length === 1 ? "" : "s"}. If you know the category for any row, pick
-                  it from the dropdown to remove it from the email batch.
+                  {partitioned.ask.length === 1 ? "" : "s"}. Picking a target from the dropdown just
+                  records your best guess — the row stays here and still goes in the email. If you're
+                  sure and want to skip asking the client, click that row's <strong>Approve</strong>{" "}
+                  button to move it out.
                 </span>
                 <button
                   onClick={() => setEmailModalOpen(true)}
