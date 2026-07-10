@@ -43,19 +43,53 @@ export interface ApMatchMeta {
   amount_applied: number;
 }
 
-export function serializeMeta(meta: UfEntryMeta | ArDuplicateMeta | ApMatchMeta): string {
+/** AR Aging Cleanup — in-scope invoice cleared via a NEW Receive Payment to
+ *  the Uncleared Deposits clearing account. The entry's qbo_transaction_id
+ *  is the INVOICE id (no payment exists yet — creating one IS the action)
+ *  and to_account_id/name carry the deposit-to clearing account. */
+export interface ArAgingClearMeta {
+  v: 1;
+  type: "ar_aging_clear";
+  invoice_doc: string | null;
+  customer_id: string;
+  customer_name: string | null;
+  year: number;
+  /** True when an uploaded bank-deposit row matched this invoice's balance. */
+  verified: boolean;
+  deposit_rows_uploaded: number;
+}
+
+/** AR Aging Cleanup — pre-engagement year written off in one lump JE. */
+export interface ArAgingWriteoffMeta {
+  v: 1;
+  type: "ar_aging_writeoff";
+  year: number;
+  invoice_count: number;
+  customer_count: number;
+}
+
+export type ProposedEntryMeta =
+  | UfEntryMeta
+  | ArDuplicateMeta
+  | ApMatchMeta
+  | ArAgingClearMeta
+  | ArAgingWriteoffMeta;
+
+export function serializeMeta(meta: ProposedEntryMeta): string {
   return JSON.stringify(meta);
 }
 
 export function parseEntryMeta(
   aiReasoning: string | null | undefined
-): UfEntryMeta | ArDuplicateMeta | ApMatchMeta | null {
+): ProposedEntryMeta | null {
   if (!aiReasoning) return null;
   try {
     const parsed = JSON.parse(aiReasoning);
     if (
       parsed?.v === 1 &&
-      (parsed.type === "uf_match" || parsed.type === "ar_duplicate" || parsed.type === "ap_match")
+      ["uf_match", "ar_duplicate", "ap_match", "ar_aging_clear", "ar_aging_writeoff"].includes(
+        parsed.type
+      )
     ) {
       return parsed;
     }

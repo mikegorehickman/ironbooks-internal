@@ -12,6 +12,7 @@ const VALID_MODULES: CleanupModule[] = [
   "bank_recon",
   "undeposited_funds",
   "accounts_receivable",
+  "ar_aging",
   "accounts_payable",
   "loans",
   "shareholder_draws",
@@ -27,6 +28,13 @@ export async function POST(
   const body = await request.json().catch(() => ({}));
   const crmSource = body.crm_source as string | undefined;
   const crmCsvText = body.crm_csv_text as string | undefined;
+  // AR Aging Cleanup options: engagement cutoff + optional deposits CSV.
+  const cutoffDate =
+    typeof body.cutoff_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.cutoff_date)
+      ? (body.cutoff_date as string)
+      : undefined;
+  const depositCsvText =
+    typeof body.deposit_csv_text === "string" ? (body.deposit_csv_text as string) : undefined;
   if (!VALID_MODULES.includes(module as CleanupModule)) {
     return NextResponse.json({ error: "Invalid module" }, { status: 400 });
   }
@@ -64,6 +72,8 @@ export async function POST(
               crmSource: (crmSource as any) || "generic",
               crmCsvText,
             }
+          : module === "ar_aging"
+          ? { cutoffDate, depositCsvText }
           : undefined
       );
       await service

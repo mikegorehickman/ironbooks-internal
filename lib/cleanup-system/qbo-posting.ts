@@ -2,7 +2,14 @@
  * QBO write helpers for BS cleanup proposed entries.
  */
 
-import { applyPaymentToInvoices, applyBillPaymentToBills, createJournalEntry } from "@/lib/qbo";
+import {
+  applyPaymentToInvoices,
+  applyBillPaymentToBills,
+  createJournalEntry,
+  createPaymentForInvoice,
+  findByPrivateNoteToken,
+  type JournalEntryLine,
+} from "@/lib/qbo";
 
 const QBO_BASE =
   process.env.QBO_ENVIRONMENT === "production"
@@ -95,6 +102,129 @@ export async function applyApPaymentToBill(
     privateNote: `Ironbooks BS Cleanup payment→Bill — ${idempotencyToken}`,
   });
   return result?.Id || params.billPaymentId;
+}
+
+/**
+ * AR Aging Cleanup: create a brand-new Receive Payment against a stale open
+ * invoice, deposited to the Uncleared Deposits clearing account. Idempotent
+ * via a PrivateNote token pre-check — a retried execute can never double-pay
+ * the same invoice.
+ */
+export async function createArAgingClearPayment(
+  realmId: string,
+  accessToken: string,
+  params: {
+    customerId: string;
+    customerName?: string;
+    invoiceId: string;
+    amount: number;
+    txnDate: string;
+    depositToAccountId: string;
+    depositToAccountName?: string;
+    runId: string;
+    entryId: string;
+  }
+): Promise<string> {
+  const idempotencyToken = `SNAP-CLEANUP-${params.runId}-${params.entryId}-ARP`;
+  const existing = await findByPrivateNoteToken(realmId, accessToken, "Payment", idempotencyToken);
+  if (existing) {
+    console.warn(`[createArAgingClearPayment] idempotent hit — Payment ${existing} already posted for ${idempotencyToken}`);
+    return existing;
+  }
+  const result = await createPaymentForInvoice(realmId, accessToken, {
+    customerId: params.customerId,
+    customerName: params.customerName,
+    invoiceId: params.invoiceId,
+    amount: params.amount,
+    txnDate: params.txnDate,
+    depositToAccountId: params.depositToAccountId,
+    depositToAccountName: params.depositToAccountName,
+    privateNote: `Ironbooks AR aging clear — ${idempotencyToken}`,
+  });
+  return result?.Id || "";
+}
+
+/**
+ * AR Aging Cleanup: post the lump pre-engagement writeoff JE. QBO's tolerance
+ * for multiple A/R lines (each with a Customer entity) in one JE varies by
+ * file configuration, so when the single lump entry is rejected we fall back
+ * to one JE per customer automatically — same net effect, more entries.
+ * Both paths are self-idempotent (createJournalEntry hashes date+note+lines).
+ */
+export async function postArAgingWriteoffJe(
+  realmId: string,
+  accessToken: string,
+  params: {
+    txnDate: string;
+    memo: string;
+    debit: { accountId: string; accountName?: string; amount: number; description?: string };
+    credits: Array<{
+      accountId: string;
+      accountName?: string;
+      amount: number;
+      description?: string;
+      customerId: string;
+      customerName?: string;
+    }>;
+  }
+): Promise<string> {
+  const creditLines: JournalEntryLine[] = params.credits.map((c) => ({
+    posting_type: "Credit" as const,
+    amount: c.amount,
+    account_id: c.accountId,
+    account_name: c.accountName,
+    description: c.description,
+    entity: { type: "Customer" as const, id: c.customerId, name: c.customerName },
+  }));
+
+  try {
+    const je = await createJournalEntry(realmId, accessToken, {
+      txn_date: params.txnDate,
+      private_note: params.memo,
+      lines: [
+        {
+          posting_type: "Debit",
+          amount: params.debit.amount,
+          account_id: params.debit.accountId,
+          account_name: params.debit.accountName,
+          description: params.debit.description,
+        },
+        ...creditLines,
+      ],
+    });
+    return je?.Id || "";
+  } catch (err: any) {
+    // Multi-AR-line JE rejected → per-customer fallback (only when there was
+    // more than one customer to begin with; a single-line failure is real).
+    if (params.credits.length <= 1) throw err;
+    console.warn(`[postArAgingWriteoffJe] lump JE rejected (${String(err?.message).slice(0, 120)}) — falling back to one JE per customer`);
+    const ids: string[] = [];
+    for (const c of params.credits) {
+      const je = await createJournalEntry(realmId, accessToken, {
+        txn_date: params.txnDate,
+        private_note: `${params.memo} — ${c.customerName || c.customerId}`,
+        lines: [
+          {
+            posting_type: "Debit",
+            amount: c.amount,
+            account_id: params.debit.accountId,
+            account_name: params.debit.accountName,
+            description: params.debit.description,
+          },
+          {
+            posting_type: "Credit",
+            amount: c.amount,
+            account_id: c.accountId,
+            account_name: c.accountName,
+            description: c.description,
+            entity: { type: "Customer", id: c.customerId, name: c.customerName },
+          },
+        ],
+      });
+      if (je?.Id) ids.push(je.Id);
+    }
+    return ids.join(",");
+  }
 }
 
 export { createJournalEntry };
