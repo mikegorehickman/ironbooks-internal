@@ -24,6 +24,7 @@ drop policy if exists "client_notes_update" on client_notes;
 drop policy if exists "Authenticated users can read notes" on client_notes;
 drop policy if exists "Authenticated users can insert notes" on client_notes;
 drop policy if exists "Authors can update their notes" on client_notes;
+drop policy if exists "client_notes_internal_read" on client_notes;
 
 create policy "client_notes_internal_read" on client_notes
   for select to authenticated
