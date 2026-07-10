@@ -24,8 +24,9 @@ const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newT
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/support", label: "Support", icon: LifeBuoy, newTab: true },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
-  { href: "/onboarding", label: "Onboarding", icon: UserPlus, senior: true },
-  { href: "/cleanup", label: "Cleanup", icon: ClipboardCheck },
+  // Onboarding + Cleanup + Production kanbans live on ONE screen now — /board
+  // with a pipeline toggle. The old routes still work for deep links.
+  { href: "/board", label: "Pipelines", icon: ClipboardCheck },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/history", label: "History", icon: Clock },
 ];
@@ -34,7 +35,7 @@ const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newT
  *  files, escalations, flagged transactions — one queue). The daily-recon
  *  engine controls live on the /admin hub. */
 const productionNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
-  { href: "/production", label: "Production board", icon: ListChecks },
+  // Production board folded into /board (Pipelines toggle) with the other kanbans.
   { href: "/approvals", label: "Approvals", icon: BadgeCheck, senior: true },
 ];
 

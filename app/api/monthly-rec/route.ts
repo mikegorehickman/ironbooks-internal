@@ -119,6 +119,8 @@ export async function GET(request: Request) {
     production: production.map((c) => ({
       id: c.id,
       client_name: c.client_name,
+      urgent: !!(c as any).urgent_flag,
+      urgent_note: (c as any).urgent_flag_note || null,
       contact_name: [c.contact_first_name, c.contact_last_name].filter(Boolean).join(" ") || null,
       paused: !!c.daily_recon_paused,
       bs_enabled: c.bs_enabled !== false,

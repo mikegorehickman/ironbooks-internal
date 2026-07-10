@@ -237,7 +237,12 @@ export function ProductionBoard() {
           {/* ── 5-COLUMN BOARD ── (4 working columns + Completed) */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
             {[
-              ...COLUMNS.map((col) => ({ ...col, cards: byColumn[col.id] })),
+              ...COLUMNS.map((col) => ({
+                ...col,
+                cards: [...byColumn[col.id]].sort(
+                  (a, b) => Number(!!b.urgent) - Number(!!a.urgent)
+                ),
+              })),
               {
                 id: "completed" as const,
                 title: "Completed",

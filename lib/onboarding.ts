@@ -465,3 +465,55 @@ export async function resolveOrCreateClientForWon(
   if (error) return { clientLinkId: null, created: false, error: error.message };
   return { clientLinkId: data.id, created: true };
 }
+
+/**
+ * Board data for the Onboarding pipeline — active unconverted leads (minus
+ * anyone who's already an active client by email) + the bookkeeper roster.
+ * Shared by /onboarding and the unified /board screen so the two never drift.
+ */
+export async function fetchOnboardingBoardData(service: any): Promise<{
+  leads: OnboardingLead[];
+  bookkeepers: Array<{ id: string; full_name: string }>;
+}> {
+  let leads: OnboardingLead[] = [];
+  try {
+    const { data } = await service
+      .from("onboarding_leads")
+      .select("*")
+      .eq("status", "active")
+      .is("client_link_id", null)
+      .order("won_at", { ascending: true, nullsFirst: false });
+    leads = (data as OnboardingLead[]) || [];
+
+    if (leads.length) {
+      const { data: activeClients } = await service
+        .from("client_links")
+        .select("client_email")
+        .eq("is_active", true);
+      const clientEmails = new Set(
+        ((activeClients as any[]) || [])
+          .map((c: any) => (c.client_email || "").toLowerCase().trim())
+          .filter(Boolean)
+      );
+      if (clientEmails.size) {
+        leads = leads.filter(
+          (l) => !clientEmails.has((l.email || "").toLowerCase().trim())
+        );
+      }
+    }
+  } catch {
+    leads = [];
+  }
+
+  const { data: bks } = await service
+    .from("users")
+    .select("id, full_name, role")
+    .eq("is_active", true)
+    .in("role", ["admin", "lead", "bookkeeper"])
+    .order("full_name");
+  const bookkeepers = ((bks as any[]) || [])
+    .filter((b: any) => b.full_name)
+    .map((b: any) => ({ id: b.id, full_name: b.full_name }));
+
+  return { leads, bookkeepers };
+}

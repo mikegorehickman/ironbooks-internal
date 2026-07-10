@@ -187,6 +187,8 @@ export async function GET(request: Request) {
     const card = {
       id: client.id,
       client_name: client.client_name,
+      urgent: !!(client as any).urgent_flag,
+      urgent_note: (client as any).urgent_flag_note || null,
       stripe_connected: stripeConnected,
       stripe_pending: stripePending,
       stripe_request_sent_at: client.stripe_request_sent_at,

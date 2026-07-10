@@ -26,6 +26,8 @@ import { type AttentionState } from "@/lib/client-attention-state";
 interface KanbanCard {
   id: string;
   client_name: string;
+  urgent?: boolean;
+  urgent_note?: string | null;
   stripe_connected: boolean;
   stripe_pending: boolean;
   stripe_request_sent_at: string | null;
@@ -262,8 +264,10 @@ export function CleanupBoard() {
   // a filter that keeps badge-less cards reads as broken.
   const [flaggedOnly, setFlaggedOnly] = useState(false);
 
+  const urgentFirst = (cards: KanbanCard[]) =>
+    [...cards].sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent));
   const visible = (cards: KanbanCard[], inReview: boolean) => {
-    let out = chipFilter ? cards.filter((c) => classifyCard(c, inReview) === chipFilter) : cards;
+    let out = urgentFirst(chipFilter ? cards.filter((c) => classifyCard(c, inReview) === chipFilter) : cards);
     if (flaggedOnly)
       out = out.filter((c) => {
         const a = attention[c.id];
@@ -507,6 +511,14 @@ function CleanupCard({
             >
               {card.client_name}
             </Link>
+            {card.urgent && (
+              <span
+                title={card.urgent_note || "Urgent — books ASAP"}
+                className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 bg-red-600 text-white"
+              >
+                URGENT
+              </span>
+            )}
             <span
               className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${CHIP_META[classifyCard(card, inReview)].cls}`}
             >

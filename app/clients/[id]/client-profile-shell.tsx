@@ -30,8 +30,11 @@ import {
   CreditCard,
   Trash2,
   ClipboardCheck,
+  StickyNote,
 } from "lucide-react";
 import { CleanupTab } from "./cleanup-tab";
+import { NotesPanel } from "./notes-panel";
+import { UrgentFlagButton } from "./urgent-flag-button";
 import type {
   OutstandingWork,
   ActivityEvent,
@@ -160,7 +163,7 @@ interface Props {
   bsCleanupOwed?: boolean;
 }
 
-type TabId = "overview" | "cleanup" | "profile" | "billing" | "pl" | "bs" | "bank" | "activity";
+type TabId = "overview" | "cleanup" | "profile" | "billing" | "pl" | "bs" | "bank" | "notes" | "activity";
 
 const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: "overview", label: "Overview", icon: Activity },
@@ -170,6 +173,7 @@ const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: "pl", label: "P&L", icon: FileText },
   { id: "bs", label: "Balance Sheet", icon: Scale },
   { id: "bank", label: "Bank Balances", icon: Banknote },
+  { id: "notes", label: "Notes", icon: StickyNote },
   { id: "activity", label: "Activity", icon: Clock },
 ];
 
@@ -203,6 +207,11 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           )}
         </div>
         <div className="flex items-center gap-2">
+          <UrgentFlagButton
+            clientLinkId={clientLink.id}
+            initialUrgent={!!(clientLink as any).urgent_flag}
+            initialNote={(clientLink as any).urgent_flag_note || null}
+          />
           <Link
             href={`/clients/${clientLink.id}/messages`}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:text-navy hover:border-gray-300"
@@ -299,6 +308,8 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
         />
       )}
       {activeTab === "bank" && <BankTab financials={financials} clientLinkId={clientLink.id} />}
+
+      {activeTab === "notes" && <NotesPanel clientLinkId={clientLink.id} />}
       {activeTab === "activity" && (
         <ActivityTab activity={overview.activity} />
       )}

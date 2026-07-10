@@ -97,6 +97,8 @@ interface Run {
 export interface ProdClient {
   id: string;
   client_name: string;
+  urgent?: boolean;
+  urgent_note?: string | null;
   /** Contact first + last name — shown under the business name on cards. */
   contact_name?: string | null;
   paused: boolean;
@@ -321,6 +323,14 @@ export function ClientRecCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-navy">{client.client_name}</span>
+            {client.urgent && (
+              <span
+                title={client.urgent_note || "Urgent — books ASAP"}
+                className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-600 text-white"
+              >
+                URGENT
+              </span>
+            )}
             {isCleanupKind && (
               <span className="text-[10px] font-bold bg-violet-100 text-violet-800 px-1.5 py-0.5 rounded">
                 CLEANUP SIGN-OFF
