@@ -6,7 +6,7 @@ import {
   Sparkles, Users, LogOut, BookOpen, Clock,
   Shield, CreditCard, ChevronDown, ChevronRight, Sun, TrendingUp,
   Volume2, VolumeX, HeartPulse, Gauge, BadgeCheck,
-  ClipboardCheck, ListChecks, UserPlus, GraduationCap, Settings as SettingsIcon, Inbox, ListTodo, LifeBuoy, ExternalLink, Landmark,
+  ClipboardCheck, ListChecks, UserPlus, GraduationCap, Settings as SettingsIcon, Inbox, ListTodo, LifeBuoy, ExternalLink, Landmark, Mail,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -47,10 +47,12 @@ const toolsNav = [
   { href: "/templates", label: "Master COA", icon: BookOpen },
 ];
 
-/** One row: the /admin hub links onward to Billing, Bulk Email, Call
- *  Matching, Daily Recon, and the Audit Log. */
+/** The /admin hub links onward to Billing, Call Matching, Daily Recon, and
+ *  the Audit Log. Bulk Email gets its own row — used often enough on its
+ *  own that a hub-then-hub-link round trip wasn't worth it. */
 const adminItems = [
   { href: "/admin", label: "Admin", icon: Shield },
+  { href: "/admin/bulk-email", label: "Bulk Email", icon: Mail },
   { href: "/admin/upgrades", label: "Upgrade Radar", icon: TrendingUp },
 ];
 
