@@ -973,6 +973,8 @@ export interface JournalEntryLine {
   account_id: string;
   account_name?: string;
   description?: string;
+  /** Required by QBO on lines posting to A/R (Customer) or A/P (Vendor). */
+  entity?: { type: "Customer" | "Vendor"; id: string; name?: string };
 }
 
 export interface CreatedJournalEntry {
@@ -1079,6 +1081,14 @@ export async function createJournalEntry(
       JournalEntryLineDetail: {
         PostingType: l.posting_type,
         AccountRef: { value: l.account_id, name: l.account_name },
+        ...(l.entity
+          ? {
+              Entity: {
+                Type: l.entity.type,
+                EntityRef: { value: l.entity.id, name: l.entity.name },
+              },
+            }
+          : {}),
       },
     })),
   };
@@ -1237,6 +1247,75 @@ export async function createInvoice(
     { method: "POST", body: JSON.stringify(body) }
   );
   return data.Invoice;
+}
+
+export interface CreatePaymentForInvoiceParams {
+  customerId: string;
+  customerName?: string;
+  /** The open invoice this payment clears. */
+  invoiceId: string;
+  amount: number;
+  txnDate: string; // YYYY-MM-DD
+  /**
+   * Where the money "lands". For AR Aging Cleanup this is the Uncleared
+   * Deposits clearing account (Bank type) — the whole point is clearing the
+   * invoice off the AR Aging Detail report without touching real bank
+   * balances or the P&L.
+   */
+  depositToAccountId: string;
+  depositToAccountName?: string;
+  privateNote: string; // MUST include the caller's idempotency token
+}
+
+/**
+ * Create a brand-new Payment (Receive Payment) applied to one invoice, with
+ * an explicit deposit-to account. This is the primitive
+ * `applyPaymentToInvoices` deliberately is not: that one links an EXISTING
+ * payment already sitting in Undeposited Funds and never touches
+ * DepositToAccountRef. This one is for invoices with no payment behind them
+ * at all — the AR-aging case where the cash was long since deposited (or
+ * never existed) and the open invoice is just aging-report noise.
+ *
+ * A Payment with a LinkedTxn is the ONLY thing that removes an invoice from
+ * QBO's AR Aging Detail. A JE crediting A/R (even with a Customer entity)
+ * nets the balance but leaves the invoice line sitting open on the report.
+ *
+ * Caller is responsible for the idempotency pre-check
+ * (findByPrivateNoteToken with the token embedded in privateNote).
+ */
+export async function createPaymentForInvoice(
+  realmId: string,
+  accessToken: string,
+  params: CreatePaymentForInvoiceParams
+): Promise<{ Id: string; SyncToken?: string; TotalAmt?: number }> {
+  if (params.amount <= 0) {
+    throw new Error(`Payment amount must be positive (got ${params.amount})`);
+  }
+  const amount = Number(params.amount.toFixed(2));
+  const body: any = {
+    CustomerRef: { value: params.customerId, name: params.customerName },
+    TotalAmt: amount,
+    TxnDate: params.txnDate,
+    DepositToAccountRef: {
+      value: params.depositToAccountId,
+      name: params.depositToAccountName,
+    },
+    PrivateNote: params.privateNote.slice(0, 4000),
+    Line: [
+      {
+        Amount: amount,
+        LinkedTxn: [{ TxnId: params.invoiceId, TxnType: "Invoice" }],
+      },
+    ],
+  };
+
+  const data = await qboRequest<{ Payment: { Id: string; SyncToken?: string; TotalAmt?: number } }>(
+    realmId,
+    accessToken,
+    "/payment?minorversion=70",
+    { method: "POST", body: JSON.stringify(body) }
+  );
+  return data.Payment;
 }
 
 export interface ApplyPaymentParams {

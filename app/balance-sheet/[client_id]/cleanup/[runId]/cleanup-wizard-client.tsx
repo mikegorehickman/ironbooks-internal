@@ -6,6 +6,7 @@ import {
   ArrowRight, Upload, Shield, FileText, Play, Lock,
   Building2, Wallet, FileSearch, Receipt, Coins,
   Users as UsersIcon, Calculator, HelpCircle, X, Send, ClipboardList, Mail, Copy, Sparkles,
+  History, MinusCircle,
 } from "lucide-react";
 import { MODULE_LABELS, MODULE_ORDER, type CleanupModule } from "@/lib/cleanup-system/types";
 import { ProposedEntryRow } from "./proposed-entry-row";
@@ -53,6 +54,12 @@ const MODULE_META: Record<CleanupModule, { icon: any; description: string; posts
   accounts_receivable: {
     icon: FileSearch,
     description: "Connects to QuickBooks, reads open A/R + Undeposited Funds, and matches stuck payments to the right invoice — no upload needed. Also flags duplicate invoices. Posts ReceivePayment / voids on execute.",
+    postsToQbo: true,
+  },
+  ar_aging: {
+    icon: History,
+    description:
+      "Optional. Clears years of stale open invoices off the AR Aging report — the two-days-of-clicking job. In-scope invoices get a Receive Payment to an Uncleared Deposits clearing account (dated to the invoice, balance-sheet only, never touches the P&L). Pre-engagement years get one lump write-off entry. Upload the client's bank-deposit CSV to verify which invoices were really paid before clearing.",
     postsToQbo: true,
   },
   accounts_payable: {
@@ -327,6 +334,10 @@ export function CleanupWizardClient({
   const [aiSummary, setAiSummary] = useState("");
   const [crmSource, setCrmSource] = useState<"jobber" | "drip_jobs" | "generic">("jobber");
   const [crmCsv, setCrmCsv] = useState("");
+  // AR Aging Cleanup inputs — cutoff = first in-scope date (defaults server-side
+  // to the engagement's billing start year); deposits CSV is optional verification.
+  const [arAgingCutoff, setArAgingCutoff] = useState("");
+  const [arAgingDepositCsv, setArAgingDepositCsv] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -397,6 +408,10 @@ export function CleanupWizardClient({
         body.crm_source = crmSource;
         body.crm_csv_text = crmCsv;
       }
+      if (mod === "ar_aging") {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(arAgingCutoff)) body.cutoff_date = arAgingCutoff;
+        if (arAgingDepositCsv.trim()) body.deposit_csv_text = arAgingDepositCsv;
+      }
       const res = await fetch(`/api/cleanup/${runId}/modules/${mod}/discover`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -407,6 +422,35 @@ export function CleanupWizardClient({
       setStep("review");
       setReviewTab("needs_review");
       setTimeout(() => loadEntries(mod, "needs_review"), 1500);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setActing(false);
+    }
+  }
+
+  // Skip / unskip a module. Skipped counts as complete for the QA gate, so an
+  // optional module (AR Aging Cleanup) a client doesn't need never blocks
+  // delivery. Modules with entries already posted to QBO can't be skipped.
+  async function skipModule(mod: CleanupModule, unskip: boolean) {
+    if (
+      !unskip &&
+      !confirm(
+        `Skip ${MODULE_LABELS[mod]} for this cleanup? The QA gate will treat it as done. You can unskip any time before delivery.`
+      )
+    )
+      return;
+    setActing(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/cleanup/${runId}/modules/${mod}/skip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unskip }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Skip failed");
+      await refresh();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -968,12 +1012,17 @@ export function CleanupWizardClient({
               const isReady = m.status === "ready" || m.status === "locked";
               const isReviewing = m.status === "reviewing";
               const isComplete = m.status === "complete";
+              const isSkipped = m.status === "skipped";
               const inFlight = ["discovering", "executing"].includes(m.status);
               // Modules whose discovery reads QBO directly (open A/R + UF) —
               // labelled "Scan QuickBooks" so the bookkeeper knows no upload
               // is needed, just a live read of QuickBooks.
               const isQboScan =
-                m.module === "accounts_receivable" || m.module === "undeposited_funds";
+                m.module === "accounts_receivable" ||
+                m.module === "undeposited_funds" ||
+                m.module === "ar_aging";
+              // The genuinely-optional modules get a Skip affordance.
+              const isOptional = m.module === "ar_aging";
 
               return (
                 <div key={m.module}>
@@ -983,6 +1032,8 @@ export function CleanupWizardClient({
                         ? "border-emerald-200 bg-emerald-50/40"
                         : isReviewing
                         ? "border-amber-200 bg-amber-50/40"
+                        : isSkipped
+                        ? "border-gray-100 bg-gray-50/50 opacity-70"
                         : isLocked
                         ? "border-gray-100 bg-gray-50/50 opacity-60"
                         : "border-gray-100 hover:border-teal/30"
@@ -997,6 +1048,8 @@ export function CleanupWizardClient({
                         <Loader2 size={16} className="animate-spin text-teal" />
                       ) : isComplete ? (
                         <CheckCircle2 size={16} className="text-emerald-600" />
+                      ) : isSkipped ? (
+                        <MinusCircle size={16} className="text-gray-400" />
                       ) : (
                         <ModIcon size={16} className="text-navy" />
                       )}
@@ -1104,6 +1157,28 @@ export function CleanupWizardClient({
                       {isComplete && (
                         <span className="text-xs font-bold text-emerald-700 px-2">Done</span>
                       )}
+                      {/* Skip — only offered on optional modules that haven't
+                          posted anything. Skipped counts as done for the QA
+                          gate; unskip is one click until delivery. */}
+                      {isOptional && (isReady || isReviewing) && (m.executed_count || 0) === 0 && (
+                        <button
+                          onClick={() => skipModule(m.module, false)}
+                          disabled={acting}
+                          className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-ink-slate hover:bg-gray-50 disabled:opacity-50 inline-flex items-center gap-1.5"
+                          title="This client doesn't need this module — mark it skipped so it doesn't block the QA gate"
+                        >
+                          Skip <MinusCircle size={10} />
+                        </button>
+                      )}
+                      {isSkipped && (
+                        <button
+                          onClick={() => skipModule(m.module, true)}
+                          disabled={acting}
+                          className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-ink-slate hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          Unskip
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1162,6 +1237,85 @@ export function CleanupWizardClient({
                       />
                     </div>
                   )}
+
+                  {/* AR Aging Cleanup inputs — cutoff + optional deposits CSV.
+                      Shown until discovery runs; after that the year table
+                      below tells the story. */}
+                  {m.module === "ar_aging" && isReady && (
+                    <div className="ml-12 mb-2 p-3 rounded-xl border border-amber-100 bg-amber-50/50 mt-1 space-y-2">
+                      <h4 className="text-xs font-bold text-navy flex items-center gap-1.5">
+                        <History size={11} /> Engagement cutoff + deposit verification (both optional)
+                      </h4>
+                      <div className="flex items-center gap-2 flex-wrap text-[11px] text-ink-light">
+                        <span>
+                          Invoices dated <strong>on/after the cutoff</strong> get a Receive Payment each (dated to the
+                          invoice, deposited to Uncleared Deposits). <strong>Older years</strong> get one lump write-off
+                          entry per year, dated today. Leave blank to use the engagement start year
+                          {"; "}everything is in-scope when there's no cutoff at all.
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px] font-semibold text-navy">Cutoff</label>
+                        <input
+                          type="date"
+                          value={arAgingCutoff}
+                          onChange={(e) => setArAgingCutoff(e.target.value)}
+                          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5"
+                        />
+                        {arAgingCutoff && (
+                          <button onClick={() => setArAgingCutoff("")} className="text-[11px] text-ink-light hover:text-navy">
+                            clear
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-ink-light">
+                        Optionally attach the client&apos;s <strong>bank deposits CSV</strong> (date + amount columns —
+                        Logan-style credit-union exports work). Invoices with a matching deposit show as{" "}
+                        <strong>verified</strong>; ones without stand out as possible phantom revenue to investigate
+                        before clearing.
+                      </p>
+                      <CsvAttach
+                        value={arAgingDepositCsv}
+                        onChange={setArAgingDepositCsv}
+                        rows={2}
+                        placeholder="…or paste the deposits CSV here"
+                      />
+                    </div>
+                  )}
+                  {m.module === "ar_aging" &&
+                    !isReady &&
+                    m.discovery_notes?.year_totals?.length > 0 && (
+                      <div className="ml-12 mb-2 mt-1 p-3 rounded-xl border border-gray-100 bg-gray-50/60">
+                        <div className="text-[11px] text-ink-light mb-1.5">
+                          Open AR by year · cutoff{" "}
+                          <strong>{m.discovery_notes.cutoff || "none (all in-scope)"}</strong>
+                          {" · "}clearing account <strong>{m.discovery_notes.clearing_account}</strong>
+                          {m.discovery_notes.deposit_rows_uploaded > 0 && (
+                            <>
+                              {" · "}
+                              {m.discovery_notes.verified_count}/{m.discovery_notes.in_scope_count} verified against{" "}
+                              {m.discovery_notes.deposit_rows_uploaded} uploaded deposits
+                            </>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {m.discovery_notes.year_totals.map((y: any) => (
+                            <span
+                              key={y.year}
+                              className={`text-[11px] font-semibold px-2 py-1 rounded-lg border ${
+                                y.inScope
+                                  ? "border-teal/30 bg-teal-lighter/40 text-navy"
+                                  : "border-gray-200 bg-white text-ink-slate"
+                              }`}
+                              title={y.inScope ? "In scope — Receive Payment per invoice" : "Pre-engagement — lump write-off JE"}
+                            >
+                              {y.year}: {y.count} · {formatMoney(y.total)}
+                              {!y.inScope && " (write-off)"}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                 </div>
               );
             })}

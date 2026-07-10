@@ -9,7 +9,14 @@ import {
   SUPPORTED_TX_TYPES,
   type SupportedTxType,
 } from "@/lib/qbo-reclass";
-import { applyUfPaymentToInvoice, applyApPaymentToBill, createJournalEntry, voidQboInvoice } from "./qbo-posting";
+import {
+  applyUfPaymentToInvoice,
+  applyApPaymentToBill,
+  createJournalEntry,
+  voidQboInvoice,
+  createArAgingClearPayment,
+  postArAgingWriteoffJe,
+} from "./qbo-posting";
 import { parseEntryMeta } from "./entry-meta";
 
 export async function executeProposedEntries(
@@ -68,8 +75,68 @@ export async function executeProposedEntries(
     try {
       let qboResultId: string | null = null;
       let handled = false;
+      const entryMeta = parseEntryMeta(entry.ai_reasoning);
 
-      if (entry.entry_type === "receive_payment" && entry.qbo_transaction_id) {
+      if (
+        entry.entry_type === "receive_payment" &&
+        entryMeta?.type === "ar_aging_clear" &&
+        entry.qbo_transaction_id
+      ) {
+        // AR Aging Cleanup: qbo_transaction_id is the INVOICE (no payment
+        // exists yet — creating one IS the action), to_account is the
+        // Uncleared Deposits clearing account the payment deposits to.
+        const amount = Number(entry.amount || 0);
+        if (!entryMeta.customer_id || !entry.to_account_id || amount <= 0 || !entry.txn_date) {
+          skipped++;
+          continue;
+        }
+        qboResultId = await createArAgingClearPayment(realmId, accessToken, {
+          customerId: entryMeta.customer_id,
+          customerName: entryMeta.customer_name || undefined,
+          invoiceId: entry.qbo_transaction_id,
+          amount,
+          txnDate: entry.txn_date,
+          depositToAccountId: entry.to_account_id,
+          depositToAccountName: entry.to_account_name || undefined,
+          runId,
+          entryId: entry.id,
+        });
+        handled = true;
+      } else if (
+        entry.entry_type === "journal_entry" &&
+        entryMeta?.type === "ar_aging_writeoff" &&
+        entry.je_lines &&
+        entry.txn_date
+      ) {
+        // Lump pre-engagement writeoff — dedicated poster with a per-customer
+        // fallback if QBO rejects multiple A/R lines in one JE.
+        const lines = entry.je_lines as any[];
+        const debit = lines.find((l) => l.side === "debit");
+        const credits = lines.filter((l) => l.side === "credit" && l.entity_id);
+        if (!debit?.qbo_account_id || credits.length === 0) {
+          skipped++;
+          continue;
+        }
+        qboResultId = await postArAgingWriteoffJe(realmId, accessToken, {
+          txnDate: entry.txn_date,
+          memo: entry.memo || `AR aging writeoff ${runId}`,
+          debit: {
+            accountId: debit.qbo_account_id,
+            accountName: debit.account_hint,
+            amount: Number(debit.amount),
+            description: debit.description,
+          },
+          credits: credits.map((c) => ({
+            accountId: c.qbo_account_id,
+            accountName: c.account_hint,
+            amount: Number(c.amount),
+            description: c.description,
+            customerId: String(c.entity_id),
+            customerName: c.entity_name,
+          })),
+        });
+        handled = true;
+      } else if (entry.entry_type === "receive_payment" && entry.qbo_transaction_id) {
         const meta = parseEntryMeta(entry.ai_reasoning);
         const invoiceId =
           entry.bookkeeper_override_target_id ||

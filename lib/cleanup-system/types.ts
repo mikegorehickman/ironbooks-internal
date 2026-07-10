@@ -16,6 +16,7 @@ export type CleanupModule =
   | "bank_recon"
   | "undeposited_funds"
   | "accounts_receivable"
+  | "ar_aging"
   | "accounts_payable"
   | "loans"
   | "shareholder_draws"
@@ -58,6 +59,7 @@ export type CpaFlagStatus = "open" | "signed_off" | "dismissed";
  */
 export const MODULE_ORDER: CleanupModule[] = [
   "accounts_receivable",
+  "ar_aging",
   "undeposited_funds",
   "accounts_payable",
   "loans",
@@ -70,6 +72,7 @@ export const MODULE_LABELS: Record<CleanupModule, string> = {
   bank_recon: "Bank & Credit Card Reconciliation",
   undeposited_funds: "Undeposited Funds",
   accounts_receivable: "Accounts Receivable",
+  ar_aging: "AR Aging Cleanup",
   accounts_payable: "Accounts Payable",
   loans: "Loans",
   shareholder_draws: "Shareholder Draws / Loans",

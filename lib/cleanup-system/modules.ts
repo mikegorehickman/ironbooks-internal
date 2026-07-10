@@ -11,6 +11,7 @@ import {
   discoverAccountsReceivableModule,
   type ArDiscoverOptions,
 } from "./ar-discovery";
+import { discoverArAgingModule, type ArAgingOptions } from "./ar-aging-cleanup";
 import { getValidToken, fetchAllAccounts } from "@/lib/qbo";
 import { resolveAccount } from "@/lib/qbo-journal-entry";
 import { analyzeClientLoans } from "@/lib/loan-analyzer";
@@ -810,6 +811,9 @@ export async function discoverObeUncategorizedModule(
   return { proposed };
 }
 
+/** Union of per-module discover options — each discoverer picks what it needs. */
+export type DiscoverOptions = ArDiscoverOptions & ArAgingOptions;
+
 const DISCOVERERS: Record<
   CleanupModule,
   (
@@ -817,13 +821,14 @@ const DISCOVERERS: Record<
     runId: string,
     clientLinkId: string,
     periodLockDate: string,
-    options?: ArDiscoverOptions
+    options?: DiscoverOptions
   ) => Promise<{ proposed: number }>
 > = {
   bank_recon: (s, r, c) => discoverBankReconModule(s, r, c),
   undeposited_funds: (s, r, c, d) => discoverUndepositedFundsModule(s, r, c, d),
   accounts_receivable: (s, r, c, d, o) =>
     discoverAccountsReceivableModule(s, r, c, d, o || {}),
+  ar_aging: (s, r, c, d, o) => discoverArAgingModule(s, r, c, d, o || {}),
   accounts_payable: (s, r, c) => discoverAccountsPayableModule(s, r, c),
   loans: (s, r, c, d) => discoverLoansModule(s, r, c, d),
   shareholder_draws: (s, r, c) => discoverShareholderDrawsModule(s, r, c),
@@ -837,7 +842,7 @@ export async function discoverModule(
   clientLinkId: string,
   module: CleanupModule,
   periodLockDate: string,
-  options?: ArDiscoverOptions
+  options?: DiscoverOptions
 ): Promise<{ proposed: number }> {
   await service
     .from("cleanup_run_modules")
