@@ -20,7 +20,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllAccounts, qboRequest } from "./qbo";
 import {
   fetchBalancesAsOf,
-  fetchAccountTransactions,
   fetchOpenInvoices,
 } from "./qbo-balance-sheet";
 import { scanUfAudit } from "./uf-audit";
@@ -258,6 +257,73 @@ interface RunParams {
 const MAX_FINDINGS_PER_CHECK = 25;
 const cap = <T,>(arr: T[]) => arr.slice(0, MAX_FINDINGS_PER_CHECK);
 
+/**
+ * Count + total the transactions that actually POST to a set of accounts in a
+ * period, reliably.
+ *
+ * Why not fetchAccountTransactions per account: that relies on the
+ * TransactionList report's `account=<id>` FILTER param, which QBO silently
+ * IGNORES — so each call returns the whole period, and looping over the 3
+ * default "Uncategorized Income/Expense/Asset" accounts reported ~3× the entire
+ * month as "uncategorized" (the XPaint false must-fix, 2026-07-09). Instead we
+ * pull the period ONCE and bucket by the account id carried on each row's
+ * account column — the same trusted attribution fetchTransactionCountsForAllAccounts
+ * uses for inactivation pre-flight.
+ */
+async function fetchActivityForAccounts(
+  realmId: string,
+  accessToken: string,
+  accountIds: Set<string>,
+  startDate: string,
+  endDate: string
+): Promise<{ count: number; amount: number }> {
+  if (accountIds.size === 0) return { count: 0, amount: 0 };
+  const params = new URLSearchParams({
+    start_date: startDate,
+    end_date: endDate,
+    columns: "tx_date,account_name,subt_nat_amount,txn_type",
+    minorversion: "70",
+  });
+  let data: any;
+  try {
+    data = await qboRequest<any>(realmId, accessToken, `/reports/TransactionList?${params.toString()}`);
+  } catch {
+    return { count: 0, amount: 0 };
+  }
+  const cols: any[] = data?.Columns?.Column || [];
+  let acctIdx = -1;
+  let amtIdx = -1;
+  cols.forEach((c, i) => {
+    const title = String(c?.ColTitle || "").toLowerCase();
+    const type = String(c?.ColType || "").toLowerCase();
+    if (acctIdx < 0 && (title.includes("account") || type === "account")) acctIdx = i;
+    if (amtIdx < 0 && (title.includes("amount") || type === "money")) amtIdx = i;
+  });
+  if (acctIdx < 0) return { count: 0, amount: 0 };
+
+  let count = 0;
+  let amount = 0;
+  const walk = (rows: any[]) => {
+    if (!Array.isArray(rows)) return;
+    for (const row of rows) {
+      if (Array.isArray(row.ColData)) {
+        const cell = row.ColData[acctIdx];
+        if (cell?.id && accountIds.has(String(cell.id))) {
+          count++;
+          if (amtIdx >= 0) {
+            const raw = String(row.ColData[amtIdx]?.value || "0").replace(/[,$ ]/g, "");
+            const n = Number(raw);
+            if (Number.isFinite(n)) amount += Math.abs(n);
+          }
+        }
+      }
+      if (row.Rows?.Row) walk(row.Rows.Row);
+    }
+  };
+  walk(data?.Rows?.Row);
+  return { count, amount: Math.round(amount * 100) / 100 };
+}
+
 export async function runBooksVerification(params: RunParams): Promise<VerificationResult> {
   const { service, clientLinkId, realmId, accessToken, period, periodStart, periodEnd, includeBS, kind, ranBy } = params;
   const t0 = Date.now();
@@ -426,20 +492,15 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
 
   // ── Categorization ──────────────────────────────────────────────────
   {
+    // QBO's default "Uncategorized Income/Expense/Asset" accounts (match by
+    // name), counted via a SINGLE period pull bucketed by account id — not a
+    // per-account refetch, whose ignored `account=` filter tripled the count
+    // (XPaint reported 972 / $524k with nothing actually uncategorized).
     const uncatAccounts = accounts.filter((a: any) => active(a) && /uncategor/i.test(a.Name));
-    let uncatCount = 0;
-    let uncatAmount = 0;
-    for (const a of uncatAccounts) {
-      try {
-        const txns = await track(
-          fetchAccountTransactions(realmId, accessToken, String(a.Id), periodStart, periodEnd)
-        );
-        uncatCount += txns.length;
-        uncatAmount += txns.reduce((s: number, t: any) => s + Math.abs(Number(t.amount || 0)), 0);
-      } catch {
-        /* count what we can */
-      }
-    }
+    const uncatIds = new Set(uncatAccounts.map((a: any) => String(a.Id)));
+    const { count: uncatCount, amount: uncatAmount } = await track(
+      fetchActivityForAccounts(realmId, accessToken, uncatIds, periodStart, periodEnd)
+    );
     checks.push({
       key: "uncategorized",
       label: "Uncategorized transactions",
