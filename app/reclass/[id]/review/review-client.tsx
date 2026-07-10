@@ -1204,12 +1204,20 @@ function MasterAccountSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const filtered = masterAccounts.filter(
-    (m) =>
-      m.account_name.toLowerCase().includes(search.toLowerCase()) ||
-      (m.parent_account_name || "").toLowerCase().includes(search.toLowerCase()) ||
-      (m.section || "").toLowerCase().includes(search.toLowerCase())
-  );
+  // Tokenized, punctuation-insensitive match — a plain phrase-substring match
+  // (the old behavior) required the WHOLE typed string to appear verbatim, so
+  // typing "owner draw" found nothing against an account literally named
+  // "Owner's Draw" (the apostrophe breaks contiguity). Split the query into
+  // words, strip punctuation from both sides, and require every word to
+  // appear somewhere across name/parent/section — order- and
+  // punctuation-independent.
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const searchTokens = normalize(search).split(/\s+/).filter(Boolean);
+  const filtered = masterAccounts.filter((m) => {
+    if (searchTokens.length === 0) return true;
+    const haystack = normalize(`${m.account_name} ${m.parent_account_name || ""} ${m.section || ""}`);
+    return searchTokens.every((t) => haystack.includes(t));
+  });
 
   return (
     <div className="relative">
