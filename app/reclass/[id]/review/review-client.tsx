@@ -194,6 +194,23 @@ export function ReclassReview({
   }
 
   /**
+   * Pull a single row out of its current bucket into another one — used to
+   * un-approve an Auto-Approve row that shouldn't have been (send it to Ask
+   * Client / Needs Review / Flagged instead). Decision-only: whatever target
+   * account is already set (AI's or a bookkeeper override) is left in place
+   * as a starting point for whoever picks this row up next, same as
+   * moveToAskClient does.
+   */
+  async function moveRowTo(rowId: string, decision: "ask_client" | "needs_review" | "flagged") {
+    setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, decision } : r)));
+    await fetch(`/api/reclass/decisions/${rowId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+  }
+
+  /**
    * Set the target account for a row.
    *
    * A row currently sitting in Ask Client STAYS in Ask Client — picking a
@@ -664,7 +681,8 @@ export function ReclassReview({
             {partitioned.auto.length > 0 && (
               <div className="p-3 bg-green-50 border-b border-green-100 text-sm text-green-800">
                 <CheckCircle2 size={14} className="inline mr-1" />
-                Auto-approved — these will execute as shown. Use the dropdown if you want to override any.
+                Auto-approved — these will execute as shown. Use the dropdown to change the target account,
+                or use "Move to" to pull a row out entirely — Ask Client, Needs Review, or Flag it for a senior.
               </div>
             )}
             <RowTable
@@ -674,6 +692,7 @@ export function ReclassReview({
               showApproveReject={false}
               masterAccounts={masterAccounts}
               onTargetChange={setTarget}
+              onMoveTo={moveRowTo}
             />
           </>
         )}
@@ -966,6 +985,7 @@ function RowTable({
   onReject,
   onMoveToAskClient,
   onApproveChoice,
+  onMoveTo,
 }: {
   rows: Reclassification[];
   showConfidence: boolean;
@@ -986,6 +1006,11 @@ function RowTable({
    *  bookkeeper override). Used on the Ask Client tab so the bookkeeper can
    *  one-click confirm a row without the email-to-client step. */
   onApproveChoice?: (id: string) => void;
+  /** If provided, renders a row of small "Move to..." buttons (Ask Client /
+   *  Needs Review / Flagged) — the un-approve escape hatch for a row that
+   *  shouldn't have auto-approved. Decision-only; the target account (if
+   *  any) is left as-is for whoever picks the row up next. */
+  onMoveTo?: (id: string, decision: "ask_client" | "needs_review" | "flagged") => void;
 }) {
   if (rows.length === 0) {
     return <div className="p-8 text-center text-ink-slate text-sm">No transactions in this category.</div>;
@@ -1017,6 +1042,9 @@ function RowTable({
             )}
             {onMoveToAskClient && (
               <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Ask Client?</th>
+            )}
+            {onMoveTo && (
+              <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Move to</th>
             )}
             {onApproveChoice && (
               <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Approve</th>
@@ -1140,6 +1168,36 @@ function RowTable({
                     <HelpCircle size={11} />
                     Ask Client
                   </button>
+                </td>
+              )}
+              {onMoveTo && (
+                <td className="px-4 py-2.5 text-right">
+                  <div className="flex justify-end gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => onMoveTo(r.id, "ask_client")}
+                      className="text-[11px] px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 inline-flex items-center gap-1"
+                      title="Pull this out of Auto-Approve and send it to the client for clarification instead"
+                    >
+                      <HelpCircle size={10} />
+                      Ask Client
+                    </button>
+                    <button
+                      onClick={() => onMoveTo(r.id, "needs_review")}
+                      className="text-[11px] px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 inline-flex items-center gap-1"
+                      title="Pull this out of Auto-Approve for a bookkeeper to look at again"
+                    >
+                      <AlertTriangle size={10} />
+                      Needs Review
+                    </button>
+                    <button
+                      onClick={() => onMoveTo(r.id, "flagged")}
+                      className="text-[11px] px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 inline-flex items-center gap-1"
+                      title="Pull this out of Auto-Approve and flag it for a senior"
+                    >
+                      <Flag size={10} />
+                      Flag
+                    </button>
+                  </div>
                 </td>
               )}
               {onApproveChoice && (
