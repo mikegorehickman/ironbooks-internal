@@ -15,6 +15,8 @@ export interface ClientAnswerRow {
   date: string | null;
   amount: number;
   vendor: string | null;
+  /** Normalized vendor pattern — the grouping key bank rules are keyed on. */
+  vendor_pattern: string | null;
   description: string | null;
   from_account: string | null;
   /** The account the client picked in their portal (null = free-text only). */
@@ -33,7 +35,7 @@ export async function getClientAnswers(
   const { data, error } = await svc
     .from("reclassifications")
     .select(
-      `id, reclass_job_id, transaction_date, transaction_amount, vendor_name, description,
+      `id, reclass_job_id, transaction_date, transaction_amount, vendor_name, vendor_pattern_normalized, description,
        from_account_name, client_response_account, client_response_note, client_responded_at,
        status, error_message,
        reclass_jobs!reclass_job_id!inner(id, client_link_id,
@@ -60,6 +62,7 @@ export async function getClientAnswers(
       date: r.transaction_date,
       amount: Number(r.transaction_amount || 0),
       vendor: r.vendor_name && r.vendor_name !== "Unknown vendor" ? r.vendor_name : null,
+      vendor_pattern: r.vendor_pattern_normalized || null,
       description: r.description || null,
       from_account: r.from_account_name || null,
       answer_account: r.client_response_account || null,
