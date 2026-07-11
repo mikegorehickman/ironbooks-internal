@@ -10,15 +10,15 @@ const conf = (v: string, amt: number) => lookupVendor(v, "", amt, "painters")?.c
 // ── Gas-station amount bands ──
 ok(acct("SHELL 4529 SASKATOON", 6.5) === "Meals (50% deductible)", "Shell $6.50 → Meals");
 ok(conf("SHELL 4529 SASKATOON", 6.5)! < 0.95, "small gas purchase stays below auto-execute floor");
-ok(acct("SHELL 4529 SASKATOON", 80) === "Fuel – Admin & Sales Vehicles", "Shell $80 → Fuel");
+ok(acct("SHELL 4529 SASKATOON", 80) === "Fuel – Overhead", "Shell $80 → Fuel");
 ok(acct("ESSO CIRCLE DR", 12) === "Meals (50% deductible)", "Esso $12 → Meals");
-ok(acct("ESSO CIRCLE DR", 65) === "Fuel – Admin & Sales Vehicles", "Esso $65 → Fuel");
+ok(acct("ESSO CIRCLE DR", 65) === "Fuel – Overhead", "Esso $65 → Fuel");
 ok(acct("CIRCLE K #2231", 4) === "Meals (50% deductible)", "Circle K $4 → Meals");
-ok(acct("7-ELEVEN 33099", 44) === "Fuel – Admin & Sales Vehicles", "7-Eleven $44 → Fuel");
+ok(acct("7-ELEVEN 33099", 44) === "Fuel – Overhead", "7-Eleven $44 → Fuel");
 // pay-at-pump / cardlock exclusions: small amount is still fuel
-ok(acct("COSTCO GAS W441", 12) === "Fuel – Admin & Sales Vehicles", "Costco Gas $12 stays Fuel (pay-at-pump only)");
-ok(acct("PETRO-PASS SASKATOON", 9) === "Fuel – Admin & Sales Vehicles", "Petro-Pass $9 stays Fuel (cardlock)");
-ok(acct("HUGHES PETROLEUM LTD", 8) === "Fuel – Admin & Sales Vehicles", "Hughes $8 stays Fuel (commercial)");
+ok(acct("COSTCO GAS W441", 12) === "Fuel – Overhead", "Costco Gas $12 stays Fuel (pay-at-pump only)");
+ok(acct("PETRO-PASS SASKATOON", 9) === "Fuel – Overhead", "Petro-Pass $9 stays Fuel (cardlock)");
+ok(acct("HUGHES PETROLEUM LTD", 8) === "Fuel – Overhead", "Hughes $8 stays Fuel (commercial)");
 // existing tiny-fee rule still wins for fees
 ok(acct("E-TRANSFER FEE", 1.5) === "Bank Charges", "e-transfer $1.50 still Bank Charges");
 

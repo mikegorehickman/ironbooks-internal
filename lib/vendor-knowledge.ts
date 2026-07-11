@@ -45,9 +45,9 @@ const PATTERNS: VendorPattern[] = [
   // Cash withdrawn from ATM is essentially untracked spending — booked to owner
   // draw by default for trades businesses (rules vary by client but this is the
   // safest default).
-  { pattern: /\batm\s+(withdrawal|wd|w\/d|cash|debit)/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "ATM Withdrawal → Owner Draw (untracked cash)" },
-  { pattern: /\bwithdrawal\s*[\-:]\s*atm/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "ATM Withdrawal → Owner Draw" },
-  { pattern: /^atm\b/i, account: "Owner Draw / Salary", confidence: 0.88, reasoning: "ATM transaction → Owner Draw" },
+  { pattern: /\batm\s+(withdrawal|wd|w\/d|cash|debit)/i, account: "Owner's Draw", confidence: 0.95, reasoning: "ATM Withdrawal → Owner Draw (untracked cash)" },
+  { pattern: /\bwithdrawal\s*[\-:]\s*atm/i, account: "Owner's Draw", confidence: 0.95, reasoning: "ATM Withdrawal → Owner Draw" },
+  { pattern: /^atm\b/i, account: "Owner's Draw", confidence: 0.88, reasoning: "ATM transaction → Owner Draw" },
 
   // ══════════════════ E-TRANSFER FEE — tiny amounts ALWAYS bank fee ══════════════════
   // Canadian banks charge $1-$1.50 per e-transfer. Anything sub-$2 with "e-transfer"
@@ -61,16 +61,16 @@ const PATTERNS: VendorPattern[] = [
 
   // ══════════════════ GYMS → Owner Draw ══════════════════
   // Personal fitness memberships almost always = owner draw for trades clients
-  { pattern: /\bfit4less\b/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "Fit4Less → Owner Draw (personal)" },
-  { pattern: /good\s*life\s+fitness/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "GoodLife Fitness → Owner Draw (personal)" },
-  { pattern: /anytime\s+fitness/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "Anytime Fitness → Owner Draw (personal)" },
-  { pattern: /\bplanet\s+fitness/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "Planet Fitness → Owner Draw (personal)" },
-  { pattern: /\bworld\s+gym\b/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "World Gym → Owner Draw (personal)" },
-  { pattern: /\bcrunch\s+fitness/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "Crunch Fitness → Owner Draw (personal)" },
-  { pattern: /\b(la|24\s*hour)\s+fitness/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "LA/24h Fitness → Owner Draw (personal)" },
-  { pattern: /\borange\s*theory/i, account: "Owner Draw / Salary", confidence: 0.95, reasoning: "Orangetheory → Owner Draw (personal)" },
-  { pattern: /\b(curves|f45|crossfit)\b/i, account: "Owner Draw / Salary", confidence: 0.93, reasoning: "Gym/CrossFit → Owner Draw (personal)" },
-  { pattern: /\byoga\s+(studio|barn|works)/i, account: "Owner Draw / Salary", confidence: 0.90, reasoning: "Yoga studio → Owner Draw (personal)" },
+  { pattern: /\bfit4less\b/i, account: "Owner's Draw", confidence: 0.95, reasoning: "Fit4Less → Owner Draw (personal)" },
+  { pattern: /good\s*life\s+fitness/i, account: "Owner's Draw", confidence: 0.95, reasoning: "GoodLife Fitness → Owner Draw (personal)" },
+  { pattern: /anytime\s+fitness/i, account: "Owner's Draw", confidence: 0.95, reasoning: "Anytime Fitness → Owner Draw (personal)" },
+  { pattern: /\bplanet\s+fitness/i, account: "Owner's Draw", confidence: 0.95, reasoning: "Planet Fitness → Owner Draw (personal)" },
+  { pattern: /\bworld\s+gym\b/i, account: "Owner's Draw", confidence: 0.95, reasoning: "World Gym → Owner Draw (personal)" },
+  { pattern: /\bcrunch\s+fitness/i, account: "Owner's Draw", confidence: 0.95, reasoning: "Crunch Fitness → Owner Draw (personal)" },
+  { pattern: /\b(la|24\s*hour)\s+fitness/i, account: "Owner's Draw", confidence: 0.95, reasoning: "LA/24h Fitness → Owner Draw (personal)" },
+  { pattern: /\borange\s*theory/i, account: "Owner's Draw", confidence: 0.95, reasoning: "Orangetheory → Owner Draw (personal)" },
+  { pattern: /\b(curves|f45|crossfit)\b/i, account: "Owner's Draw", confidence: 0.93, reasoning: "Gym/CrossFit → Owner Draw (personal)" },
+  { pattern: /\byoga\s+(studio|barn|works)/i, account: "Owner's Draw", confidence: 0.90, reasoning: "Yoga studio → Owner Draw (personal)" },
 
   // ══════════════════ GROCERY STORES → Employee Benefits (employee appreciation) ══════════════════
   // Trades clients buying groceries are usually doing it for crew lunches /
@@ -92,7 +92,7 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /\bwalmart\b|\bwal[\s\-]?mart\b/i, account: "Office Supplies", confidence: 0.92, reasoning: "Walmart → Office Supplies" },
 
   // ══════════════════ COSTCO DISAMBIGUATION (most specific first) ══════════════════
-  { pattern: /costco\s*(gas|fuel|cardlock)/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Costco Gas → Fuel" },
+  { pattern: /costco\s*(gas|fuel|cardlock)/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Costco Gas → Fuel" },
   { pattern: /costco\s*(food court|restaurant)/i, account: "Meals (50% deductible)", confidence: 0.95, reasoning: "Costco Food Court → Meals" },
   { pattern: /costco\s*(whse|wholesale|business)/i, account: "Job Supplies", confidence: 0.85, reasoning: "Costco Wholesale → Job Supplies (default for trades)" },
 
@@ -108,29 +108,29 @@ const PATTERNS: VendorPattern[] = [
     account: "Meals (50% deductible)", confidence: 0.90, reasoning: "Small gas-station purchase (≤$15) → likely snack/coffee, not fuel", amountRange: [0, 15] },
 
   // ══════════════════ FUEL / GAS STATIONS ══════════════════
-  { pattern: /\bessom?\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Esso → Fuel" },
-  { pattern: /\bshell\b(?!.*lube)/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Shell → Fuel" },
-  { pattern: /\bchevron\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Chevron → Fuel" },
-  { pattern: /petro[\s\-]?canada/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Petro-Canada → Fuel" },
-  { pattern: /\bpetro[\s\-]?pass\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Petro-Pass → Fuel" },
-  { pattern: /\bhusky\b(?!.*travel)/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.93, reasoning: "Husky → Fuel" },
-  { pattern: /\bhusky\s+travel/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Husky Travel Centre → Fuel" },
-  { pattern: /hughes\s+petroleum/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.97, reasoning: "Hughes Petroleum → Fuel" },
-  { pattern: /\bco[\s\-]?op\s+(gas|cardlock|fuel)/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.95, reasoning: "Co-op Gas/Cardlock → Fuel" },
-  { pattern: /federated\s+co[\s\-]?op/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.90, reasoning: "Federated Co-op → Fuel (likely)" },
-  { pattern: /\bdomo\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.90, reasoning: "Domo → Fuel" },
-  { pattern: /\bfasgas\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.93, reasoning: "FasGas → Fuel" },
-  { pattern: /\bcentex\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.90, reasoning: "Centex → Fuel" },
-  { pattern: /\bmohawk\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.88, reasoning: "Mohawk → Fuel" },
-  { pattern: /\bmacewen\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.90, reasoning: "Macewen → Fuel" },
-  { pattern: /pioneer\s+(gas|station)/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.92, reasoning: "Pioneer Gas → Fuel" },
-  { pattern: /\b7[\s\-]?eleven\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.85, reasoning: "7-Eleven → Fuel (convenience+gas)" },
-  { pattern: /\bcircle\s*k\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.85, reasoning: "Circle K → Fuel" },
-  { pattern: /\brace\s*trac\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.92, reasoning: "Race Trac → Fuel" },
-  { pattern: /\bspeedway\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.92, reasoning: "Speedway → Fuel" },
-  { pattern: /\bsunoco\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.92, reasoning: "Sunoco → Fuel" },
-  { pattern: /\b(mobil|exxon)\b/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.92, reasoning: "Mobil/Exxon → Fuel" },
-  { pattern: /\bbp\s+(gas|fuel)/i, account: "Fuel – Admin & Sales Vehicles", confidence: 0.92, reasoning: "BP → Fuel" },
+  { pattern: /\bessom?\b/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Esso → Fuel" },
+  { pattern: /\bshell\b(?!.*lube)/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Shell → Fuel" },
+  { pattern: /\bchevron\b/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Chevron → Fuel" },
+  { pattern: /petro[\s\-]?canada/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Petro-Canada → Fuel" },
+  { pattern: /\bpetro[\s\-]?pass\b/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Petro-Pass → Fuel" },
+  { pattern: /\bhusky\b(?!.*travel)/i, account: "Fuel – Overhead", confidence: 0.93, reasoning: "Husky → Fuel" },
+  { pattern: /\bhusky\s+travel/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Husky Travel Centre → Fuel" },
+  { pattern: /hughes\s+petroleum/i, account: "Fuel – Overhead", confidence: 0.97, reasoning: "Hughes Petroleum → Fuel" },
+  { pattern: /\bco[\s\-]?op\s+(gas|cardlock|fuel)/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Co-op Gas/Cardlock → Fuel" },
+  { pattern: /federated\s+co[\s\-]?op/i, account: "Fuel – Overhead", confidence: 0.90, reasoning: "Federated Co-op → Fuel (likely)" },
+  { pattern: /\bdomo\b/i, account: "Fuel – Overhead", confidence: 0.90, reasoning: "Domo → Fuel" },
+  { pattern: /\bfasgas\b/i, account: "Fuel – Overhead", confidence: 0.93, reasoning: "FasGas → Fuel" },
+  { pattern: /\bcentex\b/i, account: "Fuel – Overhead", confidence: 0.90, reasoning: "Centex → Fuel" },
+  { pattern: /\bmohawk\b/i, account: "Fuel – Overhead", confidence: 0.88, reasoning: "Mohawk → Fuel" },
+  { pattern: /\bmacewen\b/i, account: "Fuel – Overhead", confidence: 0.90, reasoning: "Macewen → Fuel" },
+  { pattern: /pioneer\s+(gas|station)/i, account: "Fuel – Overhead", confidence: 0.92, reasoning: "Pioneer Gas → Fuel" },
+  { pattern: /\b7[\s\-]?eleven\b/i, account: "Fuel – Overhead", confidence: 0.85, reasoning: "7-Eleven → Fuel (convenience+gas)" },
+  { pattern: /\bcircle\s*k\b/i, account: "Fuel – Overhead", confidence: 0.85, reasoning: "Circle K → Fuel" },
+  { pattern: /\brace\s*trac\b/i, account: "Fuel – Overhead", confidence: 0.92, reasoning: "Race Trac → Fuel" },
+  { pattern: /\bspeedway\b/i, account: "Fuel – Overhead", confidence: 0.92, reasoning: "Speedway → Fuel" },
+  { pattern: /\bsunoco\b/i, account: "Fuel – Overhead", confidence: 0.92, reasoning: "Sunoco → Fuel" },
+  { pattern: /\b(mobil|exxon)\b/i, account: "Fuel – Overhead", confidence: 0.92, reasoning: "Mobil/Exxon → Fuel" },
+  { pattern: /\bbp\s+(gas|fuel)/i, account: "Fuel – Overhead", confidence: 0.92, reasoning: "BP → Fuel" },
 
   // ══════════════════ PAINT SUPPLIERS (painters only) ══════════════════
   { pattern: /sherwin[\s\-]?williams|^sw\s+(paint|stores)/i, account: "Paint & Materials", confidence: 0.97, reasoning: "Sherwin-Williams → Paint & Materials", industries: ["painters"] },
@@ -188,13 +188,13 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /\bdenny['']?s\b|\bihop\b|smitty['']?s|kelsey['']?s/i, account: "Meals (50% deductible)", confidence: 0.95, reasoning: "Family restaurant chain → Meals" },
 
   // ══════════════════ VEHICLE REPAIRS ══════════════════
-  { pattern: /mr\.?\s+lube|jiffy\s+lube/i, account: "Vehicle Repairs – Admin/Sales", confidence: 0.97, reasoning: "Lube shop → Vehicle Repairs" },
-  { pattern: /mister\s+transmission/i, account: "Vehicle Repairs – Admin/Sales", confidence: 0.97, reasoning: "Mister Transmission → Vehicle Repairs" },
-  { pattern: /\bmidas\b/i, account: "Vehicle Repairs – Admin/Sales", confidence: 0.95, reasoning: "Midas → Vehicle Repairs" },
-  { pattern: /kal\s+tire|fountain\s+tire|ok\s+tire/i, account: "Vehicle Repairs – Admin/Sales", confidence: 0.95, reasoning: "Tire shop → Vehicle Repairs" },
-  { pattern: /canadian\s+tire\s+(auto|car)/i, account: "Vehicle Repairs – Admin/Sales", confidence: 0.95, reasoning: "Canadian Tire Auto → Vehicle Repairs" },
-  { pattern: /pep\s+boys/i, account: "Vehicle Repairs – Admin/Sales", confidence: 0.95, reasoning: "Pep Boys → Vehicle Repairs" },
-  { pattern: /\bautozone\b/i, account: "Vehicle Repairs – Admin/Sales", confidence: 0.90, reasoning: "AutoZone → Vehicle Repairs" },
+  { pattern: /mr\.?\s+lube|jiffy\s+lube/i, account: "Vehicle Repairs", confidence: 0.97, reasoning: "Lube shop → Vehicle Repairs" },
+  { pattern: /mister\s+transmission/i, account: "Vehicle Repairs", confidence: 0.97, reasoning: "Mister Transmission → Vehicle Repairs" },
+  { pattern: /\bmidas\b/i, account: "Vehicle Repairs", confidence: 0.95, reasoning: "Midas → Vehicle Repairs" },
+  { pattern: /kal\s+tire|fountain\s+tire|ok\s+tire/i, account: "Vehicle Repairs", confidence: 0.95, reasoning: "Tire shop → Vehicle Repairs" },
+  { pattern: /canadian\s+tire\s+(auto|car)/i, account: "Vehicle Repairs", confidence: 0.95, reasoning: "Canadian Tire Auto → Vehicle Repairs" },
+  { pattern: /pep\s+boys/i, account: "Vehicle Repairs", confidence: 0.95, reasoning: "Pep Boys → Vehicle Repairs" },
+  { pattern: /\bautozone\b/i, account: "Vehicle Repairs", confidence: 0.90, reasoning: "AutoZone → Vehicle Repairs" },
 
   // ══════════════════ JOB DISPOSAL ══════════════════
   { pattern: /waste\s+management|\bwm\s+(canada|inc)/i, account: "Job Disposal Fees", confidence: 0.95, reasoning: "Waste Management → Job Disposal Fees" },
@@ -212,11 +212,11 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /interac\s+e[\s\-]?transfer\s+fee|e[\s\-]?tfr\s+fee|emt\s+fee/i, account: "Bank Charges", confidence: 0.97, reasoning: "Interac e-Transfer Fee → Bank Charges" },
 
   // ══════════════════ INSURANCE ══════════════════
-  { pattern: /state\s+farm/i, account: "General Liability Insurance", confidence: 0.85, reasoning: "State Farm → Insurance" },
-  { pattern: /\ballstate\b/i, account: "General Liability Insurance", confidence: 0.85, reasoning: "Allstate → Insurance" },
-  { pattern: /\bgeico\b/i, account: "General Liability Insurance", confidence: 0.85, reasoning: "Geico → Insurance" },
-  { pattern: /progressive\s+(ins|claim)/i, account: "General Liability Insurance", confidence: 0.85, reasoning: "Progressive → Insurance" },
-  { pattern: /\bintact\b|\baviva\b|wawanesa|co[\s\-]?operators/i, account: "General Liability Insurance", confidence: 0.85, reasoning: "Canadian insurer → Insurance" },
+  { pattern: /state\s+farm/i, account: "Insurance – Other", confidence: 0.85, reasoning: "State Farm → Insurance" },
+  { pattern: /\ballstate\b/i, account: "Insurance – Other", confidence: 0.85, reasoning: "Allstate → Insurance" },
+  { pattern: /\bgeico\b/i, account: "Insurance – Other", confidence: 0.85, reasoning: "Geico → Insurance" },
+  { pattern: /progressive\s+(ins|claim)/i, account: "Insurance – Other", confidence: 0.85, reasoning: "Progressive → Insurance" },
+  { pattern: /\bintact\b|\baviva\b|wawanesa|co[\s\-]?operators/i, account: "Insurance – Other", confidence: 0.85, reasoning: "Canadian insurer → Insurance" },
   { pattern: /\bwsib\b|\bwcb\b/i, account: "Workers Compensation – Admin", confidence: 0.93, reasoning: "WSIB/WCB → Workers Comp" },
   { pattern: /blue\s+cross/i, account: "Health Insurance – Owner", confidence: 0.90, reasoning: "Blue Cross → Health Insurance" },
 
