@@ -56,10 +56,26 @@ export function NewJobForm({
   const [loadingPresets, setLoadingPresets] = useState(false);
   const selectedPreset = datePresets.find((p) => p.id === datePresetId);
 
+  // Deep-links (?client=) must resolve against EVERY roster bucket, not just
+  // "new cleanup". A client with a completed cleanup lives in
+  // sections.completed — the profile "Re-run COA Cleanup" button and the
+  // stepper's Step-1 link both target exactly those clients, and before this
+  // the lookup silently missed and dumped the user on a picker that couldn't
+  // even show them (Dominion Painters, 2026-07-11).
+  const allSelectable: ClientLink[] = [
+    ...clientLinks,
+    ...([
+      ...(sections?.continueCleanup ?? []),
+      ...(sections?.completed ?? []),
+      ...(sections?.stripeRecon ?? []),
+      ...(sections?.bsCleanup ?? []),
+    ] as unknown as ClientLink[]),
+  ].filter((c, i, arr) => arr.findIndex((x) => x.id === c.id) === i);
+
   useEffect(() => {
     const clientId = searchParams.get("client");
     if (clientId && !selected) {
-      const found = clientLinks.find((c) => c.id === clientId);
+      const found = allSelectable.find((c) => c.id === clientId);
       if (found) {
         setSelected(found);
         setCountry((found.jurisdiction as "US" | "CA") || "US");
@@ -72,7 +88,7 @@ export function NewJobForm({
         setStep("jurisdiction");
       }
     }
-  }, [searchParams, clientLinks]);
+  }, [searchParams, clientLinks, sections]);
 
   const supabase = createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -118,7 +134,9 @@ export function NewJobForm({
       .finally(() => setLoadingPresets(false));
   }, [selected]);
 
-  const filtered = clientLinks.filter((c) =>
+  // Default list stays "no cleanup started yet"; an actual search sweeps every
+  // bucket so an already-cleaned client (e.g. for a re-run) is findable by name.
+  const filtered = (search.trim() ? allSelectable : clientLinks).filter((c) =>
     c.client_name.toLowerCase().includes(search.toLowerCase())
   );
 
