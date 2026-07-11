@@ -784,9 +784,46 @@ async function runFullCategorization(
     );
   }
 
+  // Owner self-payment detection. A payment whose counterparty text contains
+  // the client's own contact name is almost always the owner paying themself —
+  // equity (draw/contribution), not P&L. These must land on the balance sheet
+  // (JP audit, Dominion Painters: "Kevin Casson" e-transfers were the owner).
+  // Requires BOTH first and last name in the text so business names sharing
+  // the owner's surname don't trip it. Never auto-categorized: suggest the
+  // client's draw-style equity account and route to ask_client to confirm.
+  const ownerFirst = String((clientLink as any).contact_first_name || "").trim().toLowerCase();
+  const ownerLast = String((clientLink as any).contact_last_name || "").trim().toLowerCase();
+  const ownerDrawAccount =
+    availableAccounts.find((a) => /owner'?s?\s+draw/i.test(a.account_name)) ||
+    availableAccounts.find(
+      (a) =>
+        (a.account_type || "").toLowerCase() === "equity" &&
+        /draw|distribut|shareholder|withdraw/i.test(a.account_name)
+    ) ||
+    null;
+  function isOwnerPayment(line: ReclassLine): boolean {
+    if (ownerFirst.length < 3 || ownerLast.length < 3) return false;
+    const blob = `${line.vendor_name || ""} ${line.description || ""}`.toLowerCase();
+    return blob.includes(ownerFirst) && blob.includes(ownerLast);
+  }
+
   for (const line of inScopeLines) {
     const refId = `${line.transaction_id}::${line.line_id}`;
     const absAmount = Math.abs(line.transaction_amount);
+
+    // -1) Owner self-payment — suggest equity, confirm with client.
+    if (isOwnerPayment(line)) {
+      preMatched.set(refId, {
+        ref_id: refId,
+        target_account_id: ownerDrawAccount?.qbo_account_id || null,
+        target_account_name: ownerDrawAccount?.account_name || null,
+        confidence: 0.6,
+        reasoning: `Counterparty matches the client's owner (${(clientLink as any).contact_first_name} ${(clientLink as any).contact_last_name}) — likely an owner draw or contribution (equity, not P&L). Confirm with the client before posting.`,
+        decision: "ask_client",
+      });
+      stats.askClient++;
+      continue;
+    }
 
     // 0) Bank-transfer pre-check — never auto-categorize, always ask_client.
     if (isBankTransfer(line)) {
@@ -806,21 +843,35 @@ async function runFullCategorization(
     const kbMatch = lookupVendor(line.vendor_name, line.description, line.transaction_amount, industry);
     if (kbMatch) {
       const account = kbMatch.account ? accountByName.get(kbMatch.account.toLowerCase()) : undefined;
-      // Apply the KB decision EVEN IF the suggested account isn't in the client's
-      // current QBO COA — the COA cleanup step may have removed it or this client
-      // may need it added. The bookkeeper can override via the dropdown.
-      const resolvedAccountId = account?.qbo_account_id || uncategorizedAccount?.qbo_account_id || null;
-      const resolvedAccountName = account?.account_name || kbMatch.account;
-      preMatched.set(refId, {
-        ref_id: refId,
-        target_account_id: resolvedAccountId,
-        target_account_name: resolvedAccountName,
-        confidence: kbMatch.confidence,
-        reasoning: kbMatch.reasoning + (account ? "" : ` (suggest creating "${kbMatch.account}")`),
-        // Pre-matched from the knowledge base → pre-approve; bookkeeper reviews
-        // the one list and can change any row before posting.
-        decision: "auto_approve",
-      });
+      if (account) {
+        preMatched.set(refId, {
+          ref_id: refId,
+          target_account_id: account.qbo_account_id,
+          target_account_name: account.account_name,
+          confidence: kbMatch.confidence,
+          reasoning: kbMatch.reasoning,
+          // Pre-matched from the knowledge base → pre-approve; bookkeeper reviews
+          // the one list and can change any row before posting.
+          decision: "auto_approve",
+        });
+      } else {
+        // The KB's suggested account doesn't exist in this client's live QBO
+        // chart. Never substitute a fallback account while displaying the
+        // intended name — that silently posts to Uncategorized under a label
+        // that says "Fuel" (Dominion Painters, 2026-07-10: 5 fuel transactions
+        // executed to "Uncategorized Expenses" while our records said
+        // "Fuel – Admin & Sales Vehicles"; 1,554 rows fleet-wide). Land
+        // honestly on the real Uncategorized account, under its real name,
+        // and force bookkeeper review so nothing posts unseen.
+        preMatched.set(refId, {
+          ref_id: refId,
+          target_account_id: uncategorizedAccount?.qbo_account_id || null,
+          target_account_name: uncategorizedAccount?.account_name || null,
+          confidence: kbMatch.confidence,
+          reasoning: `KB suggested account "${kbMatch.account}" which does not exist in this client's QBO — create it or pick another account before approving.`,
+          decision: uncategorizedAccount ? "needs_review" : "flagged",
+        });
+      }
       kbHits++;
       continue;
     }
@@ -992,51 +1043,11 @@ async function runFullCategorization(
     const refId = `${line.transaction_id}::${line.line_id}`;
     const decision = decisionByRef.get(refId);
 
-    if (!decision) {
-      const row = buildReclassRow(jobId, line, {
-        target_account_id: uncategorizedAccount?.qbo_account_id || null,
-        target_account_name: uncategorizedAccount?.account_name || null,
-        decision: uncategorizedAccount ? "needs_review" : "flagged",
-        confidence: 0,
-        reasoning: uncategorizedAccount
-          ? "AI did not return a decision — needs bookkeeper review before executing."
-          : "AI did not return a decision for this line.",
-      });
-      reclassRows.push(row);
-      if (row.decision === "skip") stats.skipAlreadyCorrect++;
-      else if (uncategorizedAccount) stats.needsReview++;
-      else stats.flagged++;
-      continue;
-    }
-
-    // ask_client decisions (bank transfers) need explicit human review — never auto-route.
-    // flagged decisions (AI confidence < 60%, no good target) also need explicit review —
-    // do NOT escalate to auto_approve just because an Uncategorized Expenses account exists.
-    // Only needs_review rows without a target get a soft landing to Uncategorized Expenses
-    // so the bookkeeper can batch-handle them in QBO after execution.
-    const isAskClient = decision.decision === "ask_client";
-    const isFlagged = decision.decision === "flagged";
-    const resolvedTargetId = isAskClient || isFlagged
-      ? (decision.target_account_id || null)
-      : decision.target_account_id || uncategorizedAccount?.qbo_account_id || null;
-    const resolvedTargetName = isAskClient || isFlagged
-      ? (decision.target_account_name || null)
-      : decision.target_account_name || uncategorizedAccount?.account_name || null;
-    const resolvedDecision = isAskClient
-      ? "ask_client"
-      : isFlagged
-        ? "flagged"
-        : !decision.target_account_id && uncategorizedAccount
-          ? "needs_review"
-          : decision.decision;
-
-    const row = buildReclassRow(jobId, line, {
-      target_account_id: resolvedTargetId,
-      target_account_name: resolvedTargetName,
-      decision: resolvedDecision,
-      confidence: decision.confidence,
-      reasoning: decision.flagged_reason || decision.reasoning,
-    });
+    // Single source of truth for AI-decision → row resolution (also used by the
+    // chunked path). Handles the no-decision case, honest Uncategorized
+    // soft-landing (real id + real name, needs_review), and never auto-executes
+    // a fallback.
+    const row = buildRowFromAiDecision(jobId, line, decision, uncategorizedAccount);
     reclassRows.push(row);
 
     if (row.decision === "skip") stats.skipAlreadyCorrect++;
@@ -1141,27 +1152,54 @@ function buildRowFromAiDecision(
   }
   const isAskClient = decision.decision === "ask_client";
   const isFlagged = decision.decision === "flagged";
-  const resolvedTargetId =
-    isAskClient || isFlagged
-      ? decision.target_account_id || null
-      : decision.target_account_id || uncategorizedAccount?.qbo_account_id || null;
-  const resolvedTargetName =
-    isAskClient || isFlagged
-      ? decision.target_account_name || null
-      : decision.target_account_name || uncategorizedAccount?.account_name || null;
-  const resolvedDecision = isAskClient
-    ? "ask_client"
-    : isFlagged
-      ? "flagged"
-      : !decision.target_account_id && uncategorizedAccount
-        ? "needs_review"
-        : decision.decision;
+  const baseReasoning = decision.flagged_reason || decision.reasoning;
+
+  // ask_client / flagged keep their own (possibly null) target — never soft-land.
+  if (isAskClient || isFlagged) {
+    return buildReclassRow(jobId, line, {
+      target_account_id: decision.target_account_id || null,
+      target_account_name: decision.target_account_name || null,
+      decision: decision.decision,
+      confidence: decision.confidence,
+      reasoning: baseReasoning,
+    });
+  }
+
+  // Resolved AI target present → use its id+name verbatim (matched pair).
+  if (decision.target_account_id) {
+    return buildReclassRow(jobId, line, {
+      target_account_id: decision.target_account_id,
+      target_account_name: decision.target_account_name || null,
+      decision: decision.decision,
+      confidence: decision.confidence,
+      reasoning: baseReasoning,
+    });
+  }
+
+  // No resolved target. Soft-land on the client's real Uncategorized account —
+  // but under its REAL name (never the AI's unresolved intended name, which
+  // would display an account the row won't post to) — and force needs_review so
+  // no fallback ever auto-executes. Preserve the intended name in the reasoning.
+  if (uncategorizedAccount) {
+    const intended = decision.target_account_name;
+    return buildReclassRow(jobId, line, {
+      target_account_id: uncategorizedAccount.qbo_account_id,
+      target_account_name: uncategorizedAccount.account_name,
+      decision: "needs_review",
+      confidence: decision.confidence,
+      reasoning: intended
+        ? `AI suggested "${intended}" which could not be resolved to an account in this client's QBO — create it or pick another account before approving. (${baseReasoning})`
+        : baseReasoning,
+    });
+  }
+
+  // No Uncategorized account to land on either → flag with no target.
   return buildReclassRow(jobId, line, {
-    target_account_id: resolvedTargetId,
-    target_account_name: resolvedTargetName,
-    decision: resolvedDecision,
+    target_account_id: null,
+    target_account_name: null,
+    decision: "flagged",
     confidence: decision.confidence,
-    reasoning: decision.flagged_reason || decision.reasoning,
+    reasoning: baseReasoning,
   });
 }
 
