@@ -410,8 +410,13 @@ function mergeAnalysisResults(
     new Set(batchResults.flatMap(r => r.warnings || []))
   );
 
-  // Compute missing required master accounts deterministically.
-  // A master required (leaf) account is "missing" if:
+  // Compute missing master accounts deterministically.
+  // JP audit (2026-07-10): apply the FULL standard chart to every client, not
+  // just the is_required subset. Reason — the vendor KB and reclass target
+  // master account names that were never created unless flagged required, so
+  // categorization silently fell back to Uncategorized (the fuel bug). Every
+  // non-parent master leaf is now created (parents auto-created by the executor
+  // as needed). A leaf is "missing" if:
   //   - No client account already has that exact name, AND
   //   - No suggestion is renaming to it
   const clientNamesLower = new Set(
@@ -424,7 +429,7 @@ function mergeAnalysisResults(
   );
 
   const missing = masterCOA
-    .filter(m => m.is_required && !m.is_parent)
+    .filter(m => !m.is_parent)
     .filter(m => {
       const n = m.account_name.toLowerCase().trim();
       return !clientNamesLower.has(n) && !renameTargetsLower.has(n);
@@ -442,7 +447,7 @@ function mergeAnalysisResults(
   const summary =
     `Analyzed ${allSuggestions.length} client accounts across ${batchResults.length} batches. ` +
     `Recommendations: ${counts.keep} keep, ${counts.rename} rename, ${counts.merge} merge, ${counts.delete} delete, ${counts.flag} flag for review. ` +
-    `${missing.length} required master accounts are missing and need to be created.`;
+    `${missing.length} standard master accounts are missing and will be created (full chart applied).`;
 
   return {
     suggestions: allSuggestions,

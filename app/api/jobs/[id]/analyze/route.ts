@@ -325,7 +325,8 @@ export async function POST(
       };
     });
 
-    // Add "create" actions for missing required accounts
+    // Add "create" actions for every missing standard master account (full
+    // chart applied to every client per the JP audit — not just required ones).
     const missingActions = analysis.missing_required_accounts.map((name, idx) => {
       const masterEntry = masterCOA.find(m => m.account_name === name);
       return {
@@ -336,7 +337,7 @@ export async function POST(
         new_subtype: masterEntry?.qbo_account_subtype,
         new_parent_name: masterEntry?.parent_account_name,
         ai_confidence: 1.0,
-        ai_reasoning: "Required master account missing from client COA",
+        ai_reasoning: "Standard master account missing from client COA",
         sort_order: actions.length + idx,
       };
     });
