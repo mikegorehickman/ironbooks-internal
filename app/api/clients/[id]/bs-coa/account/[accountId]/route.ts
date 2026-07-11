@@ -166,7 +166,8 @@ export async function PATCH(
         accessToken,
         accountId,
         (current as any).SyncToken,
-        newParentId
+        newParentId,
+        current as any
       );
       return NextResponse.json({
         ok: true,

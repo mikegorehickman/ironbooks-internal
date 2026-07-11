@@ -1505,7 +1505,8 @@ export async function executeJob(jobId: string): Promise<{
             try {
               await qbo.reparentAccount(
                 ctx.realmId, ctx.accessToken,
-                acct.Id, (acct as any).SyncToken, target.Id
+                acct.Id, (acct as any).SyncToken, target.Id,
+                acct as any
               );
               stats.reparented++;
               await logActionResult(ctx, null, "qbo_reparent",

@@ -1010,22 +1010,30 @@ export async function reparentAccount(
   accessToken: string,
   accountId: string,
   syncToken: string,
-  newParentId: string
+  newParentId: string,
+  /** The account's current state — QBO requires Name on EVERY account update
+   *  (even sparse; omitting it 400s with 2020 "Required parameter Name is
+   *  missing" — this stage silently failed on every run until the retype
+   *  engine surfaced it, Dominion 2026-07-11). Type/subtype are echoed too
+   *  so QBO can't misinterpret the sparse update. */
+  currentAccount: QBOAccount
 ): Promise<QBOAccount> {
+  const cur: any = currentAccount;
+  const body: any = {
+    Id: accountId,
+    SyncToken: syncToken,
+    sparse: true,
+    Name: cur.Name,
+    ParentRef: { value: newParentId },
+    SubAccount: true,
+  };
+  if (cur.AccountType) body.AccountType = cur.AccountType;
+  if (cur.AccountSubType) body.AccountSubType = cur.AccountSubType;
   const data = await qboRequest<{ Account: QBOAccount }>(
     realmId,
     accessToken,
     '/account?minorversion=70',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        Id: accountId,
-        SyncToken: syncToken,
-        sparse: true,
-        ParentRef: { value: newParentId },
-        SubAccount: true,
-      }),
-    }
+    { method: 'POST', body: JSON.stringify(body) }
   );
 
   return data.Account;
