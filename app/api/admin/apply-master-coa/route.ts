@@ -43,13 +43,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Client inactive or not QBO-connected" }, { status: 400 });
   }
 
-  const { data: masterRows } = await service
+  // Resolve the template. Clients carry legacy/unsupported industry values
+  // ("painting" instead of "painters"; general_contractors/chimney_sweepers
+  // have no dedicated template yet) — fall back to the painters template
+  // rather than erroring, since it's the standard chart and deliberately
+  // trade-generic. The client's industry field is not modified.
+  const industryRaw = ((clientLink as any).industry as string) || "painters";
+  const jurisdiction = clientLink.jurisdiction || "US";
+  let { data: masterRows } = await service
     .from("master_coa")
     .select("account_name, parent_account_name, is_parent, qbo_account_type, qbo_account_subtype")
-    .eq("industry", ((clientLink as any).industry as string) || "painters")
-    .eq("jurisdiction", clientLink.jurisdiction || "US");
+    .eq("industry", industryRaw)
+    .eq("jurisdiction", jurisdiction);
+  if ((!masterRows || masterRows.length === 0) && industryRaw !== "painters") {
+    ({ data: masterRows } = await service
+      .from("master_coa")
+      .select("account_name, parent_account_name, is_parent, qbo_account_type, qbo_account_subtype")
+      .eq("industry", "painters")
+      .eq("jurisdiction", jurisdiction));
+  }
   if (!masterRows || masterRows.length === 0) {
-    return NextResponse.json({ error: "No master COA rows for this jurisdiction/industry" }, { status: 400 });
+    return NextResponse.json({ error: `No master COA rows for jurisdiction=${jurisdiction} (industry=${industryRaw}, painters fallback also empty)` }, { status: 400 });
   }
 
   try {
