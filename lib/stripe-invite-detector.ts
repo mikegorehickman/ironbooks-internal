@@ -63,7 +63,7 @@ export async function runStripeInviteDetector(opts?: {
     .eq("is_active", true)
     .not("qbo_realm_id", "is", null)
     .is("stripe_invite_dismissed_at", null)
-    .eq("stripe_not_required" as any, false);
+    .filter("stripe_not_required", "eq", false);
   if (opts?.onlyClientLinkId) {
     q = q.eq("id", opts.onlyClientLinkId);
   }
