@@ -40,10 +40,10 @@ export async function applyMasterCoaToClient(params: {
   // Existing names — include INACTIVE accounts too: QBO rejects creating a
   // name that collides with a deleted account, so we treat those as present
   // rather than failing the create.
-  const existing = new Map<string, { id: string; active: boolean }>(
+  const existing = new Map<string, { id: string; active: boolean; type: string }>(
     qboAccounts.map((a: any) => [
       normalizeAccountName(a.Name),
-      { id: a.Id, active: a.Active !== false },
+      { id: a.Id, active: a.Active !== false, type: a.AccountType || "" },
     ])
   );
 
@@ -55,6 +55,29 @@ export async function applyMasterCoaToClient(params: {
     (m) => !m.is_parent && !existing.has(normalizeAccountName(m.account_name))
   );
 
+  // Fallback DetailType per AccountType — used when the master subtype is
+  // rejected by QBO ("Invalid Enumeration"). P&L placement is driven by
+  // AccountType; DetailType is descriptive, so a generic one beats failing.
+  const GENERIC_SUBTYPE: Record<string, string> = {
+    "Expense": "OtherMiscellaneousExpense",
+    "Other Expense": "OtherMiscellaneousExpense",
+    "Cost of Goods Sold": "OtherCostsOfServiceCos",
+    "Income": "ServiceFeeIncome",
+    "Other Income": "OtherMiscellaneousIncome",
+    "Equity": "OwnersEquity",
+  };
+  async function createWithRetry(opts: { name: string; accountType: string; accountSubType: string; parentRefId?: string }) {
+    try {
+      return await createAccount(realmId, accessToken, opts);
+    } catch (err: any) {
+      const generic = GENERIC_SUBTYPE[opts.accountType];
+      if (generic && generic !== opts.accountSubType && /Invalid Enumeration/i.test(err.message || "")) {
+        return await createAccount(realmId, accessToken, { ...opts, accountSubType: generic });
+      }
+      throw err;
+    }
+  }
+
   const result: ApplyResult = {
     client_link_id: clientLinkId,
     client_name: clientName,
@@ -65,26 +88,31 @@ export async function applyMasterCoaToClient(params: {
   };
   if (dryRun || missingLeaves.length === 0) return result;
 
-  // Parent id cache: existing QBO parents by normalized name + ones we create.
-  const parentIdByName = new Map<string, string>();
+  // Parent cache: existing QBO parents (id + type) by normalized name, plus
+  // ones we create. Type matters: QBO refuses to nest a child under a parent
+  // of a different AccountType, and many client charts hold wrongly-typed
+  // parents (e.g. "Salaries & Payroll" as Other Expense — JP's finding).
+  const parentByName = new Map<string, { id: string; type: string }>();
   for (const [norm, acc] of existing) {
-    if (acc.active) parentIdByName.set(norm, acc.id);
+    if (acc.active) parentByName.set(norm, { id: acc.id, type: acc.type });
   }
 
-  async function ensureParent(parentName: string, childType: string): Promise<string | undefined> {
+  async function ensureParent(parentName: string, childType: string): Promise<{ id: string; type: string } | undefined> {
     const norm = normalizeAccountName(parentName);
-    const cached = parentIdByName.get(norm);
+    const cached = parentByName.get(norm);
     if (cached) return cached;
     const masterParent = parents.get(parentName);
+    const type = masterParent?.qbo_account_type || childType;
     try {
-      const created = await createAccount(realmId, accessToken, {
+      const created = await createWithRetry({
         name: parentName,
-        accountType: masterParent?.qbo_account_type || childType,
+        accountType: type,
         accountSubType: masterParent?.qbo_account_subtype || "OtherMiscellaneousExpense",
       });
-      parentIdByName.set(norm, created.Id);
+      const entry = { id: created.Id, type };
+      parentByName.set(norm, entry);
       result.created.push(parentName);
-      return created.Id;
+      return entry;
     } catch (err: any) {
       result.errors.push({ account: parentName, message: err.message });
       return undefined;
@@ -95,16 +123,25 @@ export async function applyMasterCoaToClient(params: {
     try {
       let parentRefId: string | undefined;
       if (leaf.parent_account_name) {
-        parentRefId = await ensureParent(leaf.parent_account_name, leaf.qbo_account_type);
+        const parent = await ensureParent(leaf.parent_account_name, leaf.qbo_account_type);
+        // QBO: "For subaccounts, you must select the same account type as
+        // their parent." Client charts commonly hold wrongly-typed parents
+        // (e.g. "Salaries & Payroll" as Other Expense). Correct TYPE beats
+        // correct NESTING — type drives P&L placement, nesting is a rollup —
+        // so create the account top-level with the master's type and let the
+        // retype engine fix the parent + re-nest later.
+        if (parent && parent.type === leaf.qbo_account_type) {
+          parentRefId = parent.id;
+        }
       }
-      const created = await createAccount(realmId, accessToken, {
+      const created = await createWithRetry({
         name: leaf.account_name,
         accountType: leaf.qbo_account_type,
         accountSubType: leaf.qbo_account_subtype || "OtherMiscellaneousExpense",
         parentRefId,
       });
       result.created.push(leaf.account_name);
-      parentIdByName.set(normalizeAccountName(created.Name), created.Id);
+      parentByName.set(normalizeAccountName(created.Name), { id: created.Id, type: leaf.qbo_account_type });
     } catch (err: any) {
       result.errors.push({ account: leaf.account_name, message: err.message });
     }
