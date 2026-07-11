@@ -41,6 +41,7 @@ import {
   type FullCategorizationDecision,
 } from "./claude-reclass";
 import { lookupVendor, normalizeVendorForLookup } from "./vendor-knowledge";
+import { normalizeAccountName } from "./account-name";
 
 // ─── CONSTANTS ─────────────────────────────────────────────────────────────
 
@@ -280,7 +281,7 @@ export async function runDailyRecon(
       }));
     const accountById = new Map(availableAccounts.map((a) => [a.qbo_account_id, a]));
     const accountByName = new Map(
-      availableAccounts.map((a) => [a.account_name.toLowerCase(), a])
+      availableAccounts.map((a) => [normalizeAccountName(a.account_name), a])
     );
 
     // 7b. Closed-period guard. Read the client's QBO book-close date so we
@@ -320,7 +321,7 @@ export async function runDailyRecon(
       // Tier 1: KB lookup
       const kb = lookupVendor(line.vendor_name, line.description, line.transaction_amount, industry);
       if (kb && kb.account) {
-        const account = accountByName.get(kb.account.toLowerCase());
+        const account = accountByName.get(normalizeAccountName(kb.account));
         decisions.set(refId, {
           source: "kb",
           target_account_id: account?.qbo_account_id || null,
@@ -335,7 +336,7 @@ export async function runDailyRecon(
       const normalized = normalizeVendorForLookup(line.vendor_name).toUpperCase();
       const ruleHit = normalized ? bankRulesByVendor.get(normalized) : undefined;
       if (ruleHit) {
-        const account = accountByName.get(ruleHit.toLowerCase());
+        const account = accountByName.get(normalizeAccountName(ruleHit));
         if (account) {
           // ─── Idempotency guard ─────────────────────────────────────
           // Two cases where we should NOT apply the rule:
@@ -350,8 +351,8 @@ export async function runDailyRecon(
           // / etc. — see UNCATEGORIZED_ACCOUNT_PATTERNS).
           const currentIsTarget =
             line.current_account_id === account.qbo_account_id ||
-            (line.current_account_name || "").toLowerCase() ===
-              account.account_name.toLowerCase();
+            normalizeAccountName(line.current_account_name) ===
+              normalizeAccountName(account.account_name);
 
           if (currentIsTarget) {
             // Already where the rule wants it — settled, no-op.

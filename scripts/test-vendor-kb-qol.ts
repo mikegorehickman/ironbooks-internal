@@ -40,7 +40,7 @@ ok(acct("FACEBOOK MARKETPLACE", 60) !== "Online Advertising – Google Ads / Soc
 ok(acct("META QUEST STORE", 500) !== "Online Advertising – Google Ads / Social Media Marketing", "Meta Quest excluded from ads fallback");
 
 // ── Sanity: nothing above broke ──
-ok(acct("SHERWIN WILLIAMS 703581", 214) === "Paint & Materials", "Sherwin-Williams intact");
+ok(acct("SHERWIN WILLIAMS 703581", 214) === "Job Supplies & Materials", "Sherwin-Williams intact");
 ok(acct("TIM HORTONS #3320", 8) === "Meals (50% deductible)", "Tim Hortons intact");
 
 console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"}: ${pass} passed, ${fail} failed`);

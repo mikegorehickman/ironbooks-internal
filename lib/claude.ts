@@ -13,6 +13,7 @@
  *  - ANTHROPIC_API_KEY
  */
 
+import { normalizeAccountName } from "./account-name";
 import Anthropic from '@anthropic-ai/sdk';
 import type { QBOAccount } from './qbo';
 
@@ -420,18 +421,18 @@ function mergeAnalysisResults(
   //   - No client account already has that exact name, AND
   //   - No suggestion is renaming to it
   const clientNamesLower = new Set(
-    allClientAccounts.map(a => (a.Name || '').toLowerCase().trim())
+    allClientAccounts.map(a => normalizeAccountName(a.Name))
   );
   const renameTargetsLower = new Set(
     allSuggestions
       .filter(s => s.action === 'rename' && s.target_master_account)
-      .map(s => (s.target_master_account || '').toLowerCase().trim())
+      .map(s => normalizeAccountName(s.target_master_account))
   );
 
   const missing = masterCOA
     .filter(m => !m.is_parent)
     .filter(m => {
-      const n = m.account_name.toLowerCase().trim();
+      const n = normalizeAccountName(m.account_name);
       return !clientNamesLower.has(n) && !renameTargetsLower.has(n);
     })
     .map(m => m.account_name);

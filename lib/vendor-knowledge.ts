@@ -12,7 +12,7 @@
  *   4. Web search (Claude tool use, only for low-confidence items)
  *
  * Account names returned here MUST match the master COA. Industry-specific
- * accounts (like "Paint & Materials") are tagged with `industries` so they
+ * accounts (like "Job Supplies & Materials") are tagged with `industries` so they
  * only fire for matching industries.
  */
 
@@ -94,7 +94,7 @@ const PATTERNS: VendorPattern[] = [
   // ══════════════════ COSTCO DISAMBIGUATION (most specific first) ══════════════════
   { pattern: /costco\s*(gas|fuel|cardlock)/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Costco Gas → Fuel" },
   { pattern: /costco\s*(food court|restaurant)/i, account: "Meals (50% deductible)", confidence: 0.95, reasoning: "Costco Food Court → Meals" },
-  { pattern: /costco\s*(whse|wholesale|business)/i, account: "Job Supplies", confidence: 0.85, reasoning: "Costco Wholesale → Job Supplies (default for trades)" },
+  { pattern: /costco\s*(whse|wholesale|business)/i, account: "Job Supplies & Materials", confidence: 0.85, reasoning: "Costco Wholesale → Job Supplies (default for trades)" },
 
   // ══════════════════ GAS STATION SMALL PURCHASES → MEALS (before the fuel block: first match wins) ══════════════════
   // A sub-$15 charge at a retail gas station is a coffee/snack, not a fill-up
@@ -133,28 +133,28 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /\bbp\s+(gas|fuel)/i, account: "Fuel – Overhead", confidence: 0.92, reasoning: "BP → Fuel" },
 
   // ══════════════════ PAINT SUPPLIERS (painters only) ══════════════════
-  { pattern: /sherwin[\s\-]?williams|^sw\s+(paint|stores)/i, account: "Paint & Materials", confidence: 0.97, reasoning: "Sherwin-Williams → Paint & Materials", industries: ["painters"] },
-  { pattern: /benjamin\s+moore|\bbm\s+paint/i, account: "Paint & Materials", confidence: 0.97, reasoning: "Benjamin Moore → Paint & Materials", industries: ["painters"] },
-  { pattern: /dunn[\s\-]?edwards/i, account: "Paint & Materials", confidence: 0.97, reasoning: "Dunn-Edwards → Paint & Materials", industries: ["painters"] },
-  { pattern: /\bppg\b/i, account: "Paint & Materials", confidence: 0.92, reasoning: "PPG → Paint & Materials", industries: ["painters"] },
-  { pattern: /para\s+paint/i, account: "Paint & Materials", confidence: 0.95, reasoning: "Para Paints → Paint & Materials", industries: ["painters"] },
-  { pattern: /cloverdale\s+paint/i, account: "Paint & Materials", confidence: 0.95, reasoning: "Cloverdale Paint → Paint & Materials", industries: ["painters"] },
-  { pattern: /general\s+paint/i, account: "Paint & Materials", confidence: 0.92, reasoning: "General Paint → Paint & Materials", industries: ["painters"] },
-  { pattern: /kelly[\s\-]?moore/i, account: "Paint & Materials", confidence: 0.95, reasoning: "Kelly-Moore → Paint & Materials", industries: ["painters"] },
-  { pattern: /\bbehr\b/i, account: "Paint & Materials", confidence: 0.90, reasoning: "Behr Paint → Paint & Materials", industries: ["painters"] },
+  { pattern: /sherwin[\s\-]?williams|^sw\s+(paint|stores)/i, account: "Job Supplies & Materials", confidence: 0.97, reasoning: "Sherwin-Williams → Job Supplies & Materials", industries: ["painters"] },
+  { pattern: /benjamin\s+moore|\bbm\s+paint/i, account: "Job Supplies & Materials", confidence: 0.97, reasoning: "Benjamin Moore → Job Supplies & Materials", industries: ["painters"] },
+  { pattern: /dunn[\s\-]?edwards/i, account: "Job Supplies & Materials", confidence: 0.97, reasoning: "Dunn-Edwards → Job Supplies & Materials", industries: ["painters"] },
+  { pattern: /\bppg\b/i, account: "Job Supplies & Materials", confidence: 0.92, reasoning: "PPG → Job Supplies & Materials", industries: ["painters"] },
+  { pattern: /para\s+paint/i, account: "Job Supplies & Materials", confidence: 0.95, reasoning: "Para Paints → Job Supplies & Materials", industries: ["painters"] },
+  { pattern: /cloverdale\s+paint/i, account: "Job Supplies & Materials", confidence: 0.95, reasoning: "Cloverdale Paint → Job Supplies & Materials", industries: ["painters"] },
+  { pattern: /general\s+paint/i, account: "Job Supplies & Materials", confidence: 0.92, reasoning: "General Paint → Job Supplies & Materials", industries: ["painters"] },
+  { pattern: /kelly[\s\-]?moore/i, account: "Job Supplies & Materials", confidence: 0.95, reasoning: "Kelly-Moore → Job Supplies & Materials", industries: ["painters"] },
+  { pattern: /\bbehr\b/i, account: "Job Supplies & Materials", confidence: 0.90, reasoning: "Behr Paint → Job Supplies & Materials", industries: ["painters"] },
 
   // ══════════════════ HARDWARE / JOB SUPPLIES ══════════════════
-  { pattern: /home\s+depot|\bhd\s+supply/i, account: "Job Supplies", confidence: 0.93, reasoning: "Home Depot → Job Supplies" },
-  { pattern: /\blowes\b|\blowe['']?s\b/i, account: "Job Supplies", confidence: 0.93, reasoning: "Lowe's → Job Supplies" },
-  { pattern: /\brona\b/i, account: "Job Supplies", confidence: 0.95, reasoning: "Rona → Job Supplies" },
-  { pattern: /canadian\s+tire/i, account: "Job Supplies", confidence: 0.85, reasoning: "Canadian Tire → Job Supplies (likely)" },
-  { pattern: /\bace\s+hardware/i, account: "Job Supplies", confidence: 0.93, reasoning: "Ace Hardware → Job Supplies" },
-  { pattern: /princess\s+auto/i, account: "Job Supplies", confidence: 0.85, reasoning: "Princess Auto → Job Supplies / Small Tools" },
-  { pattern: /\btsc\s+stores|tractor\s+supply/i, account: "Job Supplies", confidence: 0.90, reasoning: "TSC → Job Supplies" },
-  { pattern: /shoppers\s+drug\s+mart|\bsdm\b/i, account: "Job Supplies", confidence: 0.85, reasoning: "Shoppers Drug Mart → Job Supplies (small consumables)" },
-  { pattern: /london\s+drugs/i, account: "Job Supplies", confidence: 0.85, reasoning: "London Drugs → Job Supplies" },
-  { pattern: /\bwalgreens\b/i, account: "Job Supplies", confidence: 0.82, reasoning: "Walgreens → Job Supplies (small consumables)" },
-  { pattern: /\bcvs\b/i, account: "Job Supplies", confidence: 0.82, reasoning: "CVS → Job Supplies" },
+  { pattern: /home\s+depot|\bhd\s+supply/i, account: "Job Supplies & Materials", confidence: 0.93, reasoning: "Home Depot → Job Supplies & Materials" },
+  { pattern: /\blowes\b|\blowe['']?s\b/i, account: "Job Supplies & Materials", confidence: 0.93, reasoning: "Lowe's → Job Supplies & Materials" },
+  { pattern: /\brona\b/i, account: "Job Supplies & Materials", confidence: 0.95, reasoning: "Rona → Job Supplies & Materials" },
+  { pattern: /canadian\s+tire/i, account: "Job Supplies & Materials", confidence: 0.85, reasoning: "Canadian Tire → Job Supplies (likely)" },
+  { pattern: /\bace\s+hardware/i, account: "Job Supplies & Materials", confidence: 0.93, reasoning: "Ace Hardware → Job Supplies & Materials" },
+  { pattern: /princess\s+auto/i, account: "Job Supplies & Materials", confidence: 0.85, reasoning: "Princess Auto → Job Supplies / Small Tools" },
+  { pattern: /\btsc\s+stores|tractor\s+supply/i, account: "Job Supplies & Materials", confidence: 0.90, reasoning: "TSC → Job Supplies & Materials" },
+  { pattern: /shoppers\s+drug\s+mart|\bsdm\b/i, account: "Job Supplies & Materials", confidence: 0.85, reasoning: "Shoppers Drug Mart → Job Supplies (small consumables)" },
+  { pattern: /london\s+drugs/i, account: "Job Supplies & Materials", confidence: 0.85, reasoning: "London Drugs → Job Supplies & Materials" },
+  { pattern: /\bwalgreens\b/i, account: "Job Supplies & Materials", confidence: 0.82, reasoning: "Walgreens → Job Supplies (small consumables)" },
+  { pattern: /\bcvs\b/i, account: "Job Supplies & Materials", confidence: 0.82, reasoning: "CVS → Job Supplies & Materials" },
 
   // ══════════════════ MEALS — quick-service ══════════════════
   { pattern: /tim\s+hortons?\b/i, account: "Meals (50% deductible)", confidence: 0.97, reasoning: "Tim Hortons → Meals" },

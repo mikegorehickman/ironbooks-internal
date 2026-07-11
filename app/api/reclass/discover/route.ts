@@ -23,6 +23,7 @@ import {
   type FullCategorizationDecision,
 } from "@/lib/claude-reclass";
 import { lookupVendor, normalizeVendorForLookup } from "@/lib/vendor-knowledge";
+import { normalizeAccountName } from "@/lib/account-name";
 import { getClientEndCloses, type DoubleEndCloseSummary } from "@/lib/double";
 
 /**
@@ -739,10 +740,12 @@ async function runFullCategorization(
   //   Items that match here skip Claude entirely → faster, cheaper, more accurate.
   //   Items that don't match fall through to Claude in step 5.
   const industry = ((clientLink as any).industry as string) || "painters";
+  // Keyed by normalized name (dash/whitespace-insensitive) so client charts
+  // with hyphen variants of master's en-dash names still resolve.
   const accountByName = new Map(
     availableAccounts
       .filter((a) => !!a.account_name)
-      .map((a) => [a.account_name.toLowerCase(), a])
+      .map((a) => [normalizeAccountName(a.account_name), a])
   );
 
   // Fetch per-client bank rules (vendor → account mappings learned from past runs)
@@ -842,7 +845,7 @@ async function runFullCategorization(
     // 1) Knowledge base lookup (static, ~200 patterns, instant)
     const kbMatch = lookupVendor(line.vendor_name, line.description, line.transaction_amount, industry);
     if (kbMatch) {
-      const account = kbMatch.account ? accountByName.get(kbMatch.account.toLowerCase()) : undefined;
+      const account = kbMatch.account ? accountByName.get(normalizeAccountName(kbMatch.account)) : undefined;
       if (account) {
         preMatched.set(refId, {
           ref_id: refId,
@@ -880,7 +883,7 @@ async function runFullCategorization(
     const normalized = normalizeForBankRule(line.vendor_name);
     const cachedAccountName = normalized ? bankRulesByVendor.get(normalized) : undefined;
     if (cachedAccountName) {
-      const account = accountByName.get(cachedAccountName.toLowerCase());
+      const account = accountByName.get(normalizeAccountName(cachedAccountName));
       if (account) {
         preMatched.set(refId, {
           ref_id: refId,
