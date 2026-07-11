@@ -47,6 +47,11 @@ export interface ReclassLine {
   is_reconciled: boolean;            // line.cleared === "Reconciled"
   is_bank_fed: boolean;
   is_manual_entry: boolean;
+
+  // Source account: which bank/CC the money moved through (Purchase/Expense
+  // header AccountRef). Bills/VendorCredits report "Accounts Payable".
+  // Optional for backward-compat with queued chunk payloads.
+  bank_account_name?: string | null;
 }
 
 export interface QBOLine {
@@ -79,6 +84,9 @@ export interface QBOTransaction {
   Line: QBOLine[];
   VendorRef?: { value: string; name?: string };
   EntityRef?: { value: string; name?: string };
+  // Purchase/Expense/Check: the bank or credit-card account the money moved
+  // through. Bills/VendorCredits have no payment account (they're A/P).
+  AccountRef?: { value: string; name?: string };
   PayeeRef?: { value: string; name?: string };
   // Bank-fed / online txn marker
   OnlineBankingTxnReference?: unknown;
@@ -419,6 +427,9 @@ export async function fetchAllTransactionLines(
                 is_reconciled: isReconciled,
                 is_bank_fed: isBankFed,
                 is_manual_entry: isManualEntry,
+                bank_account_name:
+                  tx.AccountRef?.name ||
+                  (txType === "Bill" || txType === "VendorCredit" ? "Accounts Payable" : null),
               });
             }
           }

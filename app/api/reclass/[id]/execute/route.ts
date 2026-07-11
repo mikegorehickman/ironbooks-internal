@@ -8,7 +8,8 @@ import {
   getValidToken,
   type SupportedTxType,
 } from "@/lib/qbo-reclass";
-import { fetchAllAccounts } from "@/lib/qbo";
+import { fetchAllAccounts, createAccount } from "@/lib/qbo";
+import { normalizeAccountName } from "@/lib/account-name";
 import { postReclassComplete } from "@/lib/double";
 import { sendAskClientQuestions } from "@/lib/reclass-ask-client";
 
@@ -201,7 +202,7 @@ async function executeReclass(jobId: string, portalOrigin: string, isContinuatio
   const accountNameToId = new Map<string, string>(
     allQboAccounts
       .filter((a) => a.Active !== false)
-      .map((a) => [a.Name.toLowerCase(), a.Id])
+      .map((a) => [normalizeAccountName(a.Name), a.Id])
   );
   // Active-account allow-list. We NEVER post a categorization to an inactive
   // ("(deleted)") account — that's exactly what leaves "… (deleted)" rows with
@@ -209,6 +210,22 @@ async function executeReclass(jobId: string, portalOrigin: string, isContinuatio
   // is demoted to needs_review instead of being written to QBO.
   const activeAccountIds = new Set(
     allQboAccounts.filter((a) => a.Active !== false).map((a) => a.Id)
+  );
+
+  // Master COA rows for create-on-demand: when a bookkeeper picked a master
+  // account by name (e.g. "Owner's Draw" — Equity, a balance-sheet target)
+  // and the client's QBO doesn't have it yet, we create it with the master's
+  // type/subtype instead of demoting the row. This is what makes non-P&L
+  // targets (draws/contributions) actually executable everywhere.
+  const { data: masterRows } = await service
+    .from("master_coa")
+    .select("account_name, qbo_account_type, qbo_account_subtype, is_parent")
+    .eq("industry", ((clientLink as any).industry as string) || "painters")
+    .eq("jurisdiction", clientLink.jurisdiction || "US");
+  const masterByName = new Map(
+    (masterRows || [])
+      .filter((m: any) => !m.is_parent)
+      .map((m: any) => [normalizeAccountName(m.account_name), m])
   );
 
   // Fetch rows to process: approved/auto_approve that haven't executed yet.
@@ -288,8 +305,35 @@ async function executeReclass(jobId: string, portalOrigin: string, isContinuatio
     let targetNameResolved: string | null = overrideName || row.to_account_name || null;
 
     if (!targetId && targetNameResolved) {
-      const resolvedId = accountNameToId.get(targetNameResolved.toLowerCase());
+      const resolvedId = accountNameToId.get(normalizeAccountName(targetNameResolved));
       if (resolvedId) targetId = resolvedId;
+    }
+
+    // Name didn't resolve but it IS a master account → create it in the
+    // client's QBO with the master's type/subtype (works for Equity and
+    // other balance-sheet targets, e.g. Owner's Draw / Owner Contributions).
+    if (!targetId && targetNameResolved) {
+      const master = masterByName.get(normalizeAccountName(targetNameResolved));
+      if (master) {
+        try {
+          const created = await createAccount(clientLink.qbo_realm_id, accessToken, {
+            name: master.account_name,
+            accountType: master.qbo_account_type,
+            accountSubType: master.qbo_account_subtype || undefined,
+          });
+          targetId = created.Id;
+          targetNameResolved = created.Name;
+          accountNameToId.set(normalizeAccountName(created.Name), created.Id);
+          activeAccountIds.add(created.Id);
+          console.log(
+            `[reclass execute] created missing master account "${created.Name}" (${master.qbo_account_type}) as ${created.Id}`
+          );
+        } catch (createErr: any) {
+          console.warn(
+            `[reclass execute] could not create master account "${targetNameResolved}": ${createErr.message}`
+          );
+        }
+      }
     }
 
     if (!targetId) {

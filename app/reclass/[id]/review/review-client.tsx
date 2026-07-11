@@ -55,6 +55,7 @@ interface Reclassification {
   transaction_amount: number | null;
   description: string | null;
   from_account_name: string | null;
+  bank_account_name?: string | null;
   to_account_id: string | null;
   to_account_name: string | null;
   ai_confidence: number | null;
@@ -108,6 +109,8 @@ export function ReclassReview({
   const [originalDecisions] = useState(
     () => new Map(initialRows.map((r) => [r.id, r.decision]))
   );
+  // Source-account filter (JP workflow: clear one bank/card at a time).
+  const [accountFilter, setAccountFilter] = useState<string>("");
   const [activeTab, setActiveTab] = useState<Tab>(
     initialRows.some((r) => r.decision === "needs_review") ? "review" : "auto"
   );
@@ -137,13 +140,16 @@ export function ReclassReview({
   //                  picks a category (which flips them to approved) or
   //                  reclassifies them. This keeps the email template clean.
   const partitioned = useMemo(() => {
+    const source = accountFilter
+      ? rows.filter((r) => (r.bank_account_name || "") === accountFilter)
+      : rows;
     const auto: Reclassification[] = [];
     const review: Reclassification[] = [];
     const flagged: Reclassification[] = [];
     const ask: Reclassification[] = [];
     const skipped: Reclassification[] = [];
 
-    for (const r of rows) {
+    for (const r of source) {
       const isApprovedNow = r.decision === "auto_approve" || r.decision === "approved";
       if (isApprovedNow) auto.push(r);
       if (r.decision === "skip" || r.decision === "rejected") skipped.push(r);
@@ -172,7 +178,7 @@ export function ReclassReview({
     }
 
     return { auto, review, flagged, ask, skipped };
-  }, [rows, originalDecisions]);
+  }, [rows, originalDecisions, accountFilter]);
 
   const totalApproved = partitioned.auto.length;
   const stillNeedsAction = partitioned.review.length + partitioned.flagged.length;
@@ -593,6 +599,32 @@ export function ReclassReview({
         )}
       </div>
 
+      {/* Source-account filter — work one bank/card at a time (JP workflow). */}
+      {(() => {
+        const accounts = [...new Set(rows.map((r) => r.bank_account_name).filter(Boolean))] as string[];
+        if (accounts.length < 2 && !accountFilter) return null;
+        return (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-semibold text-ink-slate">Account:</span>
+            <select
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value)}
+              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white"
+            >
+              <option value="">All accounts</option>
+              {accounts.sort().map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+            {accountFilter && (
+              <span className="text-xs bg-teal/10 text-teal-dark font-semibold px-2 py-1 rounded-lg">
+                Working in: {accountFilter}
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
         <TabButton
@@ -974,6 +1006,7 @@ function RowTable({
           <tr>
             <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Date</th>
             <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Vendor</th>
+            <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Account</th>
             <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Amount</th>
             <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">→ AI Target</th>
             {showDropdown && (
@@ -1043,6 +1076,9 @@ function RowTable({
                     </span>
                   )}
                 </div>
+              </td>
+              <td className="px-4 py-2.5 text-ink-slate align-top text-xs whitespace-nowrap">
+                {r.bank_account_name || "—"}
               </td>
               <td className="px-4 py-2.5 text-right font-mono text-navy align-top">
                 ${(r.transaction_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
