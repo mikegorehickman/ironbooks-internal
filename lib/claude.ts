@@ -232,6 +232,9 @@ export async function analyzeCOA(params: {
   stateProvince: string;
   clientAccounts: Array<QBOAccount & { transaction_count?: number }>;
   masterCOA: MasterCOAEntry[];
+  /** Names reserved by INACTIVE QBO accounts — count as existing so the
+   *  missing-accounts computation never proposes a 6240 Duplicate Name. */
+  reservedNames?: string[];
 }): Promise<AnalysisResult> {
   // Compact master COA once (constant across all batches)
   const compactMaster = params.masterCOA.map(m => ({
@@ -303,7 +306,7 @@ export async function analyzeCOA(params: {
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, () => worker()));
 
   // Merge all batch outputs into a single AnalysisResult
-  const merged = mergeAnalysisResults(batchResults, params.masterCOA, params.clientAccounts);
+  const merged = mergeAnalysisResults(batchResults, params.masterCOA, params.clientAccounts, params.reservedNames);
   return validateAnalysis(merged, params.clientAccounts);
 }
 
@@ -404,7 +407,8 @@ If this is a batch, do NOT worry about missing_required_accounts — that's calc
 function mergeAnalysisResults(
   batchResults: AnalysisResult[],
   masterCOA: MasterCOAEntry[],
-  allClientAccounts: Array<QBOAccount & { transaction_count?: number }>
+  allClientAccounts: Array<QBOAccount & { transaction_count?: number }>,
+  reservedNames: string[] = []
 ): AnalysisResult {
   const allSuggestions: AISuggestion[] = batchResults.flatMap(r => r.suggestions || []);
   const allWarnings: string[] = Array.from(
@@ -420,9 +424,11 @@ function mergeAnalysisResults(
   // as needed). A leaf is "missing" if:
   //   - No client account already has that exact name, AND
   //   - No suggestion is renaming to it
-  const clientNamesLower = new Set(
-    allClientAccounts.map(a => normalizeAccountName(a.Name))
-  );
+  const clientNamesLower = new Set([
+    ...allClientAccounts.map(a => normalizeAccountName(a.Name)),
+    // Inactive accounts still hold their names in QBO.
+    ...reservedNames.map(n => normalizeAccountName(n)),
+  ]);
   const renameTargetsLower = new Set(
     allSuggestions
       .filter(s => s.action === 'rename' && s.target_master_account)

@@ -751,6 +751,23 @@ export async function qboRequest<T>(
 /**
  * Pull the entire Chart of Accounts for a client.
  */
+/**
+ * Fetch ALL accounts including inactive (deleted) ones. QBO's default query
+ * filter is Active=true, so plain fetchAllAccounts never sees deleted
+ * accounts — but QBO still reserves their NAMES (creating a duplicate name
+ * fails with code 6240). Use this wherever "does this name exist?" matters.
+ */
+export async function fetchAllAccountsIncludingInactive(realmId: string, accessToken: string): Promise<QBOAccount[]> {
+  if (isDemoRealm(realmId)) return demoAccounts();
+  const query = encodeURIComponent('SELECT * FROM Account WHERE Active IN (true, false) MAXRESULTS 1000');
+  const data = await qboRequest<{ QueryResponse: { Account?: QBOAccount[] } }>(
+    realmId,
+    accessToken,
+    `/query?query=${query}`
+  );
+  return data.QueryResponse.Account || [];
+}
+
 export async function fetchAllAccounts(realmId: string, accessToken: string): Promise<QBOAccount[]> {
   if (isDemoRealm(realmId)) return demoAccounts();
   const query = encodeURIComponent('SELECT * FROM Account MAXRESULTS 1000');

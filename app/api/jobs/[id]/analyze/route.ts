@@ -1,6 +1,7 @@
 import { computeRetypePlans } from "@/lib/coa-retype";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { fetchAllAccounts, getValidToken, fetchTransactionCountsForAllAccounts, qboErrorResponse } from "@/lib/qbo";
+import {
+  fetchAllAccountsIncludingInactive, getValidToken, fetchTransactionCountsForAllAccounts, qboErrorResponse } from "@/lib/qbo";
 import { analyzeCOA, type MasterCOAEntry } from "@/lib/claude";
 import { NextResponse } from "next/server";
 
@@ -66,10 +67,17 @@ export async function POST(
       );
     };
 
-    const [allQboAccounts, txCounts] = await Promise.all([
-      fetchAllAccounts(clientLink.qbo_realm_id, accessToken),
+    const [allQboAccountsIncludingInactive, txCounts] = await Promise.all([
+      fetchAllAccountsIncludingInactive(clientLink.qbo_realm_id, accessToken),
       fetchTransactionCountsForAllAccounts(clientLink.qbo_realm_id, accessToken),
     ]);
+    // Suggestions operate on ACTIVE accounts only, but INACTIVE names are
+    // still reserved by QBO (creating them fails with 6240 Duplicate Name) —
+    // so they count as "existing" for the missing-accounts computation.
+    const allQboAccounts = allQboAccountsIncludingInactive.filter((a) => a.Active !== false);
+    const inactiveReservedNames = allQboAccountsIncludingInactive
+      .filter((a) => a.Active === false)
+      .map((a) => a.Name);
 
     // 3a. Restrict cleanup to P&L accounts only.
     //   Balance Sheet accounts (AR/AP, banks, credit cards, fixed assets,
@@ -162,6 +170,7 @@ export async function POST(
       stateProvince: clientLink.state_province || "",
       clientAccounts: accountsWithTxCounts,
       masterCOA,
+      reservedNames: inactiveReservedNames,
     });
 
     // Prepend industry-fallback warnings so they appear at the top of the

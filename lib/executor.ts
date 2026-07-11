@@ -106,6 +106,11 @@ function isQboLimitationError(err: any): boolean {
     msg.includes("\"code\":\"2010\"") ||
     msg.includes("Request has invalid or unsupported property") ||
     msg.includes("\"code\":\"2170\"") ||      // "Invalid Enumeration" — often hit on parent type conflicts
+    // Duplicate Name (6240): the name is held by another account — usually an
+    // INACTIVE (deleted) one the API can't see or touch. Manual cleanup:
+    // reactivate/rename it in QBO. (Dominion: "Remodeling Revenue", "Taxes".)
+    msg.includes("\"code\":\"6240\"") ||
+    msg.includes("Duplicate Name Exists") ||
     // Business Validation Error (code 6000) when QBO refuses to inactivate
     // an account that's referenced by another entity (product/service,
     // shipping default, payroll account, sales tax, etc.). These are QBO
