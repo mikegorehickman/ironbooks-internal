@@ -1,3 +1,4 @@
+import { computeRetypePlans } from "@/lib/coa-retype";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { fetchAllAccounts, getValidToken, fetchTransactionCountsForAllAccounts, qboErrorResponse } from "@/lib/qbo";
 import { analyzeCOA, type MasterCOAEntry } from "@/lib/claude";
@@ -369,6 +370,49 @@ export async function POST(
     }
 
     await service.from("coa_actions").insert([...actions, ...missingActions] as any);
+
+    // RETYPE ACTIONS (JP audit): accounts whose name matches the standard
+    // chart (directly, or via the rename the analyzer just proposed) but
+    // whose AccountType/AccountSubType is wrong — e.g. "Salaries & Payroll"
+    // typed Other Expense, which pushes payroll below the line on the P&L.
+    // Inserted SEPARATELY and fail-soft: until migration 119 adds 'retype'
+    // to the coa_action enum this insert fails harmlessly and the rest of
+    // the analysis is unaffected.
+    const renameTargets = new Map<string, string>(
+      analysis.suggestions
+        .filter(s => s.action === "rename" && s.qbo_account_id && s.target_master_account && !suppressedActionAccountIds.has(s.qbo_account_id))
+        .map(s => [String(s.qbo_account_id), String(s.target_master_account)])
+    );
+    const retypePlans = computeRetypePlans({
+      masterRows: masterCOA.map(m => ({
+        account_name: m.account_name,
+        qbo_account_type: m.qbo_account_type,
+        qbo_account_subtype: m.qbo_account_subtype ?? null,
+      })),
+      clientAccounts: qboAccounts.map((a: any) => ({
+        Id: a.Id, Name: a.Name, AccountType: a.AccountType, AccountSubType: a.AccountSubType,
+      })),
+      renameTargets,
+    });
+    if (retypePlans.length > 0) {
+      const retypeActions = retypePlans.map((r, idx) => ({
+        job_id: jobId,
+        qbo_account_id: r.qbo_account_id,
+        current_name: r.current_name,
+        current_type: r.current_type,
+        current_subtype: r.current_subtype,
+        action: "retype" as any,
+        new_type: r.new_type,
+        new_subtype: r.new_subtype,
+        ai_confidence: 1.0,
+        ai_reasoning: r.reason,
+        sort_order: actions.length + missingActions.length + idx,
+      }));
+      const { error: retypeErr } = await service.from("coa_actions").insert(retypeActions as any);
+      if (retypeErr) {
+        console.warn(`[coa-analyze ${jobId}] retype actions not inserted (migration 119 applied?): ${retypeErr.message}`);
+      }
+    }
 
     return NextResponse.json({
       success: true,

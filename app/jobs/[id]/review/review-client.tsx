@@ -9,7 +9,10 @@ import {
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "@/lib/database.types";
 
-type Action = Database["public"]["Tables"]["coa_actions"]["Row"];
+// The generated DB types don't include 'retype' until they're regenerated
+// after migration 119 — widen locally so the new action renders type-safely.
+type ActionRow = Database["public"]["Tables"]["coa_actions"]["Row"];
+type Action = Omit<ActionRow, "action"> & { action: ActionRow["action"] | "retype" };
 type ClientLink = Database["public"]["Tables"]["client_links"]["Row"];
 
 interface MasterAccount {
@@ -157,7 +160,7 @@ export function ReviewClient({
 }) {
   const router = useRouter();
   const [actions, setActions] = useState(initialActions);
-  const [filter, setFilter] = useState<"all" | "rename" | "merge" | "delete" | "flag" | "keep" | "create">("all");
+  const [filter, setFilter] = useState<"all" | "rename" | "merge" | "delete" | "flag" | "keep" | "create" | "retype">("all");
   const [executing, setExecuting] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -214,6 +217,7 @@ export function ReviewClient({
 
   const counts = {
     rename: actions.filter((a) => a.action === "rename").length,
+    retype: actions.filter((a) => a.action === "retype").length,
     merge:  actions.filter((a) => a.action === "merge").length,
     delete: actions.filter((a) => a.action === "delete").length,
     keep:   actions.filter((a) => a.action === "keep").length,
@@ -256,12 +260,15 @@ export function ReviewClient({
     await supabase
       .from("coa_actions")
       .update({
+        // This call site's Update generic already resolved to `never` in the
+        // typecheck baseline; 'retype' additionally isn't in the generated
+        // enum until types regenerate post-migration-119. Assert the payload.
         action: newAction,
         ...(newTarget !== undefined && { new_name: newTarget || null }),
         ...(newTarget && { ai_suggested_target: newTarget }),
         ...(flaggedReason !== undefined && { flagged_reason: flaggedReason }),
         bookkeeper_override: true,
-      })
+      } as never)
       .eq("id", actionId);
   }
 
@@ -310,7 +317,7 @@ export function ReviewClient({
 
       {/* Filter tabs + Re-analyze action */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
-        {(["all", "rename", "merge", "delete", "flag", "keep", "create"] as const).map((f) => (
+        {(["all", "rename", "retype", "merge", "delete", "flag", "keep", "create"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -460,12 +467,13 @@ function ActionRow({
     delete: { color: "#DC2626", bg: "#FEE2E2", label: "Delete",     icon: Trash2    },
     flag:   { color: "#F59E0B", bg: "#FEF3C7", label: "Flag",       icon: Flag      },
     create: { color: "#10B981", bg: "#D1FAE5", label: "Create",     icon: Building2 },
+    retype: { color: "#0891B2", bg: "#CFFAFE", label: "Fix Type",   icon: Building2 },
   };
   const cfg = actionConfig[action.action] ?? actionConfig.flag;
   const Icon = cfg.icon;
   const confidencePct = Math.round((action.ai_confidence || 0) * 100);
   const currentTarget = action.new_name || action.ai_suggested_target || "";
-  const isDeleteOrKeep = action.action === "delete" || action.action === "keep";
+  const isDeleteOrKeep = action.action === "delete" || action.action === "keep" || action.action === "retype";
 
   function handleTargetChange(selectedTarget: string) {
     if (selectedTarget === "__uncategorized__") {
@@ -494,7 +502,13 @@ function ActionRow({
 
       {/* AI Suggestion */}
       <div className="text-sm pr-2">
-        {action.action === "merge" && action.new_name ? (
+        {action.action === "retype" ? (
+          <div className="text-xs">
+            <span className="font-semibold" style={{ color: "#0891B2" }}>
+              {action.current_type || "?"}{action.current_subtype ? `/${action.current_subtype}` : ""} → {action.new_type}{action.new_subtype ? `/${action.new_subtype}` : ""}
+            </span>
+          </div>
+        ) : action.action === "merge" && action.new_name ? (
           <div className="flex items-center gap-1.5">
             <GitMerge size={13} className="text-purple-600 flex-shrink-0" />
             <span className="font-semibold text-purple-700 text-xs">Merge into {action.new_name}</span>
