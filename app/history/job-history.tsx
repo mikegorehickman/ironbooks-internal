@@ -44,6 +44,7 @@ interface Client { id: string; client_name: string }
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: any; label: string }> = {
   complete: { color: "#10B981", bg: "#D1FAE5", icon: CheckCircle2, label: "Complete" },
+  complete_with_errors: { color: "#F59E0B", bg: "#FEF3C7", icon: AlertTriangle, label: "Complete (with errors)" },
   failed: { color: "#DC2626", bg: "#FEE2E2", icon: XCircle, label: "Failed" },
   executing: { color: "#2563EB", bg: "#DBEAFE", icon: Loader2, label: "Running" },
   cancelled: { color: "#94A3B8", bg: "#F1F5F9", icon: XCircle, label: "Cancelled" },
@@ -221,6 +222,7 @@ export function JobHistory({
           >
             <option value="all">All statuses</option>
             <option value="complete">Complete</option>
+            <option value="complete_with_errors">Complete (with errors)</option>
             <option value="executing">Running</option>
             <option value="failed">Failed</option>
             <option value="in_review">In Review</option>

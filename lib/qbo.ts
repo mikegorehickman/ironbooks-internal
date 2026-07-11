@@ -802,6 +802,55 @@ export async function createAccount(
 }
 
 /**
+ * Change an existing account's AccountType / AccountSubType (sparse update).
+ *
+ * QBO rules that shape this:
+ * - A subaccount must share its parent's AccountType. Retyping a child away
+ *   from its (wrongly-typed) parent requires detaching it to top level —
+ *   pass detachFromParent; the re-parent stage re-nests it after the parent
+ *   itself is retyped.
+ * - QBO rejects some type changes outright (system accounts, certain
+ *   category jumps). This function throws cleanly; the caller (executor
+ *   retype stage) routes rejections to the manual-cleanup path.
+ */
+export async function updateAccountType(
+  realmId: string,
+  accessToken: string,
+  accountId: string,
+  syncToken: string,
+  params: {
+    newType: string;
+    newSubType: string;
+    /** Full current account — Name and parent linkage are echoed to avoid 2010s. */
+    currentAccount: QBOAccount;
+    detachFromParent?: boolean;
+  }
+): Promise<QBOAccount> {
+  const cur: any = params.currentAccount;
+  const body: any = {
+    Id: accountId,
+    SyncToken: syncToken,
+    sparse: true,
+    Name: cur.Name,
+    AccountType: params.newType,
+    AccountSubType: params.newSubType,
+  };
+  if (params.detachFromParent) {
+    body.SubAccount = false;
+  } else if (cur.SubAccount && cur.ParentRef?.value) {
+    body.SubAccount = true;
+    body.ParentRef = { value: cur.ParentRef.value };
+  }
+  const data = await qboRequest<{ Account: QBOAccount }>(
+    realmId,
+    accessToken,
+    '/account?minorversion=70',
+    { method: 'POST', body: JSON.stringify(body) }
+  );
+  return data.Account;
+}
+
+/**
  * Rename an existing account (preserves history + transactions).
  *
  * IMPORTANT: For sub-accounts, you must also pass the current account object

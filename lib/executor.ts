@@ -275,6 +275,9 @@ export async function executeJob(jobId: string): Promise<{
   // of the job to produce smart, plain-English manual cleanup line items.
   // Each entry has the exact request body + QBO error + account snapshot.
   const pendingFailures: FailureContext[] = [];
+  // Re-parents skipped because parent/child AccountTypes differ (surfaced in
+  // the completion log — the retype stage should make this list empty).
+  const reparentTypeSkips: string[] = [];
   const stats: ExecutionStats = {
     created: 0, renamed: 0, merged: 0, reclassified: 0, reparented: 0, inactivated: 0, duration_seconds: 0,
   };
@@ -586,6 +589,82 @@ export async function executeJob(jobId: string): Promise<{
       .from("coa_actions").select("*").eq("job_id", jobId).order("sort_order");
     const liveActions = (validatedActions || actions) as any[];
 
+    // ============================================================
+    // STAGE 0.75: Retype — fix AccountType/AccountSubType BEFORE any
+    // create/rename/merge/re-parent work. Types drive statement placement
+    // (JP: "Salaries & Payroll" as Other Expense put payroll below the
+    // line), and QBO refuses to nest correctly-typed children under
+    // wrongly-typed parents — so parents must be fixed first for the later
+    // stages to succeed. A child being retyped away from its parent's type
+    // is detached to top level; Stage 3.8 re-nests it afterwards.
+    // ============================================================
+    const retypes = liveActions.filter((a) => a.action === "retype" && !a.executed);
+    if (retypes.length > 0) {
+      await logProgress(ctx, "stage_start", `Fixing account types on ${retypes.length} accounts`,
+        { stage: "retype", total: retypes.length });
+      const retypeAccounts = await qbo.fetchAllAccounts(ctx.realmId, ctx.accessToken);
+      const retypeById = new Map(retypeAccounts.map((a) => [a.Id, a]));
+      for (const action of retypes) {
+        checkBudget(startTime);
+        if (await shouldCancel(ctx)) {
+          await logProgress(ctx, "cancellation_acknowledged", "Cancelled mid-run — exiting retype stage cleanly");
+          return { success: false, errors, stats };
+        }
+        try {
+          const current: any = retypeById.get(action.qbo_account_id!);
+          if (!current) throw new Error("Account no longer exists in QBO");
+          const parent: any = current.ParentRef?.value ? retypeById.get(current.ParentRef.value) : null;
+          const detachFromParent =
+            !!current.SubAccount && !!parent && parent.AccountType !== action.new_type;
+          const updated = await qbo.updateAccountType(
+            ctx.realmId, ctx.accessToken,
+            action.qbo_account_id!, current.SyncToken,
+            {
+              newType: action.new_type!,
+              newSubType: action.new_subtype!,
+              currentAccount: current,
+              detachFromParent,
+            }
+          );
+          await markActionComplete(ctx, action.id, updated.Id, updated);
+          await logActionResult(ctx, action.id, "qbo_retype", {
+            account: action.current_name,
+            from: `${action.current_type}/${action.current_subtype}`,
+            to: `${action.new_type}/${action.new_subtype}`,
+            detached: detachFromParent,
+          });
+        } catch (e: any) {
+          if (isQboLimitationError(e)) {
+            const snap: any = retypeById.get(action.qbo_account_id!) || null;
+            pendingFailures.push({
+              intended_action: "retype",
+              account_id: action.qbo_account_id ?? null,
+              account_name: action.current_name || "Unknown account",
+              request_body: {
+                Id: action.qbo_account_id,
+                AccountType: action.new_type,
+                AccountSubType: action.new_subtype,
+              },
+              qbo_error: String(e?.message || e),
+              account_snapshot: snap ? {
+                Name: snap.Name,
+                AccountType: snap.AccountType,
+                AccountSubType: snap.AccountSubType,
+                SubAccount: snap.SubAccount,
+                ParentRef: snap.ParentRef,
+                CurrentBalance: snap.CurrentBalance,
+              } : null,
+            } as any);
+            await markActionFailed(ctx, action.id, `QBO refused type change (manual cleanup item created): ${String(e?.message || e).slice(0, 300)}`);
+          } else {
+            errors.push(`Retype ${action.current_name}: ${e.message}`);
+            await markActionFailed(ctx, action.id, e.message);
+          }
+        }
+      }
+      await logProgress(ctx, "stage_complete", `Retype stage done`, { stage: "retype" });
+    }
+
     // STAGE 1: Create parents
     // Filter out already-executed actions in every stage — makes the executor
     // idempotent so a paused-and-resumed run picks up where it left off
@@ -798,6 +877,12 @@ export async function executeJob(jobId: string): Promise<{
           return { success: false, errors, stats };
         }
         try {
+          // Guard: a rename with no target name would send Name:null to QBO
+          // (1 Day Refinishing bug) — fail the action loudly instead.
+          if (!action.new_name || !String(action.new_name).trim()) {
+            await markActionFailed(ctx, action.id, "Rename skipped — no new name on the action (pick a target in review and re-run).");
+            continue;
+          }
           const current = accountMap.get(action.qbo_account_id!);
           if (!current) throw new Error("Account no longer exists in QBO");
 
@@ -1386,7 +1471,15 @@ export async function executeJob(jobId: string): Promise<{
           if (!m) return false;
           const parent = byName.get(normName(m.parent));
           if (!parent || parent.Id === acct.Id) return false;
-          if (parent.AccountType !== acct.AccountType) return false;
+          if (parent.AccountType !== acct.AccountType) {
+            // Not silent anymore: this is exactly what the retype stage exists
+            // to fix — if it still happens, the team should see it.
+            console.warn(
+              `[executor ${jobId}] re-parent skipped: "${acct.Name}" (${acct.AccountType}) cannot nest under "${parent.Name}" (${parent.AccountType}) — types differ; needs retype`
+            );
+            reparentTypeSkips.push(`"${acct.Name}" (${acct.AccountType}) under "${parent.Name}" (${parent.AccountType})`);
+            return false;
+          }
           if (acct.ParentRef?.value === parent.Id) return false; // already right
           if (hasChildren.has(acct.Id)) return false; // it's a parent itself
           return true;
@@ -1565,13 +1658,33 @@ export async function executeJob(jobId: string): Promise<{
         { stage: "ai_repair_plan", produced: aiItems.length });
     }
 
-    await supabase.from("coa_jobs").update({
-      status: "complete",
+    if (reparentTypeSkips.length > 0) {
+      await logProgress(ctx, "reparent_type_skips",
+        `${reparentTypeSkips.length} re-parents skipped due to type mismatches (need retype): ${reparentTypeSkips.slice(0, 5).join("; ")}`,
+        { count: reparentTypeSkips.length, skips: reparentTypeSkips });
+    }
+
+    // Honest completion status: failures no longer hide behind a green
+    // "complete" (task #45). Fail-soft: if migration 119 hasn't added the
+    // enum value yet, fall back to plain "complete" (error_message still
+    // carries the failures).
+    const finalStatus = errors.length > 0 ? "complete_with_errors" : "complete";
+    const { error: statusErr } = await supabase.from("coa_jobs").update({
+      status: finalStatus as any,
       execution_completed_at: new Date().toISOString(),
       execution_duration_seconds: stats.duration_seconds,
       error_message: errors.length > 0 ? errors.join("; ") : null,
       manual_cleanup_items: manualCleanupItems as any,
     }).eq("id", jobId);
+    if (statusErr && finalStatus === "complete_with_errors") {
+      await supabase.from("coa_jobs").update({
+        status: "complete",
+        execution_completed_at: new Date().toISOString(),
+        execution_duration_seconds: stats.duration_seconds,
+        error_message: errors.length > 0 ? errors.join("; ") : null,
+        manual_cleanup_items: manualCleanupItems as any,
+      }).eq("id", jobId);
+    }
 
     await logProgress(ctx, "job_complete",
       `Job complete in ${stats.duration_seconds}s` +
