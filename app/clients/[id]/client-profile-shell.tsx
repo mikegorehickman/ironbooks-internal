@@ -31,6 +31,7 @@ import {
   Trash2,
   ClipboardCheck,
   StickyNote,
+  RefreshCw,
 } from "lucide-react";
 import { CleanupTab } from "./cleanup-tab";
 import { NotesPanel } from "./notes-panel";
@@ -207,6 +208,14 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href={`/jobs/new?client=${clientLink.id}&redo=1`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal text-white text-xs font-semibold hover:bg-teal-dark"
+            title="Re-run COA cleanup — applies the latest master chart and skips the redo confirmation"
+          >
+            <RefreshCw size={13} />
+            Re-run COA Cleanup
+          </Link>
           <UrgentFlagButton
             clientLinkId={clientLink.id}
             initialUrgent={!!(clientLink as any).urgent_flag}
