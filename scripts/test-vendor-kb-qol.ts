@@ -23,21 +23,21 @@ ok(acct("HUGHES PETROLEUM LTD", 8) === "Fuel – Overhead", "Hughes $8 stays Fue
 ok(acct("E-TRANSFER FEE", 1.5) === "Bank Charges", "e-transfer $1.50 still Bank Charges");
 
 // ── Ad descriptors ──
-ok(acct("GOOGLE*ADS4739 CC", 250) === "Online Advertising – Google Ads / Social Media Marketing", "GOOGLE*ADS4739 → Advertising");
-ok(acct("GOOGLEADS7301", 512) === "Online Advertising – Google Ads / Social Media Marketing", "GOOGLEADS → Advertising");
-ok(acct("FACEBK *X2A7B9", 340) === "Online Advertising – Google Ads / Social Media Marketing", "FACEBK * → Advertising");
+ok(acct("GOOGLE*ADS4739 CC", 250) === "Online Advertising - Ad Spend", "GOOGLE*ADS4739 → Advertising");
+ok(acct("GOOGLEADS7301", 512) === "Online Advertising - Ad Spend", "GOOGLEADS → Advertising");
+ok(acct("FACEBK *X2A7B9", 340) === "Online Advertising - Ad Spend", "FACEBK * → Advertising");
 ok(conf("FACEBK *X2A7B9", 340) === 0.97, "FACEBK descriptor is high confidence");
-ok(acct("FB *ADVERTISING", 120) === "Online Advertising – Google Ads / Social Media Marketing", "FB * → Advertising");
+ok(acct("FB *ADVERTISING", 120) === "Online Advertising - Ad Spend", "FB * → Advertising");
 // software disambiguation intact
 ok(acct("GOOGLE*GSUITE_paintco", 18) === "Software Subscriptions", "GOOGLE*GSUITE → Software");
 ok(acct("GOOGLE WORKSPACE", 22) === "Software Subscriptions", "Google Workspace → Software");
 // bare-vendor fallbacks: moderate confidence, queue not auto
-ok(acct("GOOGLE", 300) === "Online Advertising – Google Ads / Social Media Marketing", "bare GOOGLE → Advertising fallback");
+ok(acct("GOOGLE", 300) === "Online Advertising - Ad Spend", "bare GOOGLE → Advertising fallback");
 ok(conf("GOOGLE", 300)! < 0.95, "bare GOOGLE stays below auto floor");
-ok(acct("FACEBOOK", 150) === "Online Advertising – Google Ads / Social Media Marketing", "bare FACEBOOK → Advertising fallback");
-ok(acct("GOOGLE *YOUTUBE", 14) !== "Online Advertising – Google Ads / Social Media Marketing", "GOOGLE *YOUTUBE excluded from ads fallback");
-ok(acct("FACEBOOK MARKETPLACE", 60) !== "Online Advertising – Google Ads / Social Media Marketing", "FB Marketplace excluded from ads fallback");
-ok(acct("META QUEST STORE", 500) !== "Online Advertising – Google Ads / Social Media Marketing", "Meta Quest excluded from ads fallback");
+ok(acct("FACEBOOK", 150) === "Online Advertising - Ad Spend", "bare FACEBOOK → Advertising fallback");
+ok(acct("GOOGLE *YOUTUBE", 14) !== "Online Advertising - Ad Spend", "GOOGLE *YOUTUBE excluded from ads fallback");
+ok(acct("FACEBOOK MARKETPLACE", 60) !== "Online Advertising - Ad Spend", "FB Marketplace excluded from ads fallback");
+ok(acct("META QUEST STORE", 500) !== "Online Advertising - Ad Spend", "Meta Quest excluded from ads fallback");
 
 // ── Sanity: nothing above broke ──
 ok(acct("SHERWIN WILLIAMS 703581", 214) === "Job Supplies & Materials", "Sherwin-Williams intact");

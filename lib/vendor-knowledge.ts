@@ -48,7 +48,7 @@ interface VendorPattern {
 
 const PATTERNS: VendorPattern[] = [
   // ══════════════ REVIEWED FLEET VENDORS (from 85K-txn mining, Mike/Lisa reviewed 2026-07) ══════════════
-  { pattern: /vistaprint/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.9, reasoning: "VISTAPRINT → Online Advertising – Google Ads / Social Media Marketing (reviewed)", vendor: "Vistaprint" },
+  { pattern: /vistaprint/i, account: "Online Advertising - Ad Spend", confidence: 0.9, reasoning: "VISTAPRINT → Online Advertising - Ad Spend (reviewed)", vendor: "Vistaprint" },
   { pattern: /indeed/i, account: "Recruiting", confidence: 0.9, reasoning: "INDEED → Recruiting (reviewed)", vendor: "Indeed" },
   { pattern: /painter\s+growth\s+venture/i, account: "Continuing Education / Professional Development", confidence: 0.9, reasoning: "PAINTER GROWTH VENTURE → Continuing Education / Professional Development (reviewed)", vendor: "Painter Growth" },
   { pattern: /dripjobs/i, account: "Software Subscriptions", confidence: 0.9, reasoning: "DRIPJOBS → Software Subscriptions (reviewed)", vendor: "Dripjobs" },
@@ -71,7 +71,7 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /mailchimp/i, account: "Software Subscriptions", confidence: 0.9, reasoning: "MAILCHIMP → Software Subscriptions (reviewed)", vendor: "Mailchimp" },
   { pattern: /marathon/i, account: "Fuel – Overhead", confidence: 0.9, reasoning: "MARATHON → Fuel – Overhead (reviewed)", vendor: "Marathon" },
   { pattern: /drip\s+jobs/i, account: "Software Subscriptions", confidence: 0.9, reasoning: "DRIP JOBS → Software Subscriptions (reviewed)" },
-  { pattern: /thumbtack/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.9, reasoning: "THUMBTACK → Online Advertising – Google Ads / Social Media Marketing (reviewed)", vendor: "Thumbtack" },
+  { pattern: /thumbtack/i, account: "Online Advertising - Ad Spend", confidence: 0.9, reasoning: "THUMBTACK → Online Advertising - Ad Spend (reviewed)", vendor: "Thumbtack" },
   { pattern: /spectrum/i, account: "Utilities", confidence: 0.9, reasoning: "SPECTRUM → Utilities (reviewed)", vendor: "Spectrum" },
   { pattern: /wawa/i, account: "Fuel – Overhead", confidence: 0.9, reasoning: "WAWA → Fuel – Overhead (reviewed)", vendor: "Wawa" },
   { pattern: /dulux\s+paints/i, account: "Job Supplies & Materials", confidence: 0.9, reasoning: "DULUX PAINTS → Job Supplies & Materials (reviewed)", vendor: "Dulux Paints" },
@@ -119,11 +119,11 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /washington\s+township\s+small/i, account: "Licenses", confidence: 0.9, reasoning: "WASHINGTON TOWNSHIP SMALL → Licenses (reviewed)", vendor: "Washington Township Small" },
   { pattern: /eversource\s+web\s+pay/i, account: "Utilities", confidence: 0.9, reasoning: "EVERSOURCE WEB PAY → Utilities (reviewed)", vendor: "Eversource Web Pay" },
   { pattern: /adp\s+payroll/i, account: "Payroll Expenses", confidence: 0.9, reasoning: "ADP PAYROLL → Payroll Expenses (reviewed)" },
-  { pattern: /thumbtack\s+marke/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.9, reasoning: "FIS THUMBTACK MARKE → Online Advertising – Google Ads / Social Media Marketing (reviewed)", vendor: "Thumbtack" },
+  { pattern: /thumbtack\s+marke/i, account: "Online Advertising - Ad Spend", confidence: 0.9, reasoning: "FIS THUMBTACK MARKE → Online Advertising - Ad Spend (reviewed)", vendor: "Thumbtack" },
   { pattern: /repcolite/i, account: "Job Supplies & Materials", confidence: 0.9, reasoning: "REPCOLITE → Job Supplies & Materials (reviewed)", vendor: "Repcolite" },
   { pattern: /wex\s+inc\s+fleet/i, account: "Fuel – Overhead", confidence: 0.9, reasoning: "WEX INC FLEET → Fuel – Overhead (reviewed)", vendor: "Wex Fleet" },
   { pattern: /national\s+grid/i, account: "Utilities", confidence: 0.9, reasoning: "NATIONAL GRID → Utilities (reviewed)", vendor: "National Grid" },
-  { pattern: /clickgrow/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.9, reasoning: "WITHDRAWAL FIS CLICKGROW → Online Advertising – Google Ads / Social Media Marketing (reviewed)" },
+  { pattern: /clickgrow/i, account: "Online Advertising - Ad Spend", confidence: 0.9, reasoning: "WITHDRAWAL FIS CLICKGROW → Online Advertising - Ad Spend (reviewed)" },
   { pattern: /southern\s+oak\s+gift/i, account: "Meals (50% deductible)", confidence: 0.9, reasoning: "SOUTHERN OAK GIFT → Meals (50% deductible) (reviewed)" },
   { pattern: /paychex\s+taxes/i, account: "Payroll Expenses", confidence: 0.9, reasoning: "PAYCHEX TAXES → Payroll Expenses (reviewed)" },
   { pattern: /paychex\s+flexperks/i, account: "Payroll Expenses", confidence: 0.9, reasoning: "PAYCHEX FLEXPERKS → Payroll Expenses (reviewed)" },
@@ -315,10 +315,10 @@ const PATTERNS: VendorPattern[] = [
   // FACEBK *X2A7B9, FB *ADVERTISING. Cover the descriptor forms explicitly
   // (bookkeeper feedback: these were falling through to AI and landing in
   // Software Subscriptions).
-  { pattern: /google\s*\*?\s*ads\w*|googleads|google\s+adwords/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.97, reasoning: "Google Ads → Online Advertising", vendor: "Google Ads" },
-  { pattern: /\bfacebk\b|\bfb\s*\*|\bmeta\s+(ads|platforms?)\b|facebook\s*ads|instagr?am\s*ads/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.97, reasoning: "Meta/Facebook descriptor → Online Advertising" },
-  { pattern: /linkedin\s+ads|tiktok\s+ads|snapchat\s+ads/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.97, reasoning: "Social ads → Online Advertising" },
-  { pattern: /yelp\s+ads|\bangi\b|home\s*advisor|\bhouzz\b/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.93, reasoning: "Lead-gen platform → Online Advertising", vendor: "Lead-gen platform" },
+  { pattern: /google\s*\*?\s*ads\w*|googleads|google\s+adwords/i, account: "Online Advertising - Ad Spend", confidence: 0.97, reasoning: "Google Ads → Online Advertising", vendor: "Google Ads" },
+  { pattern: /\bfacebk\b|\bfb\s*\*|\bmeta\s+(ads|platforms?)\b|facebook\s*ads|instagr?am\s*ads/i, account: "Online Advertising - Ad Spend", confidence: 0.97, reasoning: "Meta/Facebook descriptor → Online Advertising" },
+  { pattern: /linkedin\s+ads|tiktok\s+ads|snapchat\s+ads/i, account: "Online Advertising - Ad Spend", confidence: 0.97, reasoning: "Social ads → Online Advertising" },
+  { pattern: /yelp\s+ads|\bangi\b|home\s*advisor|\bhouzz\b/i, account: "Online Advertising - Ad Spend", confidence: 0.93, reasoning: "Lead-gen platform → Online Advertising", vendor: "Lead-gen platform" },
 
   // ══════════════════ SOFTWARE ══════════════════
   { pattern: /quickbooks|\bintuit\b/i, account: "Software Subscriptions", confidence: 0.97, reasoning: "QuickBooks/Intuit → Software" },
@@ -360,8 +360,8 @@ const PATTERNS: VendorPattern[] = [
   // advertising, not software. Confidence sits below the auto-execute floor so
   // these queue for a human instead of posting; the lookaheads keep consumer
   // Google products (One/Play/YouTube/Fi/etc.) out of the net.
-  { pattern: /\bfacebook\b(?!\s*market)|\bmeta\b(?!\s*(quest|store))/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.87, reasoning: "Bare Facebook/Meta charge on a business account → most likely ads (queued for review)" },
-  { pattern: /\bgoogle\b(?!\s*\*?\s*(workspace|suite|gsuite|one|play|fi\b|storage|cloud|domains|voice|youtube|nest))/i, account: "Online Advertising – Google Ads / Social Media Marketing", confidence: 0.82, reasoning: "Bare Google charge on a business account → most likely ads (queued for review)" },
+  { pattern: /\bfacebook\b(?!\s*market)|\bmeta\b(?!\s*(quest|store))/i, account: "Online Advertising - Ad Spend", confidence: 0.87, reasoning: "Bare Facebook/Meta charge on a business account → most likely ads (queued for review)" },
+  { pattern: /\bgoogle\b(?!\s*\*?\s*(workspace|suite|gsuite|one|play|fi\b|storage|cloud|domains|voice|youtube|nest))/i, account: "Online Advertising - Ad Spend", confidence: 0.82, reasoning: "Bare Google charge on a business account → most likely ads (queued for review)" },
 ];
 
 // ─────────── Lookup function ───────────
