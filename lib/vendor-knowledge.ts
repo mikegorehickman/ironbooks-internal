@@ -47,6 +47,12 @@ interface VendorPattern {
 // Order matters: more specific patterns first. First match wins.
 
 const PATTERNS: VendorPattern[] = [
+  // ══════════════════ PERSONAL / OWNER DRAW ══════════════════
+  // Child support, alimony, and similar court-ordered personal obligations
+  // paid from the business account are owner draws (equity, below net profit),
+  // never a business expense. No payee (not a vendor).
+  { pattern: /child\s*support|family\s*support|alimony|maintenance\s+enforcement|fmep\b|\bmep\b/i, account: "Owner's Draw", confidence: 0.9, reasoning: "Child/family support → Owner's Draw (personal obligation, equity)" },
+
   // ══════════════════ ATM WITHDRAWALS → Owner Draw ══════════════════
   // Cash withdrawn from ATM is essentially untracked spending — booked to owner
   // draw by default for trades businesses (rules vary by client but this is the
