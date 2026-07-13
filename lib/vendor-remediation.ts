@@ -46,7 +46,13 @@ export interface RemediationCandidate {
 }
 
 export const REMEDIATION_MAX_AMOUNT = 500;
-export const REMEDIATION_MIN_CONFIDENCE = 0.95;
+// 0.90, not 0.95: the 82 Mike/Lisa-reviewed fleet vendors were loaded at 0.9
+// and the grocery recats at 0.92 — a 0.95 floor silently excluded ALL of them
+// (first scan showed 751 candidates/38 clients; at 0.90 it's 3,340/60, the
+// full reviewed rule set). Everything ≥0.90 is either human-reviewed or a
+// long-standing exact-brand rule; below 0.90 are the deliberately-uncertain
+// rules (bare Google/Facebook, "likely" mappings) that queue for humans.
+export const REMEDIATION_MIN_CONFIDENCE = 0.90;
 
 const norm = (s: string | null | undefined) => normalizeAccountName(s || "");
 
