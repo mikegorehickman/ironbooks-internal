@@ -9,8 +9,11 @@
  *      nothing slips past a dropped webhook.
  *
  * Env vars (set in Vercel):
- *   GHL_WEBHOOK_SECRET   — shared secret; we compare it constant-time to the
- *                          `x-snap-webhook-secret` header (or ?secret= query).
+ *   GHL_WEBHOOK_SECRET        — shared secret; we compare it constant-time to
+ *                               the `x-snap-webhook-secret` header (or ?secret=).
+ *   ONBOARDING_WEBHOOK_SECRET — optional second secret for the ironbooks.com
+ *                               onboarding-form site (Manus), so it can be
+ *                               revoked/rotated independently of GHL.
  *   GHL_API_KEY          — LeadConnector API token (for outbound calls).
  *   GHL_LOCATION_ID      — the GHL location/sub-account id.
  *   GHL_API_BASE         — defaults to https://services.leadconnectorhq.com
@@ -19,10 +22,12 @@ import crypto from "crypto";
 
 const API_BASE = process.env.GHL_API_BASE || "https://services.leadconnectorhq.com";
 
-/** Constant-time check of the webhook shared secret. */
+/** Constant-time check of the webhook shared secret (either accepted sender's). */
 export function verifyGhlWebhook(request: Request): boolean {
-  const secret = process.env.GHL_WEBHOOK_SECRET;
-  if (!secret) {
+  const secrets = [process.env.GHL_WEBHOOK_SECRET, process.env.ONBOARDING_WEBHOOK_SECRET].filter(
+    (s): s is string => !!s
+  );
+  if (secrets.length === 0) {
     console.error("[ghl] GHL_WEBHOOK_SECRET not configured");
     return false;
   }
@@ -34,8 +39,10 @@ export function verifyGhlWebhook(request: Request): boolean {
     "";
   if (!provided) return false;
   const a = Buffer.from(provided);
-  const b = Buffer.from(secret);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  return secrets.some((secret) => {
+    const b = Buffer.from(secret);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  });
 }
 
 export function ghlConfigured(): boolean {

@@ -268,6 +268,18 @@ const FORM_TO_PROFILE: { keys: string[]; col: string; transform?: (v: string) =>
   { keys: ["Keep Receipts", "keepReceipts"], col: "keeps_receipts" },
   { keys: ["Bank Connected", "bankConnected"], col: "bank_connected_to_software" },
   { keys: ["CreditCards", "creditCards", "Credit Cards"], col: "uses_business_cards" },
+  // Address block — columns exist since migration 73 and render on the profile,
+  // but no form variant sent them until the ironbooks.com (Manus) form did.
+  {
+    keys: ["Address Line 1", "addressLine1", "Street Address", "streetAddress", "Address", "address", "address1"],
+    col: "address_line1",
+  },
+  { keys: ["Address Line 2", "addressLine2", "Unit", "Suite", "address2"], col: "address_line2" },
+  { keys: ["City", "city"], col: "city" },
+  {
+    keys: ["Postal Code", "postalCode", "postal_code", "Zip Code", "zipCode", "Zip", "zip"],
+    col: "postal_code",
+  },
   // "Additional Notes" is intentionally NOT mapped to client_links.notes (that's
   // the internal bookkeeper notes field). It stays visible via the onboarding
   // answers card + the raw stored payload.
