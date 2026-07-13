@@ -149,6 +149,10 @@ export async function POST(request: Request) {
           .update({
             to_account_id: target.Id,
             to_account_name: target.Name,
+            // Skipped rows become executed — remediation is the write that
+            // finally moved them; executed rows just refresh the stamp.
+            status: "executed",
+            executed_at: new Date().toISOString(),
             ai_reasoning: `${c.kb_reasoning} — vendor remediation (reviewed rules), was "${c.current_account}"`,
           } as any)
           .eq("id", c.reclassification_id);

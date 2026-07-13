@@ -11,11 +11,14 @@ import { normalizeAccountName } from "@/lib/account-name";
  * Permit Fees, …). This module finds those rows.
  *
  * A row is a remediation candidate when ALL hold:
- *   - status = 'executed'                 → WE posted it (not a human pick)
- *   - new KB match confidence ≥ 0.95      → the established auto-execute floor
- *   - KB target ≠ the account we posted   → i.e. the old rules got it wrong
+ *   - status = 'executed' (we posted it) OR 'skipped' (discovery found it
+ *     already sitting in a real account — e.g. Dulux parked in the legacy
+ *     "Paint & Materials" by an old bank rule; the account is wrong even
+ *     though nobody at SNAP put it there). For executed rows the current
+ *     account is to_account_name; for skipped rows it's from_account_name.
+ *   - new KB match confidence ≥ 0.90      → every human-reviewed rule
+ *   - KB target ≠ the row's current account
  *   - |amount| < $500                     → wizard auto-approve threshold
- *   - KB target ≠ current from_account    → sanity (no no-op moves)
  *
  * The scan is DB-only (read-only, no QBO calls). Two later gates run at APPLY
  * time, per client: the QBO closing-date check (never touch closed periods)
@@ -95,63 +98,88 @@ export async function scanForCandidates(opts?: {
     clientById.set(c.id, { name: c.client_name, industry: (c as any).industry || "painters" });
   }
 
-  const candidates: RemediationCandidate[] = [];
+  // Gather rows first, deduped by transaction line: the same line often
+  // appears in several jobs (each re-discovery re-skips it). Later rows
+  // overwrite earlier ones (paged ascending by id), so the freshest wins.
+  type Row = {
+    id: string; reclass_job_id: string | null; qbo_transaction_id: string;
+    qbo_transaction_type: string | null; line_id: string | null;
+    transaction_date: string | null; transaction_amount: number | null;
+    vendor_name: string | null; description: string | null;
+    to_account_name: string | null; from_account_name: string | null;
+    status: string | null; is_reconciled: boolean | null; skip_reason: string | null;
+  };
+  const byLine = new Map<string, Row>();
   const PAGE = 1000;
   let from = 0;
   for (;;) {
     let q = service
       .from("reclassifications")
       .select(
-        "id, reclass_job_id, qbo_transaction_id, qbo_transaction_type, line_id, transaction_date, transaction_amount, vendor_name, description, to_account_name, from_account_name, status"
+        "id, reclass_job_id, qbo_transaction_id, qbo_transaction_type, line_id, transaction_date, transaction_amount, vendor_name, description, to_account_name, from_account_name, status, is_reconciled, skip_reason"
       )
-      .eq("status", "executed")
+      .in("status", ["executed", "skipped"])
       .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (opts?.reclassificationIds?.length) q = q.in("id", opts.reclassificationIds);
     const { data: rows, error } = await q;
     if (error) throw new Error(`scan page failed: ${error.message}`);
     if (!rows?.length) break;
-
-    for (const r of rows) {
-      const clientId = r.reclass_job_id ? jobClient.get(r.reclass_job_id) : null;
-      if (!clientId) continue;
-      const client = clientById.get(clientId);
-      if (!client) continue; // inactive client
-      if (opts?.clientLinkIds?.length && !opts.clientLinkIds.includes(clientId)) continue;
+    for (const r of rows as Row[]) {
       if (!r.line_id || !r.qbo_transaction_id) continue;
-
-      const amount = r.transaction_amount ?? 0;
-      if (Math.abs(amount) >= REMEDIATION_MAX_AMOUNT) continue;
-
-      const kb = lookupVendor(r.vendor_name || "", r.description || "", amount, client.industry);
-      if (!kb || kb.confidence < REMEDIATION_MIN_CONFIDENCE) continue;
-
-      const current = r.to_account_name || "";
-      if (!current) continue;
-      if (sameAccount(kb.account, current)) continue;          // already right
-      if (sameAccount(kb.account, r.from_account_name)) continue; // would undo our own move — leave for review
-
-      candidates.push({
-        reclassification_id: r.id,
-        client_link_id: clientId,
-        client_name: client.name,
-        qbo_transaction_id: r.qbo_transaction_id,
-        qbo_transaction_type: r.qbo_transaction_type || "Purchase",
-        line_id: r.line_id,
-        transaction_date: r.transaction_date,
-        transaction_amount: amount,
-        vendor_name: r.vendor_name,
-        description: r.description,
-        current_account: current,
-        target_account: kb.account,
-        target_vendor: kb.vendor || null,
-        kb_confidence: kb.confidence,
-        kb_reasoning: kb.reasoning,
-      });
+      byLine.set(`${r.qbo_transaction_id}::${r.line_id}`, r);
     }
-
     if (rows.length < PAGE) break;
     from += PAGE;
+  }
+
+  const candidates: RemediationCandidate[] = [];
+  for (const r of byLine.values()) {
+    const clientId = r.reclass_job_id ? jobClient.get(r.reclass_job_id) : null;
+    if (!clientId) continue;
+    const client = clientById.get(clientId);
+    if (!client) continue; // inactive client
+    if (opts?.clientLinkIds?.length && !opts.clientLinkIds.includes(clientId)) continue;
+
+    // Skipped rows: only the "already categorized to a real account" skips
+    // are remediable (e.g. Dulux parked in legacy "Paint & Materials" by an
+    // old bank rule). Reconciled lines and closed-period skips stay
+    // untouchable.
+    if (r.status === "skipped") {
+      if (r.is_reconciled) continue;
+      if (/closed/i.test(r.skip_reason || "")) continue;
+    }
+
+    const amount = r.transaction_amount ?? 0;
+    if (Math.abs(amount) >= REMEDIATION_MAX_AMOUNT) continue;
+
+    const kb = lookupVendor(r.vendor_name || "", r.description || "", amount, client.industry);
+    if (!kb || kb.confidence < REMEDIATION_MIN_CONFIDENCE) continue;
+
+    // Current account: what we posted (executed) vs. where discovery found
+    // it (skipped — it never moved).
+    const current = (r.status === "executed" ? r.to_account_name : r.from_account_name) || "";
+    if (!current) continue;
+    if (sameAccount(kb.account, current)) continue; // already right
+    if (r.status === "executed" && sameAccount(kb.account, r.from_account_name)) continue; // would undo our own move — leave for review
+
+    candidates.push({
+      reclassification_id: r.id,
+      client_link_id: clientId,
+      client_name: client.name,
+      qbo_transaction_id: r.qbo_transaction_id,
+      qbo_transaction_type: r.qbo_transaction_type || "Purchase",
+      line_id: r.line_id!,
+      transaction_date: r.transaction_date,
+      transaction_amount: amount,
+      vendor_name: r.vendor_name,
+      description: r.description,
+      current_account: current,
+      target_account: kb.account,
+      target_vendor: kb.vendor || null,
+      kb_confidence: kb.confidence,
+      kb_reasoning: kb.reasoning,
+    });
   }
 
   return candidates;
