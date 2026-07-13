@@ -144,18 +144,23 @@ export async function POST(request: Request) {
         }
         summary.moved_lines++;
         const target = findAccount(c.target_account)!;
-        await service
-          .from("reclassifications")
-          .update({
-            to_account_id: target.Id,
-            to_account_name: target.Name,
-            // Skipped rows become executed — remediation is the write that
-            // finally moved them; executed rows just refresh the stamp.
-            status: "executed",
-            executed_at: new Date().toISOString(),
-            ai_reasoning: `${c.kb_reasoning} — vendor remediation (reviewed rules), was "${c.current_account}"`,
-          } as any)
-          .eq("id", c.reclassification_id);
+        const patch: any =
+          c.kind === "set_payee"
+            ? {
+                // account untouched — we only stamped the missing payee
+                vendor_name: c.target_vendor,
+                ai_reasoning: `${c.kb_reasoning} — vendor remediation: set missing payee "${c.target_vendor}"`,
+              }
+            : {
+                to_account_id: target.Id,
+                to_account_name: target.Name,
+                // Skipped rows become executed — remediation is the write
+                // that finally moved them; executed rows refresh the stamp.
+                status: "executed",
+                executed_at: new Date().toISOString(),
+                ai_reasoning: `${c.kb_reasoning} — vendor remediation (reviewed rules), was "${c.current_account}"`,
+              };
+        await service.from("reclassifications").update(patch).eq("id", c.reclassification_id);
       }
     } catch (err: any) {
       summary.failed += resolvable.length;

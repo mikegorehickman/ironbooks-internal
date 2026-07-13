@@ -27,6 +27,7 @@ export async function POST() {
 
   // Group: client → transition (current → target) → rows
   interface TransitionGroup {
+    kind: "move" | "set_payee";
     current_account: string;
     target_account: string;
     count: number;
@@ -39,10 +40,13 @@ export async function POST() {
     const client =
       byClient.get(c.client_link_id) ??
       byClient.set(c.client_link_id, { client_name: c.client_name, transitions: new Map() }).get(c.client_link_id)!;
-    const key = `${c.current_account} → ${c.target_account}`;
+    const key = c.kind === "set_payee"
+      ? `payee:${c.current_account}`
+      : `${c.current_account} → ${c.target_account}`;
     const g =
       client.transitions.get(key) ??
       client.transitions.set(key, {
+        kind: c.kind,
         current_account: c.current_account,
         target_account: c.target_account,
         count: 0,

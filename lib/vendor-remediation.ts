@@ -28,6 +28,11 @@ import { normalizeAccountName } from "@/lib/account-name";
  */
 
 export interface RemediationCandidate {
+  /** 'move' = wrong account, reclassify the line.
+   *  'set_payee' = account already correct but the QBO transaction has NO
+   *  payee (discovery recorded "Unknown vendor") — write stamps the KB's
+   *  canonical vendor via EntityRef, account untouched. */
+  kind: "move" | "set_payee";
   reclassification_id: string;
   client_link_id: string;
   client_name: string;
@@ -160,10 +165,24 @@ export async function scanForCandidates(opts?: {
     // it (skipped — it never moved).
     const current = (r.status === "executed" ? r.to_account_name : r.from_account_name) || "";
     if (!current) continue;
-    if (sameAccount(kb.account, current)) continue; // already right
-    if (r.status === "executed" && sameAccount(kb.account, r.from_account_name)) continue; // would undo our own move — leave for review
+
+    // Account already right → the only remediation left is the missing
+    // payee: rows whose QBO transaction had NO vendor at discovery
+    // ("Unknown vendor" / blank) get the KB's canonical payee stamped.
+    // Purchase-family only (Bills always carry a VendorRef).
+    const noPayee = !r.vendor_name || /^unknown\s*vendor$/i.test(r.vendor_name.trim());
+    const kind: "move" | "set_payee" = sameAccount(kb.account, current) ? "set_payee" : "move";
+    if (kind === "set_payee") {
+      if (!noPayee || !kb.vendor) continue;
+      if ((r.qbo_transaction_type || "Purchase") !== "Purchase") continue;
+    }
+    // NOTE deliberately NO "would undo our own move" exclusion: when the
+    // reviewed KB says the ORIGINAL account was right (e.g. we moved fuel
+    // INTO the legacy "Fuel – Admin & Sales Vehicles"), undoing our old move
+    // IS the remediation. The review screen + stale guard still gate it.
 
     candidates.push({
+      kind,
       reclassification_id: r.id,
       client_link_id: clientId,
       client_name: client.name,

@@ -16,6 +16,7 @@ interface CandidateRow {
   kb_confidence: number;
 }
 interface Transition {
+  kind: "move" | "set_payee";
   current_account: string;
   target_account: string;
   count: number;
@@ -264,9 +265,18 @@ export function VendorRemediationClient() {
                       >
                         {isExpanded ? <ChevronDown size={14} className="text-ink-light" /> : <ChevronRight size={14} className="text-ink-light" />}
                         <span className={`text-sm ${on ? "text-navy" : "text-ink-light line-through"}`}>
-                          <span className="font-medium">{t.current_account}</span>
-                          <span className="text-ink-light mx-1.5">→</span>
-                          <span className="font-semibold text-teal-dark">{t.target_account}</span>
+                          {t.kind === "set_payee" ? (
+                            <>
+                              <span className="font-medium">{t.current_account}</span>
+                              <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">set missing payee</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-medium">{t.current_account}</span>
+                              <span className="text-ink-light mx-1.5">→</span>
+                              <span className="font-semibold text-teal-dark">{t.target_account}</span>
+                            </>
+                          )}
                         </span>
                       </button>
                       <span className="text-xs text-ink-slate whitespace-nowrap">
