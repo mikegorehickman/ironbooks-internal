@@ -376,6 +376,24 @@ export function normalizeVendorForLookup(raw: string): string {
 }
 
 /**
+ * Canonical `bank_rules.vendor_pattern` for a vendor name — the ONE form a rule
+ * must be stored in so it fires on future auto-categorization.
+ *
+ * Both engines that consult bank_rules key their in-memory map on
+ * `vendor_pattern.toUpperCase()` and look up incoming vendors as
+ * `normalizeVendorForLookup(name).toUpperCase()`:
+ *   - lib/daily-recon.ts (Tier 2) — exact
+ *   - app/api/reclass/discover — same, plus an extra punctuation strip, so a
+ *     stored pattern also matches there for clean (alphanumeric) vendor names.
+ * Storing this exact value means daily-recon (the ongoing automated engine)
+ * always matches the same vendor string, and discover matches clean names.
+ * Any writer of bank_rules should use this so patterns stay consistent.
+ */
+export function bankRuleVendorPattern(name: string): string {
+  return normalizeVendorForLookup(name).toUpperCase();
+}
+
+/**
  * Look up a vendor against the static knowledge base. Returns the best match
  * or null if no pattern fires.
  *

@@ -1978,6 +1978,13 @@ function DrillDrawer({
     total: number;
     truncated: boolean;
   } | null>(null);
+  // Bumped after a bulk reclass so the list refetches (moved txns leave this
+  // account's view).
+  const [reloadKey, setReloadKey] = useState(0);
+  // Selection is keyed per transaction (`type::id`); split lines share a key so
+  // selecting any row selects the whole transaction — which is what the bulk
+  // move operates on.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -2003,7 +2010,28 @@ function DrillDrawer({
     return () => {
       cancelled = true;
     };
-  }, [clientLinkId, accountId, start, end, kind]);
+  }, [clientLinkId, accountId, start, end, kind, reloadKey]);
+
+  const txnKey = (t: DrillTransaction) => `${t.type}::${t.id}`;
+  // Distinct transactions (drill rows can repeat a txn for split lines).
+  const distinctSelectable = Array.from(
+    new Set((data?.transactions || []).map(txnKey))
+  );
+  const allSelected = distinctSelectable.length > 0 && selected.size === distinctSelectable.length;
+  function toggleOne(t: DrillTransaction) {
+    const k = txnKey(t);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }
+  function toggleAll() {
+    setSelected((prev) =>
+      prev.size === distinctSelectable.length ? new Set() : new Set(distinctSelectable)
+    );
+  }
 
   // Sum + check vs the parent row's expected amount so the bookkeeper can
   // spot QBO report-vs-detail reconciliation discrepancies at a glance.
@@ -2065,39 +2093,83 @@ function DrillDrawer({
             </div>
           ) : (
             <div className="divide-y divide-gray-100">
+              {/* Select-all — clicking any row checkbox opts that whole
+                  transaction into the bulk-reclass action bar below. */}
+              <label className="flex items-center gap-3 px-5 py-2 text-xs bg-gray-50 sticky top-0 z-10 cursor-pointer border-b border-gray-200">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  className="shrink-0 accent-teal"
+                  aria-label="Select all transactions"
+                />
+                <span className="font-semibold text-ink-slate">
+                  {selected.size > 0
+                    ? `${selected.size} selected`
+                    : `Select transactions to move`}
+                </span>
+              </label>
               {data.transactions.map((t, i) => (
-                <div key={`${t.id}-${i}`} className="px-5 py-2.5 text-xs hover:bg-gray-50">
-                  <div className="flex items-center justify-between gap-3 mb-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-ink-slate shrink-0">{t.date}</span>
-                      <span className="text-[10px] font-bold uppercase text-teal bg-teal-lighter/60 px-1.5 py-0.5 rounded shrink-0">
-                        {t.type}
-                      </span>
-                      {t.doc_number && (
-                        <span className="text-ink-slate shrink-0">#{t.doc_number}</span>
-                      )}
-                      {t.cleared && (
-                        <span className="text-[10px] text-emerald-700 shrink-0">✓ cleared</span>
-                      )}
+                <label
+                  key={`${t.id}-${i}`}
+                  className="flex items-start gap-3 px-5 py-2.5 text-xs hover:bg-gray-50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(txnKey(t))}
+                    onChange={() => toggleOne(t)}
+                    className="mt-0.5 shrink-0 accent-teal"
+                    aria-label={`Select ${t.name || t.type} ${t.date}`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-3 mb-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-ink-slate shrink-0">{t.date}</span>
+                        <span className="text-[10px] font-bold uppercase text-teal bg-teal-lighter/60 px-1.5 py-0.5 rounded shrink-0">
+                          {t.type}
+                        </span>
+                        {t.doc_number && (
+                          <span className="text-ink-slate shrink-0">#{t.doc_number}</span>
+                        )}
+                        {t.cleared && (
+                          <span className="text-[10px] text-emerald-700 shrink-0">✓ cleared</span>
+                        )}
+                      </div>
+                      <div
+                        className={`font-mono font-bold shrink-0 ${
+                          t.amount < 0 ? "text-red-600" : "text-navy"
+                        }`}
+                      >
+                        {formatCurrencyExact(t.amount)}
+                      </div>
                     </div>
-                    <div
-                      className={`font-mono font-bold shrink-0 ${
-                        t.amount < 0 ? "text-red-600" : "text-navy"
-                      }`}
-                    >
-                      {formatCurrencyExact(t.amount)}
+                    <div className="text-navy">
+                      {t.name && <span className="font-semibold">{t.name}</span>}
+                      {t.name && t.memo && <span className="text-ink-slate"> · </span>}
+                      {t.memo && <span className="text-ink-slate">{t.memo}</span>}
                     </div>
                   </div>
-                  <div className="text-navy">
-                    {t.name && <span className="font-semibold">{t.name}</span>}
-                    {t.name && t.memo && <span className="text-ink-slate"> · </span>}
-                    {t.memo && <span className="text-ink-slate">{t.memo}</span>}
-                  </div>
-                </div>
+                </label>
               ))}
             </div>
           )}
         </div>
+
+        {data && selected.size > 0 && (
+          <BulkReclassBar
+            clientLinkId={clientLinkId}
+            sourceAccountId={accountId}
+            sourceAccountName={accountName}
+            selectedTxns={data.transactions
+              .filter((t) => selected.has(txnKey(t)))
+              .map((t) => ({ id: t.id, type: t.type }))}
+            selectedCount={selected.size}
+            onApplied={() => {
+              setSelected(new Set());
+              setReloadKey((k) => k + 1);
+            }}
+          />
+        )}
 
         {data && data.transactions.length > 0 && (
           <div className="border-t border-gray-200 px-5 py-3 text-xs flex items-center justify-between bg-gray-50">
@@ -2116,6 +2188,250 @@ function DrillDrawer({
         )}
       </div>
     </>
+  );
+}
+
+// ─── BULK RECLASS ──────────────────────────────────────────────────────
+// Action bar inside the drill drawer: move the selected transactions out of
+// the drilled account into a target account (P&L or BS), and optionally learn
+// a per-client vendor rule so the same payees auto-categorize next time.
+// Budget-chunked: re-invokes the API with `remaining` until the whole
+// selection is processed.
+type QboAccountOption = {
+  id: string;
+  name: string;
+  fullyQualifiedName: string;
+  accountType: string;
+  classification: string;
+};
+
+function BulkReclassBar({
+  clientLinkId,
+  sourceAccountId,
+  sourceAccountName,
+  selectedTxns,
+  selectedCount,
+  onApplied,
+}: {
+  clientLinkId: string;
+  sourceAccountId: string;
+  sourceAccountName: string;
+  selectedTxns: Array<{ id: string; type: string }>;
+  selectedCount: number;
+  onApplied: () => void;
+}) {
+  const [accounts, setAccounts] = useState<QboAccountOption[] | null>(null);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [target, setTarget] = useState<QboAccountOption | null>(null);
+  const [search, setSearch] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [createRule, setCreateRule] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [result, setResult] = useState<Record<string, number> | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  // Lazy-load the account universe (P&L + BS) the first time the bar appears.
+  useEffect(() => {
+    if (accounts !== null) return;
+    let cancelled = false;
+    fetch(`/api/clients/${clientLinkId}/qbo-accounts`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error((await r.json()).error || `Fetch failed (${r.status})`);
+        return r.json();
+      })
+      .then((d) => {
+        if (!cancelled) setAccounts(d.accounts || []);
+      })
+      .catch((e) => {
+        if (!cancelled) setAccountsError(e?.message || "Could not load accounts");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientLinkId, accounts]);
+
+  // Tokenized, punctuation-insensitive search (same matcher that fixed
+  // "owner draw" not finding "Owner's Draw").
+  const norm = (s: string) =>
+    (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const tokens = norm(search).split(" ").filter(Boolean);
+  const filtered = (accounts || [])
+    .filter((a) => a.id !== sourceAccountId) // never offer the source
+    .filter((a) => {
+      if (tokens.length === 0) return true;
+      const hay = norm(`${a.fullyQualifiedName} ${a.accountType} ${a.classification}`);
+      return tokens.every((t) => hay.includes(t));
+    })
+    .slice(0, 60);
+  const isPL = (a: QboAccountOption) =>
+    ["Revenue", "Income", "Expense", "Other Income", "Other Expense", "Cost of Goods Sold"].some(
+      (c) => a.classification === c || a.accountType.includes(c)
+    );
+
+  async function apply() {
+    if (!target) return;
+    setApplying(true);
+    setApplyError(null);
+    setResult(null);
+    const totals: Record<string, number> = {
+      moved_txns: 0,
+      moved_lines: 0,
+      skipped_unsupported: 0,
+      skipped_closed: 0,
+      skipped_stale: 0,
+      skipped_no_source_line: 0,
+      failed: 0,
+      rules_created: 0,
+      rules_updated: 0,
+    };
+    let queue = selectedTxns;
+    const initial = queue.length;
+    try {
+      for (let pass = 0; pass < 25; pass++) {
+        const res = await fetch(`/api/clients/${clientLinkId}/bulk-reclass`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_account_id: sourceAccountId,
+            source_account_name: sourceAccountName,
+            target_account_id: target.id,
+            transactions: queue,
+            create_rules: createRule,
+          }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+        for (const k of Object.keys(totals)) totals[k] += d[k] || 0;
+        if (!d.remaining?.length) break;
+        queue = d.remaining;
+        setProgress(`${initial - queue.length} of ${initial} processed…`);
+      }
+      setResult(totals);
+      setProgress(null);
+      onApplied();
+    } catch (e: any) {
+      setApplyError(e?.message || "Bulk reclass failed");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  // Post-apply summary.
+  if (result) {
+    const parts: string[] = [`${result.moved_txns} moved`];
+    if (result.rules_created) parts.push(`${result.rules_created} rule${result.rules_created === 1 ? "" : "s"} created`);
+    if (result.rules_updated) parts.push(`${result.rules_updated} rule${result.rules_updated === 1 ? "" : "s"} updated`);
+    if (result.skipped_closed) parts.push(`${result.skipped_closed} in closed period`);
+    if (result.skipped_stale) parts.push(`${result.skipped_stale} changed since (kept)`);
+    if (result.skipped_unsupported) parts.push(`${result.skipped_unsupported} not movable here`);
+    if (result.skipped_no_source_line) parts.push(`${result.skipped_no_source_line} already moved`);
+    if (result.failed) parts.push(`${result.failed} failed`);
+    return (
+      <div className="border-t border-gray-200 px-5 py-3 bg-emerald-50">
+        <div className="flex items-start gap-2 text-xs">
+          <CheckCircle2 size={15} className="text-emerald-600 shrink-0 mt-0.5" />
+          <div className="text-emerald-900">
+            <span className="font-bold">Done — {parts.join(" · ")}.</span>
+            {result.skipped_unsupported > 0 && (
+              <div className="mt-1 text-emerald-800">
+                Transactions like deposits, transfers and journal entries can&apos;t be moved from
+                this tool — open them in QuickBooks.
+              </div>
+            )}
+            <button
+              onClick={() => setResult(null)}
+              className="mt-1.5 text-teal font-semibold hover:underline"
+            >
+              Reclass more
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-gray-200 px-5 py-3 bg-teal-lighter/30">
+      <div className="flex items-center gap-2 mb-2 text-xs font-bold text-navy">
+        <ArrowRight size={14} className="text-teal" />
+        Move {selectedCount} transaction{selectedCount === 1 ? "" : "s"} to a new account
+      </div>
+
+      {/* Target account picker */}
+      <div className="relative mb-2">
+        <input
+          type="text"
+          value={pickerOpen ? search : target ? `${target.name}` : ""}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPickerOpen(true);
+          }}
+          onFocus={() => setPickerOpen(true)}
+          placeholder={accountsError || (accounts === null ? "Loading accounts…" : "Search accounts (P&L or Balance Sheet)…")}
+          disabled={accounts === null || !!accountsError || applying}
+          className="w-full text-xs border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal/40"
+        />
+        {pickerOpen && accounts && (
+          <div className="absolute bottom-full left-0 right-0 mb-1 max-h-60 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg z-20">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-ink-slate">No matching accounts</div>
+            ) : (
+              filtered.map((a) => (
+                <button
+                  key={a.id}
+                  onClick={() => {
+                    setTarget(a);
+                    setPickerOpen(false);
+                    setSearch("");
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-teal-lighter/40 flex items-center justify-between gap-2"
+                >
+                  <span className="truncate text-navy">{a.fullyQualifiedName}</span>
+                  <span className="shrink-0 text-[10px] font-bold uppercase text-ink-slate">
+                    {isPL(a) ? "P&L" : "BS"}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      <label className="flex items-center gap-2 mb-2 text-xs text-navy cursor-pointer">
+        <input
+          type="checkbox"
+          checked={createRule}
+          onChange={(e) => setCreateRule(e.target.checked)}
+          disabled={applying}
+          className="accent-teal"
+        />
+        Create a rule so these vendors auto-categorize to{" "}
+        <span className="font-semibold">{target ? target.name : "the new account"}</span> next time
+      </label>
+
+      {applyError && (
+        <div className="mb-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+          {applyError}
+        </div>
+      )}
+
+      <button
+        onClick={apply}
+        disabled={!target || applying}
+        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-teal text-white text-xs font-bold hover:bg-teal-dark disabled:opacity-50"
+      >
+        {applying ? (
+          <>
+            <Loader2 size={13} className="animate-spin" /> {progress || "Moving…"}
+          </>
+        ) : (
+          <>
+            <ArrowRight size={13} /> Move {selectedCount} to {target ? target.name : "…"}
+          </>
+        )}
+      </button>
+    </div>
   );
 }
 
