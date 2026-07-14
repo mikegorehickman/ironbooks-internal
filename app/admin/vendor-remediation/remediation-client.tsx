@@ -272,8 +272,10 @@ export function VendorRemediationClient() {
                             </>
                           ) : (
                             <>
-                              <span className="font-medium">{t.current_account}</span>
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-light mr-1">now</span>
+                              <span className="font-medium line-through decoration-ink-light/50">{t.current_account}</span>
                               <span className="text-ink-light mx-1.5">→</span>
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-teal-dark mr-1">after</span>
                               <span className="font-semibold text-teal-dark">{t.target_account}</span>
                             </>
                           )}
