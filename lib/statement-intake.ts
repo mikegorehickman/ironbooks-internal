@@ -10,6 +10,7 @@
  * and persists the result instead of writing recon-job gaps.
  */
 import { fetchAllAccounts, getValidToken } from "@/lib/qbo";
+import { fetchBalancesAsOf } from "@/lib/qbo-balance-sheet";
 import { CLIENT_UPLOADS_BUCKET } from "@/lib/client-comms";
 import { extractStatements, reconCandidates } from "@/lib/cleanup-system/statement-analysis";
 
@@ -156,7 +157,47 @@ export async function intakeStatement(
       matched_account_name: matchedName,
       account_label: ex.account_label,
       last4: ex.last4,
+      statement_end_date: ex.statement_end_date,
     }).catch(() => {});
+  }
+
+  // Auto-recon (JP gate, Mike 2026-07-13: |variance| < $5 passes silently;
+  // anything larger needs a human explanation before the month can publish).
+  // QBO balance is fetched AS OF the statement's closing date — you can't
+  // reconcile a month-old statement against today's ledger.
+  if (ex.matched_qbo_account_id && ex.ending_balance != null && ex.statement_end_date) {
+    try {
+      const { data: cl } = await service
+        .from("client_links").select("qbo_realm_id").eq("id", clientLinkId).single();
+      const token = await getValidToken(clientLinkId, service);
+      const balances = await fetchBalancesAsOf(cl.qbo_realm_id, token, ex.statement_end_date);
+      const qboBalance = balances.get(String(ex.matched_qbo_account_id)) ?? 0;
+      // Credit-card statements usually report the amount OWED as positive
+      // while QBO holds liabilities negative — compare on magnitude too.
+      const variance = Math.min(
+        Math.abs(qboBalance - ex.ending_balance),
+        Math.abs(Math.abs(qboBalance) - Math.abs(ex.ending_balance))
+      );
+      const pass = variance < 5;
+      await service.from("client_statements")
+        .update({ recon_status: pass ? "reconciled" : "variance", recon_variance: Math.round(variance * 100) / 100, recon_qbo_balance: qboBalance } as any)
+        .eq("id", row.id);
+      await service.from("audit_log").insert({
+        event_type: "statement_recon",
+        client_link_id: clientLinkId,
+        request_payload: {
+          statement_id: row.id,
+          account: matchedName || ex.account_label,
+          as_of: ex.statement_end_date,
+          statement_balance: ex.ending_balance,
+          qbo_balance: qboBalance,
+          variance: Math.round(variance * 100) / 100,
+          result: pass ? "pass" : "VARIANCE — needs explanation",
+        } as any,
+      } as any);
+    } catch (err: any) {
+      console.warn(`[statement-intake] auto-recon failed (non-blocking): ${err?.message}`);
+    }
   }
 
   return {
@@ -188,11 +229,13 @@ export async function fulfillStatementRequests(
     matched_account_name: string | null;
     account_label: string | null;
     last4: string | null;
+    /** statement closing date — used to pick the right per-period request */
+    statement_end_date?: string | null;
   }
 ): Promise<number> {
   const { data: open } = await service
     .from("statement_requests")
-    .select("id, account_name, qbo_account_id")
+    .select("id, account_name, qbo_account_id, period_start, period_end")
     .eq("client_link_id", clientLinkId)
     .eq("status", "open");
   if (!open || open.length === 0) return 0;
@@ -201,6 +244,12 @@ export async function fulfillStatementRequests(
   const last4 = stmt.last4 || "";
 
   const toFulfill = (open as any[]).filter((r) => {
+    // Per-period requests (statement overhaul): only fulfill the request
+    // whose window contains the statement's closing date. Requests without
+    // periods keep the legacy account-only matching.
+    if (stmt.statement_end_date && r.period_start && r.period_end) {
+      if (stmt.statement_end_date < r.period_start || stmt.statement_end_date > r.period_end) return false;
+    }
     if (stmt.matched_qbo_account_id && r.qbo_account_id && r.qbo_account_id === stmt.matched_qbo_account_id) {
       return true;
     }
