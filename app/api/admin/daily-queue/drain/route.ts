@@ -31,14 +31,27 @@ export async function POST() {
   const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
   if ((actor as any)?.role !== "admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
 
-  // Pending queue, grouped per client (one token + account list + closing date each)
-  const { data: pending } = await (service as any)
+  // Pending queue, grouped per client (one token + account list + closing date
+  // each). NOTE: no PostgREST embed here — daily_review_queue has no FK to
+  // client_links, so `client_links(...)` silently errors and the drain
+  // reported "0 scanned, complete" over 2,253 pending rows (Mike, 2026-07-14).
+  // Join in code instead, and CHECK the error.
+  const { data: pending, error: pendErr } = await (service as any)
     .from("daily_review_queue")
-    .select("*, client_links(id, client_name, qbo_realm_id, industry, auto_approve_threshold, is_active)")
+    .select("*")
     .eq("decision", "pending")
     .order("created_at", { ascending: true })
     .limit(2000);
-  const rows = (pending || []).filter((r: any) => r.client_links?.is_active && r.client_links?.qbo_realm_id);
+  if (pendErr) return NextResponse.json({ error: `queue read failed: ${pendErr.message}` }, { status: 500 });
+  const { data: clientRows, error: clErr } = await service
+    .from("client_links")
+    .select("id, client_name, qbo_realm_id, industry, auto_approve_threshold, is_active")
+    .eq("is_active", true);
+  if (clErr) return NextResponse.json({ error: `clients read failed: ${clErr.message}` }, { status: 500 });
+  const clientById = new Map((clientRows || []).map((c: any) => [c.id, c]));
+  const rows = (pending || [])
+    .map((r: any) => ({ ...r, client_links: clientById.get(r.client_link_id) }))
+    .filter((r: any) => r.client_links?.qbo_realm_id);
 
   const byClient = new Map<string, any[]>();
   for (const r of rows) (byClient.get(r.client_link_id) ?? byClient.set(r.client_link_id, []).get(r.client_link_id)!).push(r);
