@@ -47,6 +47,15 @@ interface VendorPattern {
 // Order matters: more specific patterns first. First match wins.
 
 const PATTERNS: VendorPattern[] = [
+  // ══════ GAS-STATION SNACK OVERLAY — MUST STAY FIRST ══════
+  // First-match-wins: this must precede every individual gas-brand rule or
+  // the brand rules capture the small purchases as Fuel (the QuikTrip bug).
+  // The <$20 amountRange means fills fall through to the brand rules below.
+  // ALL retail gas brands (Mike 2026-07-13: "<$20 at any gas station → Meals").
+  // Deliberately still excludes pay-at-pump-only / commercial cardlock vendors
+  // (Costco Gas, Petro-Pass, Hughes, Co-op Cardlock, Federated Co-op, WEX
+  // fleet cards) where a small amount is still fuel.
+  { pattern: /\bessom?\b|\bshell\b(?!.*lube)|\bchevron\b|petro[\s\-]?canada|\bhusky\b|\bdomo\b|\bfasgas\b|\bcentex\b|\bcenex\b|\bmohawk\b|\bpioneer\b|\b7[\s\-]?eleven\b|\bcircle\s*k\b|\brace\s*trac\b|\bspeedway\b|\bsunoco\b|\b(mobil|exxon)\b|\bquiktrip\b|quick\s+trip\b|kwik\s+trip|\bwawa\b|\bcasey'?s?\b|\bsheetz\b|\bmarathon\b|\bmacewen\b|\bbp\s+(gas|fuel)/i, account: "Meals (50% deductible)", confidence: 0.90, reasoning: "Small gas-station purchase (<$20) → likely snack/coffee, not fuel", amountRange: [0, 19.99] },
   { pattern: /child\s*support|family\s*support|alimony|maintenance\s+enforcement|fmep\b|\bmep\b/i, account: "Owner's Draw", confidence: 0.9, reasoning: "Owner's Draw (keyword match)" },
   { pattern: /\bvistaprint\b/i, account: "Online Advertising - Ad Spend", confidence: 0.9, reasoning: "Vistaprint → Online Advertising - Ad Spend", vendor: "Vistaprint" },
   { pattern: /\bindeed\b/i, account: "Recruiting", confidence: 0.9, reasoning: "Indeed → Recruiting", vendor: "Indeed" },
@@ -163,7 +172,6 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /costco\s*(food court|restaurant)/i, account: "Meals (50% deductible)", confidence: 0.95, reasoning: "Meals (50% deductible) (keyword match)" },
   { pattern: /costco\s*(whse|wholesale|business)/i, account: "Job Supplies & Materials", confidence: 0.85, reasoning: "Costco Wholesale → Job Supplies & Materials", vendor: "Costco Wholesale" },
   // Gas-station small purchases (≤$15) → snack/coffee, not fuel. MUST precede the fuel block.
-  { pattern: /\bessom?\b|\bshell\b(?!.*lube)|\bchevron\b|petro[\s\-]?canada|\bhusky\b|\bdomo\b|\bfasgas\b|\bcentex\b|\bmohawk\b|pioneer\s+(gas|station)|\b7[\s\-]?eleven\b|\bcircle\s*k\b|\brace\s*trac\b|\bspeedway\b|\bsunoco\b|\b(mobil|exxon)\b/i, account: "Meals (50% deductible)", confidence: 0.90, reasoning: "Small gas-station purchase (≤$15) → likely snack/coffee, not fuel", amountRange: [0, 15] },
   { pattern: /\bessom?\b/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Esso → Fuel – Overhead", vendor: "Esso" },
   { pattern: /\bshell\b(?!.*lube)/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Shell → Fuel – Overhead", vendor: "Shell" },
   { pattern: /\bchevron\b/i, account: "Fuel – Overhead", confidence: 0.95, reasoning: "Chevron → Fuel – Overhead", vendor: "Chevron" },

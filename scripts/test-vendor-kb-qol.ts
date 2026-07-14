@@ -19,6 +19,15 @@ ok(acct("7-ELEVEN 33099", 44) === "Fuel – Overhead", "7-Eleven $44 → Fuel");
 ok(acct("COSTCO GAS W441", 12) === "Fuel – Overhead", "Costco Gas $12 stays Fuel (pay-at-pump only)");
 ok(acct("PETRO-PASS SASKATOON", 9) === "Fuel – Overhead", "Petro-Pass $9 stays Fuel (cardlock)");
 ok(acct("HUGHES PETROLEUM LTD", 8) === "Fuel – Overhead", "Hughes $8 stays Fuel (commercial)");
+// expanded band: ALL retail gas brands, <$20 (Mike 2026-07-13)
+ok(acct("QUIKTRIP #442 PHOENIX", 15) === "Meals (50% deductible)", "QuikTrip $15 → Meals");
+ok(acct("QUICK TRIP", 8) === "Meals (50% deductible)", "Quick Trip $8 → Meals");
+ok(acct("QUIKTRIP #442 PHOENIX", 47) === "Fuel – Overhead", "QuikTrip $47 → Fuel");
+ok(acct("WAWA 8123", 18) === "Meals (50% deductible)", "Wawa $18 → Meals (band now <$20)");
+ok(acct("SHEETZ 552", 19.5) === "Meals (50% deductible)", "Sheetz $19.50 → Meals");
+ok(acct("CASEY'S GENERAL STORE", 12) === "Meals (50% deductible)", "Casey's $12 → Meals (pizza)");
+ok(acct("MARATHON PETRO 7712", 61) === "Fuel – Overhead", "Marathon $61 → Fuel");
+ok(acct("KWIK TRIP 330", 20) === "Fuel – Overhead", "$20 exactly → Fuel (band is <$20)");
 // existing tiny-fee rule still wins for fees
 ok(acct("E-TRANSFER FEE", 1.5) === "Bank Charges", "e-transfer $1.50 still Bank Charges");
 
