@@ -70,6 +70,15 @@ ok(acct("INTERAC E-TRANSFER FEE", 50) === "Bank Charges", "e-transfer FEE at $50
 ok(acct("SEND E-TFR FEE", 500) === "Bank Charges", "e-tfr FEE at $500 → Bank Charges");
 ok(acct("E-TRANSFER TO JOHN", 500) !== "Bank Charges", "bare $500 e-transfer is NOT a bank fee");
 
+// ── Substring-collision guards (Wawanessa bug, 2026-07-13) ──
+// Bare vendor words must match as WORDS, never inside other words.
+ok(acct("WAWANESSA INSURANCE", 87) === "Insurance – Other", "WawaNESSA Insurance → Insurance (NOT Wawa fuel)");
+ok(acct("WAWANESA INSURANCE", 87) === "Insurance – Other", "Wawanesa (one s) → Insurance");
+ok(acct("WAWA 8123", 45) === "Fuel – Overhead", "real Wawa store still → Fuel");
+ok(acct("HEADPHONES ADAPTER USB", 25) !== "Payroll Expenses", "hEADPhones does not match ADP");
+ok(acct("CANVAS PRINTING CO", 60) !== "Software Subscriptions", "CANVAs does not match Canva");
+ok(acct("TARGETED MARKETING LLC", 200) !== "Office Supplies", "TARGETed does not match Target");
+
 // ── Sanity: nothing above broke ──
 ok(acct("SHERWIN WILLIAMS 703581", 214) === "Job Supplies & Materials", "Sherwin-Williams intact (painters)");
 ok(lookupVendor("SHERWIN WILLIAMS 703581", "", 214, "plumbers")?.account == null, "Sherwin painter-scoped: no match for non-painter industry");
