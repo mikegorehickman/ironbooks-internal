@@ -88,6 +88,7 @@ Common mappings you must apply:
   "Business Taxes", "Taxes"                       → "Taxes"
   "Business License", "Licenses", "License & Fees" → "Licenses"
   "Workers Comp Insurance", "Workman's Comp", "WCB Insurance", "Workman's Comp Insurance" → "Workers Compensation – Admin"
+  "Owner Draw / Salary", "Owner Draw", "Owner Draws", "Draws", "Distributions", "Shareholder Distribution", "Shareholder's Distribution" → "Owner's Draw" (EQUITY account — retype to Equity before merging; owner draws are NEVER a P&L expense)
   "Direct Fuel", "Field Fuel"                     → "Direct Fuel Allocation"
   "Commissions", "Sales Commission"               → "Sales Team Payroll/Commission"
   "Advertising", "Google Ads", "Facebook Ads"     → "Online Advertising - Ad Spend"
