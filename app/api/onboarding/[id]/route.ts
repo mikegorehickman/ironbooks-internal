@@ -90,6 +90,11 @@ export async function POST(
 
     case "create_client": {
       if (lead.client_link_id) {
+        // Client already exists (usually webhook-created on form completion).
+        // STILL convert the lead — leaving it 'active' is how clients ended up
+        // duplicated across the onboarding AND cleanup boards (ABE of
+        // Mitchell, 2026-07-14).
+        if (lead.status === "active") await stamp({ status: "converted" });
         return NextResponse.json({ ok: true, client_link_id: lead.client_link_id, already: true });
       }
       const clientName = lead.business_name || lead.full_name || "New client";

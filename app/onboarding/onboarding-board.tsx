@@ -75,6 +75,11 @@ export function OnboardingBoard({ leads, bookkeepers }: { leads: OnboardingLead[
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (action === "create_client" && data.client_link_id) {
+        // straight into the work: the lead is converted, cleanup starts now
+        window.location.href = "/board?pipeline=cleanup";
+        return;
+      }
       router.refresh();
     } catch (e: any) {
       setError(e.message || "Action failed");
@@ -282,12 +287,12 @@ function LeadCard({
         {stage === "ready" && (
           <button
             onClick={() => {
-              if (confirm(`Create a SNAP client for ${lead.business_name || lead.full_name}? They'll move into the Cleanup board.`))
+              if (confirm(`Start cleanup for ${lead.business_name || lead.full_name}? Their account moves to the Cleanup board (created now if the onboarding form didn't already create it).`))
                 onAct(lead.id, "create_client");
             }}
             className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded bg-teal text-white hover:bg-teal-dark"
           >
-            <UserPlus size={11} /> Create client <ArrowRight size={10} />
+            <UserPlus size={11} /> Start cleanup <ArrowRight size={10} />
           </button>
         )}
         <button
