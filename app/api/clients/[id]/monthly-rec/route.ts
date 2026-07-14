@@ -358,7 +358,7 @@ export async function POST(
     // Production board move: not_started / in_progress / stuck /
     // waiting_client (+ reason checkboxes + note). "Ready for manager
     // review" is NOT a board status — that's the submit action.
-    const VALID_BOARD = ["not_started", "in_progress", "stuck", "waiting_client"];
+    const VALID_BOARD = ["not_started", "in_progress", "stuck", "waiting_client", "ready_for_review"];
     const VALID_REASONS = ["waiting_reply", "waiting_statements", "disconnected_feed"];
     const boardStatus = String(body.board_status || "");
     if (!VALID_BOARD.includes(boardStatus)) {

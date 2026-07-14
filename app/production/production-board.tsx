@@ -40,15 +40,18 @@ const WAITING_REASONS = [
   { id: "disconnected_feed", label: "Disconnected feed" },
 ] as const;
 
-type BoardStatus = "not_started" | "in_progress" | "stuck" | "waiting_client";
+// "not_started" survives as a legacy DB value but has NO column — those runs
+// display under In Progress (Mike 2026-07-14: a production client's month is
+// always in progress; an empty column earns nothing).
+type BoardStatus = "not_started" | "in_progress" | "stuck" | "waiting_client" | "ready_for_review";
 
-const COLUMNS: { id: BoardStatus; title: string; icon: any; tone: string }[] = [
-  { id: "not_started", title: "Not Started", icon: CircleDashed, tone: "border-gray-200" },
+const COLUMNS: { id: Exclude<BoardStatus, "not_started">; title: string; icon: any; tone: string }[] = [
   { id: "in_progress", title: "In Progress", icon: PlayCircle, tone: "border-teal/40" },
   // "Blocked (this month)" — month-state, deliberately NOT the client-level
   // STUCK JOB badge. A client can be blocked this month and fine as a client.
   { id: "stuck", title: "Blocked (this month)", icon: OctagonAlert, tone: "border-red-300" },
   { id: "waiting_client", title: "Waiting on Client", icon: MailQuestion, tone: "border-amber-300" },
+  { id: "ready_for_review", title: "Ready for Manager Review", icon: CheckCircle2, tone: "border-indigo-300" },
 ];
 
 export function ProductionBoard() {
@@ -105,11 +108,11 @@ export function ProductionBoard() {
   }, []);
 
   const { byColumn, done } = useMemo(() => {
-    const byColumn: Record<BoardStatus, ProdClient[]> = {
-      not_started: [],
+    const byColumn: Record<Exclude<BoardStatus, "not_started">, ProdClient[]> = {
       in_progress: [],
       stuck: [],
       waiting_client: [],
+      ready_for_review: [],
     };
     const done: ProdClient[] = [];
     for (const c of production) {
@@ -117,13 +120,13 @@ export function ProductionBoard() {
         done.push(c);
         continue;
       }
-      // Submitted-for-review runs live in Waiting on Client with a purple chip
+      // Submitted-for-review runs ARE the manager-review queue.
       if (c.run?.status === "pending_review") {
-        byColumn.waiting_client.push(c);
+        byColumn.ready_for_review.push(c);
         continue;
       }
-      const bs = (c.run?.board_status as BoardStatus) || "not_started";
-      byColumn[bs in byColumn ? bs : "not_started"].push(c);
+      const bs = (c.run?.board_status as BoardStatus) || "in_progress";
+      byColumn[bs in byColumn ? (bs as Exclude<BoardStatus, "not_started">) : "in_progress"].push(c);
     }
     return { byColumn, done };
   }, [production]);
@@ -493,7 +496,7 @@ function BoardCard({
     ? "waiting_client"
     : isComplete
     ? "completed"
-    : ((run?.board_status as string) || "not_started");
+    : (((run?.board_status as string) === "not_started" ? "in_progress" : (run?.board_status as string)) || "in_progress");
 
   return (
     <div
@@ -603,10 +606,10 @@ function BoardCard({
           }}
           className="text-[11px] px-1.5 py-1 rounded border border-gray-200 bg-white text-ink-slate flex-1 min-w-0 disabled:opacity-60"
         >
-          <option value="not_started">Not started</option>
           <option value="in_progress">In progress</option>
           <option value="stuck">Blocked (this month)</option>
           <option value="waiting_client">Waiting on client</option>
+          <option value="ready_for_review">Ready for manager review</option>
           <option value="completed">✓ Completed</option>
         </select>
         {isSenior && (
