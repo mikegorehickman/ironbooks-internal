@@ -26,6 +26,10 @@ import { fetchAllAccounts, getValidToken } from "@/lib/qbo";
  */
 export const maxDuration = 300;
 const BUDGET_MS = 240_000;
+// Small passes → the UI progress bar moves every ~30-60s instead of sitting
+// on one 4-minute request. Each POST processes at most this many QBO
+// transactions, then returns remaining_ids for the client to re-invoke.
+const MAX_GROUPS_PER_PASS = 40;
 
 export async function POST(request: Request) {
   const startTime = Date.now();
@@ -95,7 +99,7 @@ export async function POST(request: Request) {
   for (let i = 0; i < txnGroups.length; i++) {
     const group = txnGroups[i];
 
-    if (Date.now() - startTime > BUDGET_MS) {
+    if (Date.now() - startTime > BUDGET_MS || i >= MAX_GROUPS_PER_PASS) {
       for (const g of txnGroups.slice(i)) for (const c of g) summary.remaining_ids.push(c.reclassification_id);
       break;
     }
@@ -170,12 +174,14 @@ export async function POST(request: Request) {
     }
   }
 
-  await service.from("audit_log").insert({
+  // NOTE: audit_log has NO client_link_id column — it lives in the payload.
+  // (The original insert passed it as a column and failed silently.)
+  const { error: auditErr } = await service.from("audit_log").insert({
     event_type: "vendor_remediation_apply",
     user_id: user.id,
-    client_link_id: clientLinkId,
-    request_payload: { ...summary, remaining: summary.remaining_ids.length, remaining_ids: undefined } as any,
+    request_payload: { client_link_id: clientLinkId, ...summary, remaining: summary.remaining_ids.length, remaining_ids: undefined } as any,
   } as any);
+  if (auditErr) console.warn(`[vendor-remediation] audit insert failed: ${auditErr.message}`);
 
   return NextResponse.json(summary);
 }

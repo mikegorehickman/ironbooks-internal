@@ -148,8 +148,8 @@ export async function POST(
   await service.from("audit_log").insert({
     event_type: "statement_requests_generated",
     user_id: auth.userId,
-    client_link_id: clientLinkId,
     request_payload: {
+      client_link_id: clientLinkId,
       accounts_enumerated: accounts.length,
       requests_created: toInsert.length,
       requests_already_open: requests.length - toInsert.length,

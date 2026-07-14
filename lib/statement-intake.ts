@@ -184,8 +184,8 @@ export async function intakeStatement(
         .eq("id", row.id);
       await service.from("audit_log").insert({
         event_type: "statement_recon",
-        client_link_id: clientLinkId,
         request_payload: {
+          client_link_id: clientLinkId,
           statement_id: row.id,
           account: matchedName || ex.account_label,
           as_of: ex.statement_end_date,

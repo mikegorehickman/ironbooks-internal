@@ -53,6 +53,10 @@ export function VendorRemediationClient() {
   const [applying, setApplying] = useState<Record<string, "running" | "done" | "error">>({});
   const [applyMsg, setApplyMsg] = useState<Record<string, string>>({});
   const [applyAllRunning, setApplyAllRunning] = useState(false);
+  // per-client apply progress: total rows at start vs rows still remaining
+  const [progress, setProgress] = useState<Record<string, { total: number; left: number }>>({});
+  // companies excluded from scope entirely (checkbox in the client header)
+  const [excludedClients, setExcludedClients] = useState<Set<string>>(new Set());
 
   const tKey = (clientId: string, t: Transition) => `${clientId}|${t.current_account}|${t.target_account}`;
 
@@ -87,6 +91,8 @@ export function VendorRemediationClient() {
     if (ids.length === 0) return;
     setApplying((p) => ({ ...p, [cid]: "running" }));
     setApplyMsg((p) => ({ ...p, [cid]: `applying ${ids.length} rows…` }));
+    const initialTotal = ids.length;
+    setProgress((p) => ({ ...p, [cid]: { total: initialTotal, left: initialTotal } }));
     try {
       const totals: ApplySummary = {
         moved_lines: 0, skipped_stale: 0, skipped_closed: 0,
@@ -107,9 +113,10 @@ export function VendorRemediationClient() {
         totals.skipped_no_account += data.skipped_no_account;
         totals.failed += data.failed;
         totals.dropped_by_revalidation += data.dropped_by_revalidation;
-        if (!data.remaining_ids?.length) break;
+        if (!data.remaining_ids?.length) { setProgress((p) => ({ ...p, [cid]: { total: initialTotal, left: 0 } })); break; }
         ids = data.remaining_ids;
-        setApplyMsg((p) => ({ ...p, [cid]: `continuing — ${ids.length} rows left…` }));
+        setProgress((p) => ({ ...p, [cid]: { total: initialTotal, left: ids.length } }));
+        setApplyMsg((p) => ({ ...p, [cid]: `${initialTotal - ids.length} of ${initialTotal} done…` }));
       }
       const parts = [`${totals.moved_lines} moved`];
       if (totals.skipped_stale) parts.push(`${totals.skipped_stale} kept (human changed them since)`);
@@ -127,13 +134,15 @@ export function VendorRemediationClient() {
 
   async function applyAll() {
     if (!clients) return;
-    const totalRows = clients.reduce((s, c) => s + selectedIdsFor(c).length, 0);
+    const inScope = clients.filter((c) => !excludedClients.has(c.client_link_id));
+    const totalRows = inScope.reduce((s, c) => s + selectedIdsFor(c).length, 0);
     if (!confirm(
-      `Apply the selected re-categorizations to ${clients.length} clients (${totalRows} transactions)?\n\n` +
+      `Apply the selected re-categorizations to ${inScope.length} clients (${totalRows} transactions)?\n\n` +
       `This WRITES to each client's QuickBooks. Closed periods and lines a human has since changed are automatically skipped.`
     )) return;
     setApplyAllRunning(true);
     for (const c of clients) {
+      if (excludedClients.has(c.client_link_id)) continue;
       if (applying[c.client_link_id] === "done") continue;
       // eslint-disable-next-line no-await-in-loop
       await applyClient(c);
@@ -141,7 +150,8 @@ export function VendorRemediationClient() {
     setApplyAllRunning(false);
   }
 
-  const grandTotalRows = clients?.reduce((s, c) => s + selectedIdsFor(c).length, 0) ?? 0;
+  const grandTotalRows = clients?.reduce(
+    (s, c) => s + (excludedClients.has(c.client_link_id) ? 0 : selectedIdsFor(c).length), 0) ?? 0;
 
   return (
     <div className="space-y-4">
@@ -211,8 +221,33 @@ export function VendorRemediationClient() {
           <div key={cid} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-100">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-navy">{client.client_name}</span>
+                <input
+                  type="checkbox"
+                  title="Include this company in scope"
+                  checked={!excludedClients.has(cid)}
+                  disabled={state === "running" || applyAllRunning}
+                  onChange={(e) => {
+                    const next = new Set(excludedClients);
+                    e.target.checked ? next.delete(cid) : next.add(cid);
+                    setExcludedClients(next);
+                  }}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <span className={`font-semibold ${excludedClients.has(cid) ? "text-ink-light line-through" : "text-navy"}`}>{client.client_name}</span>
                 <span className="text-xs text-ink-slate">{client.total_rows} candidate txns</span>
+                {state === "running" && progress[cid] && (
+                  <span className="flex items-center gap-2 ml-2">
+                    <span className="w-36 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                      <span
+                        className="block h-full bg-teal rounded-full transition-all duration-700"
+                        style={{ width: `${Math.round(((progress[cid].total - progress[cid].left) / Math.max(1, progress[cid].total)) * 100)}%` }}
+                      />
+                    </span>
+                    <span className="text-xs font-semibold text-teal-dark tabular-nums">
+                      {Math.round(((progress[cid].total - progress[cid].left) / Math.max(1, progress[cid].total)) * 100)}%
+                    </span>
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 {applyMsg[cid] && (
