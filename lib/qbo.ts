@@ -692,29 +692,45 @@ export async function qboRequest<T>(
   // Demo client has no real QBO — fast-fail so callers fall back to their
   // empty/handled states (the synthesized fetchers branch before reaching here).
   if (isDemoRealm(realmId)) throw new Error('demo client — no live QuickBooks');
+  await qboRateLimiter.throttle(realmId);
   const url = `${QBO_BASE}/v3/company/${realmId}${endpoint}`;
+
+  const maxAttempts = 3;
   let res: Response;
-  try {
-    res = await fetch(url, {
-      ...options,
-      // Caller-supplied signal wins if present; otherwise enforce our ceiling.
-      signal: options.signal ?? AbortSignal.timeout(QBO_REQUEST_TIMEOUT_MS),
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
-  } catch (err: any) {
-    // AbortSignal.timeout fires a TimeoutError; surface it as a clear,
-    // job-failing message rather than a raw "The operation was aborted".
-    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
-      throw new Error(
-        `QBO API timed out after ${QBO_REQUEST_TIMEOUT_MS / 1000}s at ${endpoint} (realm ${realmId}) — QuickBooks did not respond.`
-      );
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await fetch(url, {
+        ...options,
+        // Caller-supplied signal wins if present; otherwise enforce our ceiling.
+        signal: options.signal ?? AbortSignal.timeout(QBO_REQUEST_TIMEOUT_MS),
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+    } catch (err: any) {
+      // AbortSignal.timeout fires a TimeoutError; surface it as a clear,
+      // job-failing message rather than a raw "The operation was aborted".
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        throw new Error(
+          `QBO API timed out after ${QBO_REQUEST_TIMEOUT_MS / 1000}s at ${endpoint} (realm ${realmId}) — QuickBooks did not respond.`
+        );
+      }
+      throw err;
     }
-    throw err;
+
+    // Defensive retry on rate-limit/server hiccups. The throttle above keeps
+    // us under QBO's published limits on our own traffic, but a realm shared
+    // with another integration (or a transient Intuit 5xx) can still 429 us —
+    // that shouldn't fail the whole operation outright.
+    if ((res.status === 429 || res.status >= 500) && attempt < maxAttempts) {
+      console.warn(`[qbo] ${endpoint} (realm ${realmId}) got ${res.status}, retry ${attempt}/${maxAttempts}`);
+      await sleepWithBackoff(attempt);
+      continue;
+    }
+    break;
   }
 
   const intuitTid = extractIntuitTid(res);
@@ -1836,17 +1852,35 @@ export async function batchOperation(
 }
 
 // ============== RATE LIMITER ==============
-// QBO limit: 500 requests/minute per realm.
+// QBO's published limits are per app+realm: 10 req/sec, 500 req/min,
+// 10 concurrent. We stay 20% under every one we enforce mechanically:
+//   - 8/sec   → minSpacingMs=125 between consecutive calls to the same realm
+//   - 400/min → maxPerMinute, sliding 60s window
+// Concurrency (10, target 8) is NOT separately tracked — every call site
+// (10+ files) awaits this per-realm before firing its fetch and is never
+// Promise.all'd against another call for the SAME realm, so true in-flight
+// concurrency per realm is 1 by construction, not by a counter here. If a
+// future call site ever fires concurrent requests at one realm, this class
+// needs a concurrency gate too.
 // Simple in-memory limiter — use Redis for production multi-instance.
 class RateLimiter {
   private timestamps: Map<string, number[]> = new Map();
+  private lastCallAt: Map<string, number> = new Map();
   private readonly maxPerMinute: number;
+  private readonly minSpacingMs: number;
 
-  constructor(maxPerMinute = 450) {
+  constructor(maxPerMinute = 400, minSpacingMs = 125) {
     this.maxPerMinute = maxPerMinute;
+    this.minSpacingMs = minSpacingMs;
   }
 
   async throttle(key: string): Promise<void> {
+    const last = this.lastCallAt.get(key);
+    if (last != null) {
+      const spacingWait = this.minSpacingMs - (Date.now() - last);
+      if (spacingWait > 0) await new Promise(r => setTimeout(r, spacingWait));
+    }
+
     const now = Date.now();
     const cutoff = now - 60_000;
     const list = (this.timestamps.get(key) || []).filter(t => t > cutoff);
@@ -1860,6 +1894,7 @@ class RateLimiter {
 
     list.push(now);
     this.timestamps.set(key, list);
+    this.lastCallAt.set(key, now);
   }
 }
 

@@ -6,6 +6,7 @@
  */
 
 import { isDemoRealm, demoProfitAndLoss } from "./demo-data";
+import { qboRateLimiter } from "./qbo";
 
 const QBO_BASE =
   process.env.QBO_ENVIRONMENT === "production"
@@ -18,6 +19,7 @@ async function fetchQBOReport(
   reportName: string,
   params: Record<string, string>
 ): Promise<any> {
+  await qboRateLimiter.throttle(realmId);
   const qs = new URLSearchParams({ ...params, minorversion: "65" });
   const url = `${QBO_BASE}/v3/company/${realmId}/reports/${reportName}?${qs}`;
   const res = await fetch(url, {
