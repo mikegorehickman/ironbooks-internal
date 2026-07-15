@@ -430,3 +430,26 @@ export function lookupVendor(
   }
   return null;
 }
+
+/**
+ * Extract a KNOWN, NAMED vendor's canonical display name from raw text — used
+ * to consolidate per-client bank-rule candidates (Mike, 2026-07-14: rules
+ * were "too specific", one per raw bank descriptor, instead of one broad
+ * "contains petro-canada" rule covering every phrasing).
+ *
+ * Deliberately narrower than lookupVendor: only fires on PATTERNS entries
+ * that carry an explicit `vendor` field (a real single named brand — the 254
+ * Mike/Lisa-reviewed vendors). Category/keyword-only rules (e.g. bare
+ * "attorney" → Legal Fees, no `vendor`) are skipped — they're accounts, not
+ * a name to group raw bank descriptions under. No amount/industry gating:
+ * this is a naming question, not a categorization decision.
+ */
+export function extractKnownVendorName(text: string): string | null {
+  const haystack = normalizeVendorForLookup(text || "");
+  if (!haystack) return null;
+  for (const p of PATTERNS) {
+    if (!p.vendor) continue;
+    if (p.pattern.test(haystack)) return p.vendor;
+  }
+  return null;
+}
