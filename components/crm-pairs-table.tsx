@@ -38,11 +38,12 @@ export function CrmPairsTable({ data }: { data: any }) {
   }
   return (
     <div>
-      <div className="flex items-center gap-3 text-[11px] text-ink-slate mb-2">
-        <span className="font-bold text-navy">{pairs.length} pairs</span>
-        {sc.paid_in_qbo ? <span>{sc.paid_in_qbo} paid-in-QBO (deposit is the dupe leg)</span> : null}
-        {sc.open ? <span>{sc.open} open (deposit never applied)</span> : null}
-        {sc.unknown ? <span>{sc.unknown} unknown</span> : null}
+      <div className="text-[11px] text-ink-slate mb-2">
+        <span className="font-bold text-navy">{pairs.length} proven pairs</span> — evidence the
+        invoices duplicate the bank deposits. The <strong>invoice</strong> is the duplicate to
+        remove; the <strong>deposit</strong> is the real cash (kept).{" "}
+        {sc.paid_in_qbo ? <span>{sc.paid_in_qbo} invoice(s) paid in QBO (void invoice + its payment). </span> : null}
+        {sc.open ? <span>{sc.open} open (void the invoice). </span> : null}
       </div>
       <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white">
         <table className="w-full text-xs">
@@ -54,7 +55,7 @@ export function CrmPairsTable({ data }: { data: any }) {
               <th className="text-left font-semibold px-3 py-2">Deposit → account</th>
               <th className="text-right font-semibold px-3 py-2">Deposit</th>
               <th className="text-left font-semibold px-3 py-2">Match</th>
-              <th className="text-left font-semibold px-3 py-2">Scenario</th>
+              <th className="text-left font-semibold px-3 py-2">QBO fix (invoice = dupe)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -78,11 +79,11 @@ export function CrmPairsTable({ data }: { data: any }) {
                 </td>
                 <td className="px-3 py-2">
                   {p.scenario === "paid_in_qbo" ? (
-                    <span className="text-red-700 font-semibold">deposit is the dupe (invoice paid)</span>
+                    <span className="text-red-700 font-semibold">void invoice + unlink its CRM payment</span>
                   ) : p.scenario === "open" ? (
-                    <span className="text-amber-700 font-semibold">invoice open — never applied</span>
+                    <span className="text-amber-700 font-semibold">void invoice (open, no payment)</span>
                   ) : (
-                    <span className="text-ink-light">unknown</span>
+                    <span className="text-ink-light">void invoice</span>
                   )}
                 </td>
               </tr>

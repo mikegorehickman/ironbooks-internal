@@ -181,8 +181,15 @@ export function RevenueCheckClient({
               <div className="flex flex-wrap gap-4 mt-2 text-xs">
                 <span>Invoice income: <strong className="font-mono">{fmt(s.invoice_income_total)}</strong> ({s.invoice_txn_count} invoices)</span>
                 <span>Deposits in income: <strong className="font-mono">{fmt(s.deposit_income_total)}</strong> ({s.deposit_count})</span>
-                <span>Matched pairs: <strong className="font-mono">{s.pair_count} · {fmt(s.paired_deposit_total)}</strong></span>
+                <span className="text-ink-light">Proven pairs (evidence): {s.pair_count} · {fmt(s.paired_deposit_total)}</span>
               </div>
+              {s.flagged && (
+                <div className="mt-2 text-xs bg-white/60 border border-amber-200 rounded-lg px-2.5 py-1.5 text-amber-900">
+                  <strong>Scope of the fix:</strong> cash-deposits-only excludes <strong>every</strong> invoice —
+                  all {fmt(s.invoice_income_total)} of CRM invoice income ({s.invoice_txn_count} invoices), not just
+                  the {s.pair_count} pairs below. The pairs are proof of the duplication; the deposits stay as the real revenue.
+                </div>
+              )}
             </div>
           </div>
 
@@ -194,7 +201,7 @@ export function RevenueCheckClient({
                 {mode === "deposits_only" ? "cash deposits only" : "standard"}
               </span>
               {mode === "deposits_only" && (
-                <span className="text-ink-slate"> — CRM invoice income is excluded from statements.</span>
+                <span className="text-ink-slate"> — <strong>all</strong> {fmt(s.invoice_income_total)} of CRM invoice income is excluded from statements (every invoice).</span>
               )}
             </div>
             {isSenior ? (
