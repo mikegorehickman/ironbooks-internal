@@ -179,35 +179,23 @@ export async function POST(
       analysis.warnings = [...industryWarnings, ...analysis.warnings];
     }
 
-    // 5.5. Detect merge candidates.
+    // 5.5. Rename→merge collision resolution (Mike, 2026-07-15).
     //
-    // A merge candidate exists when:
-    //   - Multiple rename actions point to the same target_master_account (Scenario 2: new consolidation)
-    //   - OR a single rename action targets a name that already exists in client's QBO (Scenario 1: existing target)
+    // QBO can't hold two accounts with the same name, so when several accounts
+    // target the same name — or a rename targets a name that already exists in
+    // QBO — we resolve it INLINE (no more flag + post-cleanup "merge card"
+    // detour) so the review dropdown opens on the real recommendation:
+    // exactly ONE account keeps "rename" (the winner), every OTHER becomes
+    // "merge" into that target.
+    //   - Scenario 1 (target already exists in QBO): ALL sources merge into it,
+    //     no rename winner needed.
+    //   - Scenario 2 (new consolidation): the highest-transaction account keeps
+    //     the rename (it creates the target name); the rest merge into it.
     //
-    // For each detected merge, we suppress the corresponding rename actions from
-    // the auto-execute flow (they get filtered out below) and present an
-    // interactive merge card after cleanup completes. Lisa decides per-merge.
-    interface MergeCandidate {
-      id: string;
-      type: "existing_target" | "new_consolidation";
-      target_name: string;
-      target_account_id: string | null;
-      source_accounts: Array<{
-        id: string;
-        name: string;
-        transaction_count: number;
-        balance: number;
-      }>;
-      recommended_winner_id: string | null;
-      status: "pending" | "in_progress" | "complete" | "failed" | "ignored";
-      error_message: string | null;
-      completed_at: string | null;
-      user_choice: any;
-    }
-
-    const mergeCandidates: MergeCandidate[] = [];
-    const suppressedActionAccountIds = new Set<string>();
+    // `forced` maps qbo_account_id → the action that overrides the analyzer's
+    // original "rename". `mergedAccountIds` is the set demoted to merge.
+    const forced = new Map<string, { action: "merge"; target: string; targetId: string | null }>();
+    const mergedAccountIds = new Set<string>();
 
     // Build a lookup of QBO accounts by case-folded name for Scenario 1 detection
     const qboByName = new Map<string, any>();
@@ -228,7 +216,6 @@ export async function POST(
       byTarget.get(key)!.push(s);
     }
 
-    let mergeIdCounter = 1;
     for (const [targetKey, group] of byTarget.entries()) {
       const targetName = group[0].target_master_account as string;
       const existingTargetInQbo = qboByName.get(targetKey);
@@ -241,45 +228,37 @@ export async function POST(
       const isScenario1 = existingTargetInQbo && !existingIsItselfASource;
       const isScenario2 = group.length > 1 && !isScenario1;
 
-      if (!isScenario1 && !isScenario2) continue;
+      if (!isScenario1 && !isScenario2) continue; // lone rename to a brand-new name — no collision
 
-      // Build source rows with tx counts + balances from QBO snapshot
-      const sourceById = new Map(qboAccounts.map((a: any) => [a.Id, a]));
-      const sources = group.map((g: any) => {
-        const acc: any = sourceById.get(g.qbo_account_id) || {};
-        return {
-          id: g.qbo_account_id as string,
-          name: g.current_name as string,
-          transaction_count: txCounts.get(g.qbo_account_id) ?? 0,
-          balance: Number(acc.CurrentBalance ?? 0),
-        };
-      });
-
-      // Pick winner: account with most transactions; tie-break by lowest id
-      const recommendedWinner = isScenario1
-        ? null
-        : [...sources].sort(
-            (a, b) =>
-              b.transaction_count - a.transaction_count ||
-              Number(a.id) - Number(b.id)
-          )[0].id;
-
-      mergeCandidates.push({
-        id: `merge_${mergeIdCounter++}`,
-        type: isScenario1 ? "existing_target" : "new_consolidation",
-        target_name: targetName,
-        target_account_id: isScenario1 ? existingTargetInQbo.Id : null,
-        source_accounts: sources,
-        recommended_winner_id: recommendedWinner,
-        status: "pending",
-        error_message: null,
-        completed_at: null,
-        user_choice: null,
-      });
-
-      // Mark these source account renames as suppressed from auto-execute
-      for (const s of group) {
-        suppressedActionAccountIds.add(s.qbo_account_id as string);
+      if (isScenario1) {
+        // Target already exists in QBO → every source merges into it (capture
+        // the stable target id so the executor merges by id, not fuzzy name).
+        for (const s of group) {
+          forced.set(s.qbo_account_id as string, {
+            action: "merge",
+            target: targetName,
+            targetId: existingTargetInQbo.Id,
+          });
+          mergedAccountIds.add(s.qbo_account_id as string);
+        }
+      } else {
+        // New consolidation → the highest-transaction account keeps its rename
+        // (creating the target name); every other account merges into it. The
+        // merge resolves by name at execute time, after the winner's rename.
+        const winnerId = [...group].sort(
+          (a: any, b: any) =>
+            (txCounts.get(b.qbo_account_id) ?? 0) - (txCounts.get(a.qbo_account_id) ?? 0) ||
+            Number(a.qbo_account_id) - Number(b.qbo_account_id)
+        )[0].qbo_account_id as string;
+        for (const s of group) {
+          if (s.qbo_account_id === winnerId) continue; // stays a rename
+          forced.set(s.qbo_account_id as string, {
+            action: "merge",
+            target: targetName,
+            targetId: null,
+          });
+          mergedAccountIds.add(s.qbo_account_id as string);
+        }
       }
     }
 
@@ -291,25 +270,26 @@ export async function POST(
       ai_suggestions: analysis as any,
       ai_model_used: "claude-opus-4-7",
       ai_completed_at: new Date().toISOString(),
+      // Collision losers are now first-class "merge" actions, not flags — so
+      // rename count drops by the demoted set and flagged count is flags only.
       accounts_to_rename:
         analysis.suggestions.filter(s => s.action === "rename").length -
-        suppressedActionAccountIds.size,
+        mergedAccountIds.size,
       accounts_to_delete: analysis.suggestions.filter(s => s.action === "delete").length,
-      accounts_flagged:
-        analysis.suggestions.filter(s => s.action === "flag").length +
-        suppressedActionAccountIds.size,
+      accounts_flagged: analysis.suggestions.filter(s => s.action === "flag").length,
       accounts_to_create: analysis.missing_required_accounts.length,
-      flagged_for_lisa:
-        analysis.suggestions.some(s => s.action === "flag") || mergeCandidates.length > 0,
-      merge_candidates: mergeCandidates as any,
+      flagged_for_lisa: analysis.suggestions.some(s => s.action === "flag"),
+      // Collisions are handled inline as merge ACTIONS now — the old
+      // post-cleanup "merge card" list is retired (kept empty for readers).
+      merge_candidates: [] as any,
     }).eq("id", jobId);
 
     // 7. Create individual action rows.
-    // Suppressed actions (those participating in a merge candidate) become "flag"
-    // instead of "rename" so the executor skips them — merge happens via the
-    // separate per-card workflow on the live execution / report screen.
+    // Collision losers (from the pass above) are written as first-class "merge"
+    // actions — so the review dropdown opens on the real recommendation
+    // (rename for the winner, "Merge into …" for the rest) instead of "flag".
     const actions = analysis.suggestions.map((s, idx) => {
-      const isSuppressed = s.qbo_account_id && suppressedActionAccountIds.has(s.qbo_account_id);
+      const override = s.qbo_account_id ? forced.get(s.qbo_account_id) : undefined;
       // If the target already exists in QBO at analyze-time, capture its
       // stable QBO ID so the executor doesn't have to re-resolve by name
       // (which can collide on subaccounts and post-rename moves — caused
@@ -317,19 +297,23 @@ export async function POST(
       const targetInQbo = s.target_master_account
         ? qboByName.get(String(s.target_master_account).toLowerCase().trim())
         : null;
+      const effectiveTarget = override ? override.target : (s.target_master_account || null);
+      const effectiveTargetId = override
+        ? (override.targetId ?? (targetInQbo ? targetInQbo.Id : null))
+        : (targetInQbo ? targetInQbo.Id : null);
       return {
         job_id: jobId,
         qbo_account_id: s.qbo_account_id,
         current_name: s.current_name,
-        action: isSuppressed ? "flag" : s.action,
-        new_name: s.target_master_account || null,
-        new_qbo_account_id: targetInQbo ? targetInQbo.Id : null,
+        action: override ? override.action : s.action,
+        new_name: effectiveTarget,
+        new_qbo_account_id: effectiveTargetId,
         ai_confidence: s.confidence,
-        ai_reasoning: s.reasoning,
+        ai_reasoning: override
+          ? `${s.reasoning || ""} — auto-set to Merge: "${effectiveTarget}" is already being renamed/created by another account, and QBO can't hold two accounts with the same name.`.trim()
+          : s.reasoning,
         ai_suggested_target: s.target_master_account || null,
-        flagged_reason: isSuppressed
-          ? `Part of a merge into "${s.target_master_account}" — handled via Manual Cleanup Report.`
-          : (s.flag_reason || null),
+        flagged_reason: s.flag_reason || null,
         transaction_count: s.qbo_account_id ? (txCounts.get(s.qbo_account_id) ?? 0) : 0,
         sort_order: idx,
       };
@@ -389,7 +373,7 @@ export async function POST(
     // the analysis is unaffected.
     const renameTargets = new Map<string, string>(
       analysis.suggestions
-        .filter(s => s.action === "rename" && s.qbo_account_id && s.target_master_account && !suppressedActionAccountIds.has(s.qbo_account_id))
+        .filter(s => s.action === "rename" && s.qbo_account_id && s.target_master_account && !mergedAccountIds.has(s.qbo_account_id))
         .map(s => [String(s.qbo_account_id), String(s.target_master_account)])
     );
     const retypePlans = computeRetypePlans({

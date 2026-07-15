@@ -242,12 +242,36 @@ export function ReviewClient({
     newTarget?: string,
     flaggedReason?: string
   ) {
+    // One-rename-per-target guard (Mike, 2026-07-15): QBO can't hold two
+    // accounts with the same name. If this row is being set to "rename" toward
+    // a name that ANOTHER row is already renaming to, this row must "merge"
+    // into that target instead — never a second rename to the same name.
+    let effAction = newAction;
+    if (newAction === "rename") {
+      const target = (
+        (newTarget !== undefined
+          ? newTarget
+          : actions.find((a) => a.id === actionId)?.new_name) || ""
+      )
+        .trim()
+        .toLowerCase();
+      if (target) {
+        const clashes = actions.some(
+          (a) =>
+            a.id !== actionId &&
+            a.action === "rename" &&
+            (a.new_name || "").trim().toLowerCase() === target
+        );
+        if (clashes) effAction = "merge";
+      }
+    }
+
     setActions((prev) =>
       prev.map((a) =>
         a.id === actionId
           ? {
               ...a,
-              action: newAction,
+              action: effAction,
               new_name: newTarget !== undefined ? newTarget : a.new_name,
               ai_suggested_target: newTarget || a.ai_suggested_target,
               flagged_reason: flaggedReason !== undefined ? flaggedReason : a.flagged_reason,
@@ -263,7 +287,7 @@ export function ReviewClient({
         // This call site's Update generic already resolved to `never` in the
         // typecheck baseline; 'retype' additionally isn't in the generated
         // enum until types regenerate post-migration-119. Assert the payload.
-        action: newAction,
+        action: effAction,
         ...(newTarget !== undefined && { new_name: newTarget || null }),
         ...(newTarget && { ai_suggested_target: newTarget }),
         ...(flaggedReason !== undefined && { flagged_reason: flaggedReason }),
