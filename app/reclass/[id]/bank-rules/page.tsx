@@ -193,6 +193,10 @@ export default async function BankRulesFromReclassPage({
       totalAmount: c.totalAmount,
       hasTarget: c.hasTarget,
       alreadyInQbo: alreadyInQbo.has(normalizePattern(c.vendorPattern)),
+      // Real bank descriptions this rule will match — the "show me the
+      // transactions" preview (Mike, 2026-07-14). Was computed but dropped
+      // here before reaching the page.
+      sampleDescriptions: c.sampleDescriptions,
     }))
     .sort((a, b) => {
       // Group order: ready → needs target → already in QBO

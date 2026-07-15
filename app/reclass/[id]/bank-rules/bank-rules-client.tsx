@@ -26,6 +26,9 @@ interface ProposedRule {
    * + push guards prevent QBO duplicates.
    */
   alreadyInQbo: boolean;
+  /** Real bank descriptions this rule will match — up to 6 examples, so the
+   *  bookkeeper can SEE what's going into a rule before approving it. */
+  sampleDescriptions: string[];
 }
 
 interface AvailableAccount {
@@ -680,6 +683,23 @@ export function BankRulesFromReclassClient({
                     </div>
                     {rule.vendorPattern !== rule.vendorDisplay && (
                       <div className="text-xs text-ink-slate font-mono">{rule.vendorPattern}</div>
+                    )}
+                    {rule.sampleDescriptions.length > 0 && (
+                      <details className="mt-1" onClick={(e) => e.stopPropagation()}>
+                        <summary className="text-[11px] text-ink-light cursor-pointer hover:text-navy select-none">
+                          {rule.txCount} transaction{rule.txCount === 1 ? "" : "s"} will match — show examples
+                        </summary>
+                        <ul className="mt-1 text-[11px] text-ink-slate font-mono space-y-0.5 pl-2 border-l-2 border-gray-100">
+                          {rule.sampleDescriptions.map((s, i) => (
+                            <li key={i} className="truncate max-w-xs" title={s}>{s}</li>
+                          ))}
+                          {rule.txCount > rule.sampleDescriptions.length && (
+                            <li className="italic text-ink-light">
+                              …and {rule.txCount - rule.sampleDescriptions.length} more like these
+                            </li>
+                          )}
+                        </ul>
+                      </details>
                     )}
                   </td>
                   <td className="px-4 py-3">
