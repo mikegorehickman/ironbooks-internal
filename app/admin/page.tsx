@@ -2,7 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone, Repeat, Video, Landmark, ReceiptText } from "lucide-react";
+import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone, Repeat, Video, Landmark, ReceiptText, CheckCheck } from "lucide-react";
 import { DupSweepButton } from "./dup-sweep-button";
 
 export default async function AdminOverviewPage() {
@@ -161,6 +161,12 @@ export default async function AdminOverviewPage() {
               icon: ReceiptText,
               title: "CRM invoice revenue",
               desc: "CRM-pushed invoices double-counting deposit revenue (Dominion pattern) · review pairs + set deposits-only per client",
+            },
+            {
+              href: "/admin/reapply-skipped",
+              icon: CheckCheck,
+              title: "Re-apply skipped",
+              desc: "Re-push 'already in target account' skips to QBO · fixes categorizations that never actually landed · idempotent, closed-period safe",
             },
           ].map((t) => {
             const Icon = t.icon;
