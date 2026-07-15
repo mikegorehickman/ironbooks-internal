@@ -114,6 +114,55 @@ export function BankRulesFromReclassClient({
     errors: string[];
   } | null>(null);
 
+  // .xls download state. The export route now auto-creates any master-COA
+  // account these rules target that doesn't exist yet in the client's live
+  // QBO (Mike, 2026-07-15: QBO's own import wizard leaves the category
+  // dropdown blank whenever no matching account exists) — surfaced here so
+  // the bookkeeper sees exactly what got created vs. what still needs a
+  // manual pick in QBO's wizard.
+  const [downloading, setDownloading] = useState(false);
+  const [exportSummary, setExportSummary] = useState<{
+    accountsCreated: string[];
+    accountsUnresolved: string[];
+  } | null>(null);
+  const [exportError, setExportError] = useState("");
+
+  async function handleDownloadQboXls() {
+    setDownloading(true);
+    setExportError("");
+    try {
+      const res = await fetch(`/api/rules/export-qbo/${clientLinkId}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setExportError(body.error || `Download failed (${res.status})`);
+        return;
+      }
+      const accountsCreated = JSON.parse(
+        decodeURIComponent(res.headers.get("X-Accounts-Created") || "%5B%5D")
+      );
+      const accountsUnresolved = JSON.parse(
+        decodeURIComponent(res.headers.get("X-Accounts-Unresolved") || "%5B%5D")
+      );
+      setExportSummary({ accountsCreated, accountsUnresolved });
+
+      const blob = await res.blob();
+      const filenameMatch = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
+      const filename = filenameMatch?.[1] || "Bank_Feed_Rules.xls";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setExportError(err.message || "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   // Stripe-deposits pre-check: counts QBO deposits flagged as Stripe-origin
   // in the cleanup's date range. Drives the "skip Stripe recon" shortcut
   // when zero exist. Null = not yet checked / fail-soft. We fetch lazily
@@ -518,18 +567,48 @@ export function BankRulesFromReclassClient({
             the SNAP backstop. */}
         {!skipped && created > 0 && (
           <div className="max-w-md mx-auto pt-2">
-            <a
-              href={`/api/rules/export-qbo/${clientLinkId}`}
-              download
-              className="inline-flex items-center gap-2 text-sm font-semibold text-teal hover:text-teal-dark border border-teal/30 hover:border-teal bg-teal-lighter/50 hover:bg-teal-lighter px-4 py-2 rounded-lg transition-colors"
+            <button
+              type="button"
+              onClick={handleDownloadQboXls}
+              disabled={downloading}
+              className="inline-flex items-center gap-2 text-sm font-semibold text-teal hover:text-teal-dark border border-teal/30 hover:border-teal bg-teal-lighter/50 hover:bg-teal-lighter px-4 py-2 rounded-lg transition-colors disabled:opacity-60"
             >
-              <Download size={16} />
-              Download .xls for QBO import
-            </a>
+              {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              {downloading ? "Preparing file…" : "Download .xls for QBO import"}
+            </button>
             <p className="text-[11px] text-ink-slate mt-2 leading-snug">
               Upload this in QuickBooks under <strong>Banking → Rules → ⋮ → Import Rules</strong>{" "}
               to add them natively in QBO. SNAP will keep applying them automatically either way.
             </p>
+            {exportError && (
+              <p className="text-[11px] text-red-700 mt-2">{exportError}</p>
+            )}
+            {exportSummary && (
+              <div className="mt-3 text-left text-[11px] leading-snug space-y-1.5">
+                {exportSummary.accountsCreated.length > 0 && (
+                  <p className="text-green-700">
+                    Created {exportSummary.accountsCreated.length} category account
+                    {exportSummary.accountsCreated.length === 1 ? "" : "ies"} in QBO so this file
+                    auto-matches: {exportSummary.accountsCreated.join(", ")}.
+                  </p>
+                )}
+                {exportSummary.accountsUnresolved.length > 0 && (
+                  <p className="text-amber-700">
+                    {exportSummary.accountsUnresolved.length} categor
+                    {exportSummary.accountsUnresolved.length === 1 ? "y" : "ies"} couldn't be
+                    auto-created ({exportSummary.accountsUnresolved.join(", ")}) — QBO's import
+                    wizard will ask you to pick those manually.
+                  </p>
+                )}
+                {exportSummary.accountsCreated.length === 0 &&
+                  exportSummary.accountsUnresolved.length === 0 && (
+                    <p className="text-ink-slate">
+                      Every category already exists in QBO — this file should auto-match with no
+                      manual picking required.
+                    </p>
+                  )}
+              </div>
+            )}
           </div>
         )}
 
