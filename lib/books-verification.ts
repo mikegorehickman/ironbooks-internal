@@ -27,6 +27,7 @@ import { fetchPLDetailAll } from "./qbo-reports";
 import { fetchProfitAndLossByMonth, type PLByMonthBlock } from "./qbo-pl-by-month";
 import { findDuplicates } from "./qbo-dup-scan";
 import { analyzeDepositsToIncome } from "./revenue-integrity";
+import { computeRevenueAdjustment, normalizeRevenueMode } from "./revenue-recognition";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -329,6 +330,16 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
   const t0 = Date.now();
   let qboCalls = 0;
   const track = <T,>(p: Promise<T>): Promise<T> => (qboCalls++, p);
+
+  // Per-client revenue-recognition mode. deposits_only clients recognize cash
+  // receipts only; the deposits-into-income check is INVERTED for them (their
+  // deposits are the real revenue), so it becomes an informational note below.
+  const { data: clientRow } = await (service as any)
+    .from("client_links")
+    .select("revenue_recognition_mode")
+    .eq("id", clientLinkId)
+    .maybeSingle();
+  const revenueMode = normalizeRevenueMode(clientRow?.revenue_recognition_mode);
 
   const [py, pm] = period.split("-").map(Number);
   // Trailing window for variance: 3 prior months + the period itself.
@@ -745,6 +756,27 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
         detail: "P&L detail unavailable",
         skipReason: "QBO P&L detail report failed — re-run verification.",
         findings: [],
+      });
+    } else if (revenueMode === "deposits_only") {
+      // Cash-deposits-only client: deposits ARE the intended revenue, so never
+      // flag them. Instead surface how much CRM invoice-recognized income was
+      // excluded (the duplicate leg) — informational, non-blocking.
+      const adj = computeRevenueAdjustment(plDetail, "deposits_only");
+      checks.push({
+        key: "deposits_in_revenue",
+        label: "Revenue recognition — cash deposits only",
+        pillar: "anomalies",
+        status: "pass",
+        detail:
+          adj.excludedInvoiceRevenue > 0
+            ? `Recognizing actual cash deposits only. Excluded ${fmt(adj.excludedInvoiceRevenue)} of CRM invoice-recognized income this period (it duplicates the bank deposits).`
+            : "Recognizing actual cash deposits only. No CRM invoice income to exclude this period.",
+        findings: [],
+        meta: {
+          revenueMode,
+          excludedInvoiceRevenue: adj.excludedInvoiceRevenue,
+          excludedByAccount: adj.excludedByAccount,
+        },
       });
     } else {
       const rev = analyzeDepositsToIncome(

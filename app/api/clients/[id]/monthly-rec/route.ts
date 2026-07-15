@@ -330,7 +330,7 @@ export async function POST(
         accessToken,
         periodStart,
         periodEnd,
-        { includeBS }
+        { includeBS, revenueMode: (client as any).revenue_recognition_mode }
       );
       const { data: run, error } = await (service as any)
         .from("monthly_rec_runs")
@@ -529,7 +529,7 @@ export async function POST(
             accessToken,
             periodStart,
             periodEnd,
-            { includeBS }
+            { includeBS, revenueMode: (client as any).revenue_recognition_mode }
           );
           const { data: up, error: upErr } = await (service as any)
             .from("monthly_rec_runs")

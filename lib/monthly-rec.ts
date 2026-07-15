@@ -14,7 +14,13 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { fetchAllAccounts, qboRequest } from "./qbo";
-import { fetchProfitAndLoss, fetchCashFlow, type CashFlowData } from "./qbo-reports";
+import { fetchProfitAndLoss, fetchCashFlow, fetchPLDetailAll, type CashFlowData } from "./qbo-reports";
+import {
+  computeRevenueAdjustment,
+  applyRevenueAdjustment,
+  normalizeRevenueMode,
+  type RevenueRecognitionMode,
+} from "./revenue-recognition";
 import {
   fetchAccountTransactions,
   fetchOpenInvoices,
@@ -212,6 +218,10 @@ export interface StatementsPreview {
     cogs: number;
     grossProfit: number;
     lineItems: { label: string; amount: number; group: string }[];
+    /** Present when the client's revenue_recognition_mode adjusted revenue
+     *  (deposits_only excludes CRM invoice-recognized income). Lets the UI /
+     *  statement note the exclusion. Absent/zeroed under standard mode. */
+    revenueRecognition?: { mode: RevenueRecognitionMode; excludedInvoiceRevenue: number };
   };
   /** null when the client's Balance Sheet toggle is off (P&L-only). */
   bs: {
@@ -249,10 +259,14 @@ export async function fetchStatementsPreview(
   accessToken: string,
   periodStart: string,
   periodEnd: string,
-  opts?: { includeBS?: boolean } // false = P&L-only client (BS toggle off)
+  // false = P&L-only client (BS toggle off). revenueMode: when 'deposits_only',
+  // CRM invoice-recognized income is excluded from the cash-basis P&L (only
+  // actual cash receipts count) — see lib/revenue-recognition.ts.
+  opts?: { includeBS?: boolean; revenueMode?: RevenueRecognitionMode }
 ): Promise<StatementsPreview> {
   const includeBS = opts?.includeBS !== false;
-  const [pl, bsReport, cfs] = await Promise.all([
+  const revenueMode = normalizeRevenueMode(opts?.revenueMode);
+  const [pl, bsReport, cfs, plDetail] = await Promise.all([
     fetchProfitAndLoss(realmId, accessToken, periodStart, periodEnd),
     includeBS
       ? qboRequest<any>(
@@ -264,24 +278,40 @@ export async function fetchStatementsPreview(
     includeBS
       ? fetchCashFlow(realmId, accessToken, periodStart, periodEnd).catch(() => null)
       : Promise.resolve(null),
+    // Only pull the detail when we actually need it to exclude invoice income.
+    revenueMode === "deposits_only"
+      ? fetchPLDetailAll(realmId, accessToken, periodStart, periodEnd, "Cash").catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   const lines = flattenBalanceSheet(bsReport?.Rows?.Row || []);
   const find = (re: RegExp) =>
     lines.find((l) => re.test(l.label))?.amount ?? 0;
 
+  // Revenue-recognition adjustment (no-op under standard mode).
+  const revAdj = computeRevenueAdjustment(plDetail as any, revenueMode);
+  const adjusted = applyRevenueAdjustment(
+    {
+      totalIncome: pl.totalIncome,
+      cogs: pl.cogs,
+      netIncome: pl.netIncome,
+      lineItems: pl.lineItems.map((i) => ({ label: i.label, amount: i.amount, group: i.group })),
+    },
+    revAdj
+  );
+
   return {
     pl: {
-      totalIncome: pl.totalIncome,
+      totalIncome: adjusted.totalIncome,
       totalExpenses: pl.totalExpenses,
-      netIncome: pl.netIncome,
+      netIncome: adjusted.netIncome,
       cogs: pl.cogs,
-      grossProfit: pl.grossProfit,
-      lineItems: pl.lineItems.map((i) => ({
-        label: i.label,
-        amount: i.amount,
-        group: i.group,
-      })),
+      grossProfit: adjusted.grossProfit,
+      lineItems: adjusted.lineItems,
+      revenueRecognition:
+        revAdj.excludedInvoiceRevenue > 0
+          ? { mode: revenueMode, excludedInvoiceRevenue: revAdj.excludedInvoiceRevenue }
+          : undefined,
     },
     bs: includeBS
       ? {
