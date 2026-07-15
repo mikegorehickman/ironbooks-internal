@@ -25,6 +25,7 @@ import {
 import { lookupVendor, normalizeVendorForLookup } from "@/lib/vendor-knowledge";
 import { runWebSearchAuto } from "@/lib/web-search-runner";
 import { normalizeAccountName } from "@/lib/account-name";
+import { classifyMoneyMovement, isNamelessETransfer, type BsAccount } from "@/lib/transfer-detection";
 import { getClientEndCloses, type DoubleEndCloseSummary } from "@/lib/double";
 
 /**
@@ -775,20 +776,22 @@ async function runFullCategorization(
   let kbHits = 0;
   let cacheHits = 0;
 
-  // Bank-to-bank transfer patterns. Until we have proper bank-account-number
-  // mapping, these can't be auto-categorized — route to ask_client so the
-  // bookkeeper can confirm with the client which account it moved to/from.
-  // Catches: "ONLINE TRANSFER TO MITCHELL J", "TRANSFER FROM CHECKING",
-  // "INTERNAL TRANSFER", "FUNDS TRANSFER", "ZELLE TO/FROM", etc.
-  function isBankTransfer(line: ReclassLine): boolean {
-    const blob = `${line.vendor_name || ""} ${line.description || ""}`.toUpperCase();
-    return (
-      /\b(ONLINE\s+TRANSFER|FUNDS?\s+TRANSFER|INTERNAL\s+TRANSFER|WIRE\s+TRANSFER)\b/.test(blob) ||
-      /\bTRANSFER\s+(TO|FROM)\b/.test(blob) ||
-      /\bACH\s+TRANSFER\b/.test(blob) ||
-      /\b(XFER|TFR)\s+(TO|FROM)\b/.test(blob)
-    );
-  }
+  // Balance-sheet destinations for money-movement (CC payments, loan
+  // payments, transfers) — resolved from the FULL live chart, not the
+  // P&L-only availableAccounts. Booking these to a P&L account corrupts the
+  // statements, so we route them to the client's own Credit Card / Bank /
+  // Liability accounts where we can confidently name the destination, and
+  // park the ambiguous ones (Mike, 2026-07-15). See lib/transfer-detection.
+  const ccAccounts: BsAccount[] = allAccounts
+    .filter((a) => a.Active !== false && (a.AccountType || "").toLowerCase() === "credit card")
+    .map((a) => ({ id: a.Id, name: a.Name }));
+  const bankAccounts: BsAccount[] = allAccounts
+    .filter((a) => a.Active !== false && (a.AccountType || "").toLowerCase() === "bank")
+    .map((a) => ({ id: a.Id, name: a.Name }));
+  const liabilityAccounts: BsAccount[] = allAccounts
+    .filter((a) => a.Active !== false && (a.Classification || "").toLowerCase() === "liability")
+    .map((a) => ({ id: a.Id, name: a.Name }));
+  const movementBlob = (line: ReclassLine) => `${line.vendor_name || ""} ${line.description || ""}`;
 
   // Owner self-payment detection. A payment whose counterparty text contains
   // the client's own contact name is almost always the owner paying themself —
@@ -831,17 +834,37 @@ async function runFullCategorization(
       continue;
     }
 
-    // 0) Bank-transfer pre-check — never auto-categorize, always ask_client.
-    if (isBankTransfer(line)) {
-      preMatched.set(refId, {
-        ref_id: refId,
-        target_account_id: null,
-        target_account_name: null,
-        confidence: 0,
-        reasoning: "Detected as a bank-to-bank transfer. Confirm with client which account this moved to/from before categorizing.",
-        decision: "ask_client",
-      });
-      stats.askClient++;
+    // 0) Money-movement pre-check — CC payments, loan payments, transfers must
+    //    land on the balance sheet, never the P&L. Auto-route to the client's
+    //    own account where the destination is unambiguous (e.g. a "PC Financial
+    //    Mastercard" payment → that card); park the ambiguous ones for review.
+    const movement = classifyMoneyMovement(movementBlob(line), {
+      creditCard: ccAccounts,
+      bank: bankAccounts,
+      liability: liabilityAccounts,
+    });
+    if (movement) {
+      if (movement.confident && movement.target) {
+        preMatched.set(refId, {
+          ref_id: refId,
+          target_account_id: movement.target.id,
+          target_account_name: movement.target.name,
+          confidence: 0.9,
+          reasoning: movement.reasoning,
+          decision: "auto_approve",
+        });
+        stats.autoApprove++;
+      } else {
+        preMatched.set(refId, {
+          ref_id: refId,
+          target_account_id: movement.target?.id || null,
+          target_account_name: movement.target?.name || null,
+          confidence: movement.target ? 0.55 : 0,
+          reasoning: movement.reasoning,
+          decision: "ask_client",
+        });
+        stats.askClient++;
+      }
       continue;
     }
 
@@ -899,6 +922,27 @@ async function runFullCategorization(
         cacheHits++;
         continue;
       }
+    }
+
+    // E-transfer with no identifiable payee → ask_client, never the AI.
+    // Runs AFTER the KB + bank-rule lookups on purpose: the ~$1.50 Interac
+    // fee already matched the KB (→ Bank Charges), and any learned per-client
+    // rule already won. What's left is a bare "E Transfer Request" we can't
+    // attribute — the AI can only pick a P&L account, so left to it a real
+    // transfer/payment would be booked as an expense (Mike, 2026-07-15:
+    // "e-transfers without names should be uncategorized / ask client").
+    if (isNamelessETransfer(movementBlob(line))) {
+      preMatched.set(refId, {
+        ref_id: refId,
+        target_account_id: uncategorizedAccount?.qbo_account_id || null,
+        target_account_name: uncategorizedAccount?.account_name || null,
+        confidence: 0,
+        reasoning:
+          "e-Transfer with no identifiable payee — confirm with the client who it was to/from. Not an expense by default; the ~$1.50 Interac fee is booked separately to Bank Charges.",
+        decision: "ask_client",
+      });
+      stats.askClient++;
+      continue;
     }
 
     // No pre-match → needs AI
