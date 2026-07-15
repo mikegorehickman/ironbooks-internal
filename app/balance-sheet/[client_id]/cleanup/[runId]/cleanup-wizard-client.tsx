@@ -11,6 +11,7 @@ import { MODULE_LABELS, MODULE_ORDER, type CleanupModule } from "@/lib/cleanup-s
 import { ProposedEntryRow } from "./proposed-entry-row";
 import { parseEntryMeta } from "@/lib/cleanup-system/entry-meta";
 import { StatementsReview, periodLabel, type Statements } from "@/app/production/rec-card";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 
 type WizardStep = "diagnose" | "modules" | "review" | "qa" | "deliver";
 
@@ -880,6 +881,10 @@ export function CleanupWizardClient({
               </div>
             </div>
 
+            {/* Statement coverage — every bank/CC account with a have-it /
+                still-need-it check, plus the uploaded statements table. */}
+            <StatementCoveragePanel clientLinkId={clientLinkId} />
+
             {/* Recommended fix input: upload the actual statements. */}
             <StatementAnalysisPanel runId={runId} onApplied={refresh} />
 
@@ -1496,6 +1501,145 @@ export function CleanupWizardClient({
   );
 }
 
+/* ── Statement coverage ───────────────────────────────────────────────
+   Every bank + credit-card account in QBO, each with a have-it / still-
+   need-it check based on whether an uploaded statement is matched to it —
+   so the bookkeeper sees at a glance which accounts are still missing
+   statements. Below the checklist, the uploaded statements themselves in
+   the same previewable table as the client profile. */
+
+type CoverageAccount = { id: string; name: string; accountType: string; accountSubType: string };
+type CoverageStatement = {
+  id: string; display_name: string; matched_qbo_account_id: string | null;
+  matched_account_name: string | null; last4: string | null; account_kind: string | null;
+  statement_end_date: string | null; ending_balance: number | null; status: string; storage_path: string;
+};
+
+function StatementCoveragePanel({ clientLinkId }: { clientLinkId: string }) {
+  const [accounts, setAccounts] = useState<CoverageAccount[] | null>(null);
+  const [statements, setStatements] = useState<CoverageStatement[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ path: string; name: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [acctRes, stmtRes] = await Promise.all([
+          fetch(`/api/clients/${clientLinkId}/qbo-accounts`),
+          fetch(`/api/clients/${clientLinkId}/statements`),
+        ]);
+        if (cancelled) return;
+        if (acctRes.ok) {
+          const j = await acctRes.json();
+          const all = (j.accounts || []) as CoverageAccount[];
+          setAccounts(
+            all.filter((a) => {
+              const t = (a.accountType || "").toLowerCase();
+              return t === "bank" || t === "credit card";
+            })
+          );
+        } else {
+          const j = await acctRes.json().catch(() => ({}));
+          setLoadError(j.error || "Couldn't load QuickBooks accounts");
+          setAccounts([]);
+        }
+        if (stmtRes.ok) {
+          const j = await stmtRes.json();
+          setStatements((j.statements || j || []) as CoverageStatement[]);
+        }
+      } catch (e: any) {
+        if (!cancelled) { setLoadError(e?.message || "Load failed"); setAccounts([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [clientLinkId]);
+
+  const money = (n: number | null) =>
+    n == null ? "—" : `$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // An account is "covered" if any matched statement points at it.
+  const coveredIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const st of statements) if (st.matched_qbo_account_id) s.add(String(st.matched_qbo_account_id));
+    return s;
+  }, [statements]);
+
+  const covered = accounts?.filter((a) => coveredIds.has(String(a.id))).length ?? 0;
+  const total = accounts?.length ?? 0;
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5">
+      {preview && <FilePreviewModal path={preview.path} name={preview.name} onClose={() => setPreview(null)} />}
+      <h3 className="font-bold text-navy mb-1 flex items-center gap-2">
+        <Building2 size={14} /> Statement coverage
+        {accounts && total > 0 && (
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${covered === total ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+            {covered}/{total} accounts
+          </span>
+        )}
+      </h3>
+      <p className="text-xs text-ink-light mb-3">
+        Every bank &amp; credit-card account in QuickBooks — green if we have a statement matched to it, red if we still need it.
+      </p>
+
+      {accounts === null ? (
+        <div className="text-sm text-ink-slate flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading accounts…</div>
+      ) : loadError ? (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{loadError}</div>
+      ) : total === 0 ? (
+        <div className="text-sm text-ink-light">No bank or credit-card accounts found in QuickBooks.</div>
+      ) : (
+        <ul className="space-y-1.5 mb-1">
+          {accounts.map((a) => {
+            const has = coveredIds.has(String(a.id));
+            return (
+              <li key={a.id} className="flex items-center gap-2 text-sm">
+                {has ? <CheckCircle2 size={15} className="text-emerald-600 flex-shrink-0" /> : <XCircle size={15} className="text-red-500 flex-shrink-0" />}
+                <span className="text-navy">{a.name}</span>
+                <span className="text-[11px] text-ink-light">{(a.accountType || "").toLowerCase() === "credit card" ? "credit card" : "bank"}</span>
+                {!has && <span className="ml-auto text-[11px] font-semibold text-red-600">statement needed</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {statements.length > 0 && (
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light mb-2">Uploaded statements ({statements.length})</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-gray-50">
+                {statements.map((s) => (
+                  <tr key={s.id} className="hover:bg-gray-50">
+                    <td className="py-2 pr-2">
+                      <button
+                        type="button"
+                        onClick={() => setPreview({ path: s.storage_path, name: s.display_name })}
+                        className="inline-flex items-center gap-1.5 text-left text-navy hover:text-teal-dark hover:underline"
+                        title="Click to preview"
+                      >
+                        <FileText size={14} className="text-indigo-500 flex-shrink-0" />
+                        <span className="truncate max-w-[240px]">{s.display_name}</span>
+                      </button>
+                    </td>
+                    <td className="py-2 px-2 text-ink-slate whitespace-nowrap hidden sm:table-cell">
+                      {s.matched_account_name || <span className="text-amber-700">not applied</span>}
+                    </td>
+                    <td className="py-2 px-2 text-ink-slate whitespace-nowrap hidden md:table-cell">{s.statement_end_date || "—"}</td>
+                    <td className="py-2 pl-2 text-right font-mono text-navy whitespace-nowrap">{money(s.ending_balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Need from client ─────────────────────────────────────────────────
    Turns the diagnose results into a document-request checklist. Each
    flagged account maps to the statement/answer that unblocks its module:
@@ -1577,10 +1721,7 @@ function buildClientRequests(
         push("payroll", "Latest payroll reports from your payroll provider (Gusto, ADP, etc.) and your most recent payroll tax filing");
         break;
       case "undeposited_funds":
-        push("crm", "A completed-jobs or payments report from your CRM (Jobber, DripJobs, etc.) so we can match deposits to jobs");
-        break;
-      case "accounts_receivable":
-        push("ar", "A quick review of your open invoices — which are still collectible, and which were already paid or won't be?");
+        push("crm", "An export CSV of all completed jobs over the last 12 months, including job name, date, total amount, and tax collected (if any).");
         break;
       case "accounts_payable":
         push("ap", "A quick review of your open bills — which do you still actually owe?");
