@@ -42,6 +42,7 @@ import {
 } from "./claude-reclass";
 import { lookupVendor, normalizeVendorForLookup } from "./vendor-knowledge";
 import { normalizeAccountName } from "./account-name";
+import { classifyMoneyMovement, type BsAccount } from "./transfer-detection";
 
 // ─── CONSTANTS ─────────────────────────────────────────────────────────────
 
@@ -100,6 +101,19 @@ const HARD_BLOCK_PATTERNS = [
   /\bdraw\b/i,
   /\bdistribution\b/i,
   /\bshareholder\s+loan\b/i,
+  // Money-movement (balance-sheet, not P&L): a CC payment / loan payment /
+  // inter-account transfer must never silently auto-book to an expense or
+  // revenue account (Mike, 2026-07-15). Detected here so the nightly engine
+  // queues them for review; the one-time reclass flow auto-routes the
+  // confident ones to the right balance-sheet account. Deliberately keyed on
+  // unambiguous payment/transfer wording (not bare issuer names) so ordinary
+  // card-branded purchases still flow.
+  /\btransfer\s+(to|from)\b/i,
+  /\b(online|internal|wire)\s+transfer\b/i,
+  /\bcredit\s+card\s+pay(ment|mt)?\b/i,
+  /\bcard\s+payment\b/i,
+  /\bline\s+of\s+credit\b/i,
+  /\bloan\s+pay(ment|mt)?\b/i,
 ];
 
 // ─── TYPES ─────────────────────────────────────────────────────────────────
@@ -289,6 +303,16 @@ export async function runDailyRecon(
         account_subtype: a.AccountSubType || "",
       }));
     const accountById = new Map(availableAccounts.map((a) => [a.qbo_account_id, a]));
+    // Balance-sheet destinations for the money-movement guard below.
+    const ccAccountsDR: BsAccount[] = allQboAccounts
+      .filter((a) => a.Active !== false && (a.AccountType || "").toLowerCase() === "credit card")
+      .map((a) => ({ id: a.Id, name: a.Name }));
+    const bankAccountsDR: BsAccount[] = allQboAccounts
+      .filter((a) => a.Active !== false && (a.AccountType || "").toLowerCase() === "bank")
+      .map((a) => ({ id: a.Id, name: a.Name }));
+    const liabilityAccountsDR: BsAccount[] = allQboAccounts
+      .filter((a) => a.Active !== false && (a.Classification || "").toLowerCase() === "liability")
+      .map((a) => ({ id: a.Id, name: a.Name }));
     const accountByName = new Map(
       availableAccounts.map((a) => [normalizeAccountName(a.account_name), a])
     );
@@ -496,6 +520,31 @@ export async function runDailyRecon(
           lineAnomalies.push({
             code: "deposit_to_income",
             message: `Deposit ${suggested?.account_type === "Income" ? "suggested into" : "sitting in"} revenue account "${hit.account_name}" — if this client invoices their jobs, the invoice already recorded this income and the deposit should be matched to it, not booked as new revenue. Confirm it's a true cash sale before approving.`,
+          });
+        }
+      }
+      // Money-movement→P&L guard: a CC payment / loan payment / transfer that
+      // would land on (or currently sits in) a P&L Expense or Income account
+      // is a balance-sheet move mis-booked — never auto-apply. Mirrors the
+      // deposit→income guard on the money-OUT side (Mike, 2026-07-15).
+      const movement = classifyMoneyMovement(
+        `${line.vendor_name || ""} ${line.description || ""}`,
+        { creditCard: ccAccountsDR, bank: bankAccountsDR, liability: liabilityAccountsDR }
+      );
+      if (movement) {
+        const suggested = d.target_account_id ? accountById.get(d.target_account_id) : undefined;
+        const current = line.current_account_id ? accountById.get(String(line.current_account_id)) : undefined;
+        const plHit = [suggested, current].find(
+          (a) => a?.account_type === "Expense" || a?.account_type === "Other Expense" || a?.account_type === "Income" || a?.account_type === "Cost of Goods Sold"
+        );
+        if (plHit || !movement.target) {
+          lineAnomalies.push({
+            code: "payment_to_pl",
+            message:
+              `Looks like a ${movement.kind.replace("_", " ")} — a balance-sheet move, not an expense/revenue. ` +
+              (plHit ? `It is ${suggested === plHit ? "suggested into" : "sitting in"} the P&L account "${plHit.account_name}". ` : "") +
+              (movement.target ? `Route it to "${movement.target.name}" instead, or ` : "Pick the right balance-sheet account and ") +
+              `confirm before posting.`,
           });
         }
       }
