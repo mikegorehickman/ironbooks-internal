@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  FileText, Upload, Loader2, Download, CheckCircle2, AlertTriangle, Sparkles, Eye,
+  FileText, Upload, Loader2, Download, CheckCircle2, AlertTriangle, Sparkles, Eye, Scale,
 } from "lucide-react";
 import { createBrowserSupabase } from "@/lib/supabase-browser";
 import { CLIENT_UPLOADS_BUCKET } from "@/lib/client-comms";
@@ -210,6 +210,15 @@ export function StatementsCard({ clientLinkId }: { clientLinkId: string }) {
                         </span>
                       </td>
                       <td className="px-3 py-2.5 text-right">
+                        {s.ending_balance != null && s.matched_account_name && (
+                          <a
+                            href={`/clients/${clientLinkId}/reconcile?statement=${s.id}`}
+                            className="inline-flex p-1.5 rounded-md hover:bg-teal-light text-teal"
+                            title="Reconcile this statement against QuickBooks"
+                          >
+                            <Scale size={15} />
+                          </a>
+                        )}
                         <button
                           type="button"
                           onClick={() => setPreview({ path: s.storage_path, name: s.display_name })}
