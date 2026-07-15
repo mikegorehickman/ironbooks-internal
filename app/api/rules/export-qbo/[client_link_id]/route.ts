@@ -1,6 +1,9 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
+import { getValidToken, fetchAllAccounts, QBOReauthRequiredError } from "@/lib/qbo";
+import { applyMasterCoaToClient, type MasterCoaRow } from "@/lib/apply-master-coa";
+import { normalizeAccountName } from "@/lib/account-name";
 
 /**
  * GET /api/rules/export-qbo/[client_link_id]
@@ -21,6 +24,17 @@ import * as XLSX from "xlsx";
  *     QBO IDs — meaning we can write target_account_name straight
  *     through without resolving against the target QBO file
  *
+ * Before building the file, we ensure every target account referenced by
+ * these rules actually EXISTS in the client's live QBO chart (creating any
+ * master-COA account that's missing, additive-only — same primitive as
+ * /admin/apply-master-coa). Mike, 2026-07-15: QBO's own "Upload list"
+ * import wizard tries to auto-match each row's category text against the
+ * live COA and falls back to a blank "Select category" dropdown whenever
+ * no matching account exists yet — which was every row for a brand-new
+ * category (Job Supplies & Materials, Parking, Small Tools, Permit Fees on
+ * Dominion Painters). Creating the account first means the exact name is
+ * live in QBO by the time the file lands in the wizard, so it auto-selects.
+ *
  * Action type codes:
  *   0  = category (account name)
  *   1  = memo
@@ -34,6 +48,10 @@ import * as XLSX from "xlsx";
  *   1  = description contains
  *   10 = transaction sign ("-1" = money out / expense, "1" = money in)
  */
+// Account creation is sequential QBO writes (one per missing account, plus
+// parents) — budget beyond Vercel's default cap the same as apply-master-coa.
+export const maxDuration = 300;
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ client_link_id: string }> }
@@ -57,7 +75,7 @@ export async function GET(
   // Pull client name for the filename + ensure the user can access this client
   const { data: clientLink } = await service
     .from("client_links")
-    .select("client_name")
+    .select("client_name, qbo_realm_id, jurisdiction, industry")
     .eq("id", client_link_id)
     .single();
 
@@ -104,6 +122,63 @@ export async function GET(
       },
       { status: 404 }
     );
+  }
+
+  // Ensure every target account these rules reference actually exists in
+  // the client's live QBO — additive-only account creation, scoped to just
+  // the account names this export needs (not a full COA application). Fail
+  // soft: if QBO is unreachable or reauth is needed, export proceeds with
+  // whatever account names are already on the rules (today's behavior).
+  const accountsEnsured = { created: [] as string[], unresolved: [] as string[] };
+  if (clientLink.qbo_realm_id) {
+    const neededNames = [
+      ...new Set(rules.map((r: any) => String(r.target_account_name || "").trim()).filter(Boolean)),
+    ];
+    try {
+      const accessToken = await getValidToken(client_link_id, service as any, "ironbooks/api/rules/export-qbo");
+      const liveAccounts = await fetchAllAccounts(clientLink.qbo_realm_id, accessToken);
+      const liveNamesNorm = new Set(liveAccounts.map((a) => normalizeAccountName(a.Name)));
+
+      const industryRaw = (clientLink as any).industry || "painters";
+      const jurisdiction = (clientLink as any).jurisdiction || "US";
+      let { data: masterRows } = await service
+        .from("master_coa")
+        .select("account_name, parent_account_name, is_parent, qbo_account_type, qbo_account_subtype")
+        .eq("industry", industryRaw)
+        .eq("jurisdiction", jurisdiction);
+      if ((!masterRows || masterRows.length === 0) && industryRaw !== "painters") {
+        ({ data: masterRows } = await service
+          .from("master_coa")
+          .select("account_name, parent_account_name, is_parent, qbo_account_type, qbo_account_subtype")
+          .eq("industry", "painters")
+          .eq("jurisdiction", jurisdiction));
+      }
+      if (masterRows && masterRows.length > 0) {
+        const applyResult = await applyMasterCoaToClient({
+          clientLinkId: client_link_id,
+          clientName: clientLink.client_name,
+          realmId: clientLink.qbo_realm_id,
+          accessToken,
+          masterRows: masterRows as MasterCoaRow[],
+          dryRun: false,
+          onlyLeafNames: neededNames,
+        });
+        accountsEnsured.created = applyResult.created;
+      }
+      // Anything still missing after creation attempts — either it was
+      // already live (fine, no action needed) or it genuinely couldn't be
+      // resolved (not a master-COA name and not already in QBO). Surface
+      // only the latter so the export log names the real gap instead of a
+      // silent mismatch in QBO's wizard.
+      const createdNorm = new Set(accountsEnsured.created.map((n) => normalizeAccountName(n)));
+      accountsEnsured.unresolved = neededNames.filter(
+        (n) => !liveNamesNorm.has(normalizeAccountName(n)) && !createdNorm.has(normalizeAccountName(n))
+      );
+    } catch (err: any) {
+      if (!(err instanceof QBOReauthRequiredError)) {
+        console.warn(`[export-qbo ${client_link_id}] Could not ensure target accounts:`, err.message);
+      }
+    }
   }
 
   // Build the rows in QBO's exact format. One row per rule.
@@ -208,6 +283,8 @@ export async function GET(
       rule_count: rows.length,
       include_mode: includeMode,
       format: "biff8_xls",
+      accounts_created: accountsEnsured.created,
+      accounts_unresolved: accountsEnsured.unresolved,
     } as any,
   });
 
@@ -224,6 +301,11 @@ export async function GET(
       "Content-Type": "application/vnd.ms-excel",
       "Content-Disposition": `attachment; filename="${filename}"`,
       "Content-Length": String(buffer.length),
+      // Header values must stay ASCII/newline-free — encode the account
+      // name lists so the client component can surface exactly which
+      // categories were auto-created in QBO vs. couldn't be resolved.
+      "X-Accounts-Created": encodeURIComponent(JSON.stringify(accountsEnsured.created)),
+      "X-Accounts-Unresolved": encodeURIComponent(JSON.stringify(accountsEnsured.unresolved)),
     },
   });
 }

@@ -33,8 +33,15 @@ export async function applyMasterCoaToClient(params: {
   accessToken: string;
   masterRows: MasterCoaRow[];
   dryRun: boolean;
+  /**
+   * Restrict account creation to these leaf names (normalized match) instead
+   * of every missing master leaf. Used by the bank-rules QBO export, which
+   * only needs the handful of accounts its own rules target created — not a
+   * full fleet-style COA application as a side effect of a file download.
+   */
+  onlyLeafNames?: string[];
 }): Promise<ApplyResult> {
-  const { clientLinkId, clientName, realmId, accessToken, masterRows, dryRun } = params;
+  const { clientLinkId, clientName, realmId, accessToken, masterRows, dryRun, onlyLeafNames } = params;
 
   const qboAccounts = await fetchAllAccounts(realmId, accessToken);
   // Existing names — include INACTIVE accounts too: QBO rejects creating a
@@ -51,8 +58,14 @@ export async function applyMasterCoaToClient(params: {
     masterRows.filter((m) => m.is_parent).map((m) => [m.account_name, m])
   );
 
+  const onlyNamesNorm = onlyLeafNames
+    ? new Set(onlyLeafNames.map((n) => normalizeAccountName(n)))
+    : null;
   const missingLeaves = masterRows.filter(
-    (m) => !m.is_parent && !existing.has(normalizeAccountName(m.account_name))
+    (m) =>
+      !m.is_parent &&
+      !existing.has(normalizeAccountName(m.account_name)) &&
+      (!onlyNamesNorm || onlyNamesNorm.has(normalizeAccountName(m.account_name)))
   );
 
   // Fallback DetailType per AccountType — used when the master subtype is
