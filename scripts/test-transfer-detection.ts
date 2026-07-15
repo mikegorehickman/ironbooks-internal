@@ -1,6 +1,6 @@
 // Tests for money-movement detection + auto-route.
 // Run: npx tsx scripts/test-transfer-detection.ts
-import { classifyMoneyMovement, matchAccountByName, type BsAccount } from "@/lib/transfer-detection";
+import { classifyMoneyMovement, matchAccountByName, isNamelessETransfer, type BsAccount } from "@/lib/transfer-detection";
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
@@ -62,6 +62,16 @@ ok(matchAccountByName("nothing here", accounts.creditCard) === null, "no match �
 // ── Owner-draw / payroll stay OUT of this classifier (handled elsewhere) ──
 const m9 = classifyMoneyMovement("GUSTO PAYROLL", accounts);
 ok(m9 === null, "payroll is not money-movement here (separate hard-block)");
+
+// ── Nameless e-transfer detection (real Dominion descriptions) ──
+ok(isNamelessETransfer("Unknown vendor e-Transfer Request Fulfilled"), "bare e-Transfer Request → nameless");
+ok(isNamelessETransfer("Unknown vendor Online Transfer to Deposit Account-"), "online transfer to deposit account → nameless");
+ok(isNamelessETransfer("EMT"), "bare EMT → nameless");
+ok(!isNamelessETransfer("KEVIN CASSON e-Transfer Request Fulfilled"), "named owner e-transfer → NOT nameless (owner block handles)");
+ok(!isNamelessETransfer("Sherwin Williams IMO painting e-Transfer sent"), "named supplier e-transfer → NOT nameless (KB handles)");
+ok(!isNamelessETransfer("Sandra Clark - Frawley e-Transfer sent"), "named person e-transfer → NOT nameless");
+ok(!isNamelessETransfer("SHELL OIL 4821"), "an ordinary purchase is not an e-transfer");
+ok(!isNamelessETransfer("INTERAC PURCHASE - HOME DEPOT"), "interac debit purchase is not an e-transfer");
 
 console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"}: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

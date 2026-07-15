@@ -50,6 +50,37 @@ const LOAN_TOKENS = /\b(loan|line\s+of\s+credit|\bloc\b|term\s+loan|instal?lment
 const TRANSFER_TOKENS =
   /\b(online\s+transfer|funds?\s+transfer|internal\s+transfer|wire\s+transfer|ach\s+transfer|transfer\s+(to|from)|(xfer|tfr)\s+(to|from))\b/i;
 
+// E-transfer plumbing words — everything left after stripping these (and
+// numbers) is a counterparty name.
+const ETRANSFER_BOILERPLATE = new Set([
+  "e", "etransfer", "transfer", "tfr", "etfr", "emt", "interac", "online",
+  "request", "requested", "fulfilled", "sent", "send", "received", "receive",
+  "deposit", "account", "acct", "to", "from", "ref", "id", "incoming",
+  "outgoing", "autodeposit", "auto", "pending", "unknown", "vendor", "of",
+]);
+
+/**
+ * A NAMELESS e-transfer: e-transfer wording with no identifiable counterparty
+ * once the boilerplate is stripped (e.g. "e-Transfer Request Fulfilled",
+ * "Online Transfer to Deposit Account", vendor "Unknown"). Mike, 2026-07-15:
+ * "e-transfers without names should be uncategorized / ask client." Named
+ * e-transfers ("KEVIN CASSON…" → owner draw, "Sherwin Williams…" → supplies)
+ * return false so the owner-detection / KB / AI paths still handle them.
+ * Excludes bare "INTERAC PURCHASE/RETAIL" (debit-card purchases, not
+ * e-transfers).
+ */
+export function isNamelessETransfer(blob: string): boolean {
+  const lower = (blob || "").toLowerCase();
+  const hasETransfer =
+    /e[\s\-]?transfer/.test(lower) || /\be[\s\-]?tfr\b/.test(lower) || /\bemt\b/.test(lower);
+  if (!hasETransfer) return false;
+  const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean);
+  const hasName = tokens.some(
+    (t) => /^[a-z]/.test(t) && t.length >= 3 && !ETRANSFER_BOILERPLATE.has(t)
+  );
+  return !hasName;
+}
+
 const normText = (s: string) =>
   normalizeAccountName(s).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 

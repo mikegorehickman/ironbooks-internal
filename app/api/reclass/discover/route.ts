@@ -25,7 +25,7 @@ import {
 import { lookupVendor, normalizeVendorForLookup } from "@/lib/vendor-knowledge";
 import { runWebSearchAuto } from "@/lib/web-search-runner";
 import { normalizeAccountName } from "@/lib/account-name";
-import { classifyMoneyMovement, type BsAccount } from "@/lib/transfer-detection";
+import { classifyMoneyMovement, isNamelessETransfer, type BsAccount } from "@/lib/transfer-detection";
 import { getClientEndCloses, type DoubleEndCloseSummary } from "@/lib/double";
 
 /**
@@ -922,6 +922,27 @@ async function runFullCategorization(
         cacheHits++;
         continue;
       }
+    }
+
+    // E-transfer with no identifiable payee → ask_client, never the AI.
+    // Runs AFTER the KB + bank-rule lookups on purpose: the ~$1.50 Interac
+    // fee already matched the KB (→ Bank Charges), and any learned per-client
+    // rule already won. What's left is a bare "E Transfer Request" we can't
+    // attribute — the AI can only pick a P&L account, so left to it a real
+    // transfer/payment would be booked as an expense (Mike, 2026-07-15:
+    // "e-transfers without names should be uncategorized / ask client").
+    if (isNamelessETransfer(movementBlob(line))) {
+      preMatched.set(refId, {
+        ref_id: refId,
+        target_account_id: uncategorizedAccount?.qbo_account_id || null,
+        target_account_name: uncategorizedAccount?.account_name || null,
+        confidence: 0,
+        reasoning:
+          "e-Transfer with no identifiable payee — confirm with the client who it was to/from. Not an expense by default; the ~$1.50 Interac fee is booked separately to Bank Charges.",
+        decision: "ask_client",
+      });
+      stats.askClient++;
+      continue;
     }
 
     // No pre-match → needs AI
