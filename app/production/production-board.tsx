@@ -446,7 +446,15 @@ function BoardCard({
           status_note: extra?.status_note ?? note,
         }),
       });
-      if (res.ok) onChanged();
+      if (res.ok) {
+        onChanged();
+      } else {
+        // Never fail silently: a rejected move used to just do nothing, so a
+        // card that wouldn't move looked like a mystery (Mike, 2026-07-15 —
+        // "Ready for Manager Review" bounced off a stale DB CHECK constraint).
+        const body = await res.json().catch(() => ({}));
+        alert(body.error || `Couldn't update the board (HTTP ${res.status}).`);
+      }
     } finally {
       setSaving(false);
       setEditing(false);
