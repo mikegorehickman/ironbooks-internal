@@ -12,9 +12,11 @@ interface MergeProposal {
   sourceId: string;
   sourceName: string;
   sourceType: string;
+  action: "merge" | "leave";
   targetId: string | null;
   targetName: string | null;
   confident: boolean;
+  reason?: string;
 }
 
 interface Drift {
@@ -26,6 +28,7 @@ interface Drift {
   conformancePct: number;
   mergeTargets?: { id: string; name: string }[];
   mergeProposals?: MergeProposal[];
+  aiSuggestions?: boolean;
 }
 
 interface RowState {
@@ -69,7 +72,7 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
     setRetypeSel((prev) => ({ ...prev, [id]: new Set(d.wrongType.map((w) => w.id)) }));
     setCreateSel((prev) => ({ ...prev, [id]: new Set(d.missingRequired) }));
     const m: Record<string, string> = {};
-    for (const p of d.mergeProposals || []) m[p.sourceId] = p.targetId || "";
+    for (const p of d.mergeProposals || []) if (p.action === "merge") m[p.sourceId] = p.targetId || "";
     setMergeSel((prev) => ({ ...prev, [id]: m }));
   }
 
@@ -279,50 +282,78 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
                             </div>
                           </div>
                         )}
-                        {(d.mergeProposals?.length ?? 0) > 0 && (
-                          <div>
-                            <div className="font-semibold text-orange-600 mb-1">
-                              Merge duplicates into the master account ({d.mergeProposals!.length}) — approve one at a time; moves all YTD transactions
-                            </div>
-                            <div className="space-y-1.5">
-                              {d.mergeProposals!.map((p) => {
-                                const targets = d.mergeTargets || [];
-                                const sel = mergeSel[c.id]?.[p.sourceId] ?? "";
-                                return (
-                                  <div key={p.sourceId} className="flex items-center gap-2 flex-wrap bg-white border border-orange-100 rounded-lg px-2.5 py-1.5">
-                                    <span className="font-medium text-navy">{p.sourceName}</span>
-                                    <span className="text-ink-light">→</span>
-                                    <select
-                                      value={sel}
-                                      onChange={(e) => setMergeSel((prev) => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [p.sourceId]: e.target.value } }))}
-                                      className="text-xs border border-gray-300 rounded px-1.5 py-1 bg-white text-navy max-w-[220px]"
-                                    >
-                                      <option value="">Pick target…</option>
-                                      {targets.map((t) => (
-                                        <option key={t.id} value={t.id}>{t.name}</option>
-                                      ))}
-                                    </select>
-                                    {p.confident && sel === p.targetId && (
-                                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">suggested</span>
-                                    )}
-                                    <button
-                                      onClick={() => applyMerge(c.id, c.client_name, p, targets)}
-                                      disabled={!sel || mergeBusy === p.sourceId || !!mergeBusy}
-                                      className="text-[11px] font-bold text-white bg-orange-600 hover:bg-orange-700 px-2.5 py-1 rounded disabled:opacity-50 inline-flex items-center gap-1"
-                                    >
-                                      {mergeBusy === p.sourceId ? <Loader2 size={11} className="animate-spin" /> : null}
-                                      Approve merge
-                                    </button>
-                                    {mergeMsg[p.sourceId] && (
-                                      <span className="text-[11px] text-navy">{mergeMsg[p.sourceId]}</span>
-                                    )}
+                        {(() => {
+                          const proposals = d.mergeProposals || [];
+                          const merges = proposals.filter((p) => p.action === "merge");
+                          const left = proposals.filter((p) => p.action !== "merge");
+                          if (proposals.length === 0) return null;
+                          return (
+                            <div>
+                              <div className="font-semibold text-orange-600 mb-1 flex items-center gap-2">
+                                Merge duplicates into the master account ({merges.length})
+                                {d.aiSuggestions && <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">AI-suggested</span>}
+                              </div>
+                              {merges.length > 0 ? (
+                                <>
+                                  <div className="text-ink-light mb-1.5">Approve one at a time — each moves all YTD transactions onto the target and deactivates the source.</div>
+                                  <div className="space-y-1.5">
+                                    {merges.map((p) => {
+                                      const targets = d.mergeTargets || [];
+                                      const sel = mergeSel[c.id]?.[p.sourceId] ?? "";
+                                      return (
+                                        <div key={p.sourceId} className="bg-white border border-orange-100 rounded-lg px-2.5 py-1.5">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-medium text-navy">{p.sourceName}</span>
+                                            <span className="text-[10px] text-ink-light">[{p.sourceType}]</span>
+                                            <span className="text-ink-light">→</span>
+                                            <select
+                                              value={sel}
+                                              onChange={(e) => setMergeSel((prev) => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [p.sourceId]: e.target.value } }))}
+                                              className="text-xs border border-gray-300 rounded px-1.5 py-1 bg-white text-navy max-w-[220px]"
+                                            >
+                                              <option value="">Pick target…</option>
+                                              {targets.map((t) => (
+                                                <option key={t.id} value={t.id}>{t.name}</option>
+                                              ))}
+                                            </select>
+                                            {p.confident && sel === p.targetId && (
+                                              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">suggested</span>
+                                            )}
+                                            <button
+                                              onClick={() => applyMerge(c.id, c.client_name, p, targets)}
+                                              disabled={!sel || mergeBusy === p.sourceId || !!mergeBusy}
+                                              className="text-[11px] font-bold text-white bg-orange-600 hover:bg-orange-700 px-2.5 py-1 rounded disabled:opacity-50 inline-flex items-center gap-1"
+                                            >
+                                              {mergeBusy === p.sourceId ? <Loader2 size={11} className="animate-spin" /> : null}
+                                              Approve merge
+                                            </button>
+                                            {mergeMsg[p.sourceId] && (
+                                              <span className="text-[11px] text-navy">{mergeMsg[p.sourceId]}</span>
+                                            )}
+                                          </div>
+                                          {p.reason && <div className="text-[11px] text-ink-light mt-0.5 italic">{p.reason}</div>}
+                                        </div>
+                                      );
+                                    })}
                                   </div>
-                                );
-                              })}
+                                </>
+                              ) : (
+                                <div className="text-ink-light">No obvious merges — every off-standard account is a real bank / asset / loan / income account or has no clear home.</div>
+                              )}
+                              {left.length > 0 && (
+                                <details className="mt-1.5">
+                                  <summary className="text-ink-light cursor-pointer">{left.length} account(s) left as-is (not merge candidates)</summary>
+                                  <div className="text-[11px] text-ink-light mt-1 space-y-0.5 pl-2">
+                                    {left.map((p) => (
+                                      <div key={p.sourceId}><span className="font-medium text-navy">{p.sourceName}</span> <span className="opacity-70">[{p.sourceType}]</span>{p.reason ? ` — ${p.reason}` : ""}</div>
+                                    ))}
+                                  </div>
+                                </details>
+                              )}
+                              <div className="text-ink-light mt-1 italic">Renames/deletes and anything without an obvious target still go through the full per-client COA cleanup.</div>
                             </div>
-                            <div className="text-ink-light mt-1 italic">Renames/deletes and anything without an obvious target still go through the full per-client COA cleanup.</div>
-                          </div>
-                        )}
+                          );
+                        })()}
                         <div className="flex items-center gap-3 pt-1">
                           <button
                             onClick={() => applyFix(c.id, c.client_name)}

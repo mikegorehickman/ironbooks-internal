@@ -81,6 +81,24 @@ export async function POST(request: Request) {
     if (!source) return NextResponse.json({ error: "Source account no longer exists" }, { status: 400 });
     if (!target) return NextResponse.json({ error: "Target account no longer exists" }, { status: 400 });
 
+    // Type-safety guard (defense in depth — the UI only offers compatible
+    // targets): never merge a balance-sheet account (bank/card/AR/AP/asset/
+    // loan) and never cross income↔expense↔equity families.
+    const family = (t: string) => {
+      const x = (t || "").toLowerCase();
+      if (x === "income" || x === "other income") return "income";
+      if (x === "expense" || x === "other expense" || x === "cost of goods sold") return "expense";
+      if (x === "equity") return "equity";
+      return "other";
+    };
+    const srcFam = family(source.AccountType);
+    if (srcFam === "other") {
+      return NextResponse.json({ error: `"${source.Name}" is a ${source.AccountType} account — this tool only merges P&L/equity accounts, not banks, receivables, assets, or loans.` }, { status: 400 });
+    }
+    if (srcFam !== family(target.AccountType)) {
+      return NextResponse.json({ error: `Can't merge a ${source.AccountType} account into a ${target.AccountType} account — types must be compatible.` }, { status: 400 });
+    }
+
     const { lines, transactionsPulled } = await fetchTransactionsForAccount(
       clientLink.qbo_realm_id, accessToken, sourceId, ytdStart, ytdEnd
     );

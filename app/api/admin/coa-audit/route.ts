@@ -3,6 +3,7 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, fetchAllAccounts, QBOReauthRequiredError } from "@/lib/qbo";
 import { computeCoaDrift, type DriftMasterRow } from "@/lib/coa-drift";
 import { suggestMergeTarget, type MergeTarget } from "@/lib/coa-merge-suggest";
+import { suggestMergesWithAI, type AiMergeSource, type AiMergeTarget } from "@/lib/coa-merge-ai";
 import { normalizeAccountName } from "@/lib/account-name";
 
 export const dynamic = "force-dynamic";
@@ -70,24 +71,54 @@ export async function POST(request: Request) {
     const drift = computeCoaDrift(accounts as any, masterRows as DriftMasterRow[]);
 
     // Merge proposals: the client's own accounts that already match a master
-    // name are the valid merge TARGETS; suggest the best target for each
-    // non-master ("sprawl") account so the bookkeeper can approve/override
-    // one at a time. Suggestion only — the merge route re-validates + a human
-    // confirms before any transactions move.
-    const masterNorm = new Set(masterRows.map((m: any) => normalizeAccountName(m.account_name)));
+    // name are the valid merge TARGETS; an AI engine decides which non-master
+    // ("sprawl") accounts should merge into which target — and, crucially,
+    // which are NOT merge candidates at all (banks, cards, A/R–A/P, fixed
+    // assets like vehicles/sprayers, loans) and should be left alone. The
+    // bookkeeper approves/overrides one at a time; the merge route re-validates
+    // and a human confirms before any transactions move.
+    const masterTypeByNorm = new Map<string, string>();
+    for (const m of masterRows as any[]) masterTypeByNorm.set(normalizeAccountName(m.account_name), m.qbo_account_type || "");
     const mergeTargets: MergeTarget[] = accounts
-      .filter((a) => a.Active !== false && masterNorm.has(normalizeAccountName(a.Name)))
+      .filter((a) => a.Active !== false && masterTypeByNorm.has(normalizeAccountName(a.Name)))
       .map((a) => ({ id: a.Id, name: a.Name }));
+    const aiTargets: AiMergeTarget[] = mergeTargets.map((t) => ({
+      id: t.id,
+      name: t.name,
+      type: (accounts.find((a) => a.Id === t.id) as any)?.AccountType || masterTypeByNorm.get(normalizeAccountName(t.name)) || "",
+    }));
+    const aiSources: AiMergeSource[] = drift.nonMaster.map((nm) => ({ id: nm.id, name: nm.name, type: nm.type }));
+
+    let aiFailed = false;
+    let suggestionById = new Map<string, { action: string; targetId: string | null; targetName: string | null; confidence: number; reason: string }>();
+    try {
+      const ai = await suggestMergesWithAI(aiSources, aiTargets);
+      suggestionById = new Map(ai.map((s) => [s.sourceId, s]));
+    } catch (e) {
+      aiFailed = true; // fall back to the deterministic heuristic below
+    }
+
     const mergeProposals = drift.nonMaster.map((nm) => {
+      const ai = suggestionById.get(nm.id);
+      if (ai) {
+        return {
+          sourceId: nm.id, sourceName: nm.name, sourceType: nm.type,
+          action: ai.action, targetId: ai.targetId, targetName: ai.targetName,
+          confident: ai.action === "merge" && ai.confidence >= 0.85,
+          reason: ai.reason,
+        };
+      }
+      // Heuristic fallback (AI unavailable): only ever proposes P&L targets.
       const isCogs = /cost of goods/i.test(nm.type);
       const s = suggestMergeTarget(nm.name, isCogs, mergeTargets);
+      const mergeable = /income|expense|cost of goods|equity/i.test(nm.type);
       return {
-        sourceId: nm.id,
-        sourceName: nm.name,
-        sourceType: nm.type,
-        targetId: s.target?.id || null,
-        targetName: s.target?.name || null,
-        confident: s.confident,
+        sourceId: nm.id, sourceName: nm.name, sourceType: nm.type,
+        action: mergeable && s.confident ? "merge" : "leave",
+        targetId: mergeable && s.confident ? s.target?.id || null : null,
+        targetName: mergeable && s.confident ? s.target?.name || null : null,
+        confident: mergeable && s.confident,
+        reason: mergeable ? "" : `${nm.type} account — not a merge candidate`,
       };
     });
 
@@ -98,6 +129,7 @@ export async function POST(request: Request) {
       ...drift,
       mergeTargets,
       mergeProposals,
+      aiSuggestions: !aiFailed,
     });
   } catch (err: any) {
     if (err instanceof QBOReauthRequiredError) {
