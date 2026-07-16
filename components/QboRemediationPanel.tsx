@@ -82,6 +82,27 @@ export function QboRemediationPanel({
     });
   }
 
+  // Every invoice that CAN be selected right now: safe ones always, review
+  // ones only when the "include review" box is ticked.
+  const selectableIds = (preview?.invoices || [])
+    .filter((i) => i.safe || allowReview)
+    .map((i) => i.invoiceId);
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set<string>() : new Set(selectableIds));
+  }
+
+  // Turning OFF "include review" must drop the now-unselectable review
+  // invoices from the selection (else the count + void would still include them).
+  function setAllowReviewSafe(next: boolean) {
+    setAllowReview(next);
+    if (!next && preview) {
+      const reviewIds = new Set(preview.invoices.filter((i) => !i.safe).map((i) => i.invoiceId));
+      setSelected((prev) => new Set([...prev].filter((id) => !reviewIds.has(id))));
+    }
+  }
+
   async function run(dryRun: boolean) {
     if (!preview) return;
     const ids = [...selected];
@@ -182,7 +203,7 @@ export function QboRemediationPanel({
 
           {s.review > 0 && (
             <label className="flex items-start gap-2 mb-3 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 cursor-pointer">
-              <input type="checkbox" checked={allowReview} onChange={(e) => setAllowReview(e.target.checked)} className="mt-0.5 accent-amber-600" />
+              <input type="checkbox" checked={allowReview} onChange={(e) => setAllowReviewSafe(e.target.checked)} className="mt-0.5 accent-amber-600" />
               <span>
                 <ShieldAlert size={12} className="inline mr-1 text-amber-600" />
                 Include the {s.review} <strong>review</strong> invoices — only if you&apos;ve confirmed their payments aren&apos;t real cash. Off by default.
@@ -190,11 +211,33 @@ export function QboRemediationPanel({
             </label>
           )}
 
+          <div className="flex items-center gap-3 mb-2 text-xs">
+            <button
+              onClick={toggleAll}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1 font-semibold text-navy hover:bg-gray-50"
+            >
+              {allSelected ? "Clear all" : `Select all (${selectableIds.length})`}
+            </button>
+            <span className="text-ink-slate">{selected.size} selected</span>
+            {!allowReview && s.review > 0 && (
+              <span className="text-ink-light">· only {s.safe} safe invoice{s.safe === 1 ? "" : "s"} are selectable (tick the box above to include review)</span>
+            )}
+          </div>
+
           <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white mb-3 max-h-80 overflow-y-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 sticky top-0">
                 <tr className="text-[10px] uppercase tracking-wide text-ink-slate">
-                  <th className="px-3 py-2 w-8" />
+                  <th className="px-3 py-2 w-8">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      className="accent-red-600"
+                      aria-label="Select all invoices"
+                      title={allSelected ? "Clear all" : "Select all selectable invoices"}
+                    />
+                  </th>
                   <th className="text-left font-semibold px-3 py-2">Invoice</th>
                   <th className="text-left font-semibold px-3 py-2">Customer</th>
                   <th className="text-right font-semibold px-3 py-2">Amount</th>
