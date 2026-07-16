@@ -125,6 +125,21 @@ For job costing purposes, your best source of truth is usually your payroll syst
     title: "My Financial Reports",
     items: [
       {
+        id: "draft-vs-verified",
+        question: "My statements say DRAFT — what's the difference between draft and verified?",
+        answer: `For your first month or two with us, your statements go out marked **DRAFT**. That's on purpose.
+
+A draft is our best picture of your business from the information we have so far — but **you know your business best**. Before we call your books verified, we need you to gut-check a few things right in your portal:
+- Is all of your **revenue** showing?
+- Are **all** your bank accounts, credit cards, and loans included?
+- Have you paid anyone in **cash** that isn't reflected?
+- Does the **sales tax** look right?
+
+Answer those questions on the draft statement page (takes about 2 minutes), and either approve it or tell us what's missing. Once you've confirmed everything and our senior team signs off, your books graduate to **verified** — and every statement after that goes out without the DRAFT label.
+
+If you never respond, your statements simply stay marked DRAFT — so if you're seeing that label after a few months, the fastest fix is to complete the quick review in your portal.`,
+      },
+      {
         id: "when-statements",
         question: "When do I get my financial statements each month?",
         answer: `Your financial statement package — P&L, balance sheet, and cash flow statement — is published in your portal by the **24th of each month**, covering the prior month.

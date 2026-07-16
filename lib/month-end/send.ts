@@ -45,7 +45,8 @@ async function finalizeSuccessfulSend(
   pkg: MonthEndPackageRow,
   sentBy: string,
   lastMessageId: string | undefined,
-  partialErrors: string[]
+  partialErrors: string[],
+  sentAsDraft: boolean
 ): Promise<void> {
   const now = new Date().toISOString();
   const period = periodBounds({
@@ -53,21 +54,39 @@ async function finalizeSuccessfulSend(
     periodMonth: pkg.period_month,
   });
 
-  const { data: finalized } = await service
+  const finalizePatch: any = {
+    status: "sent",
+    portal_published_at: now,
+    email_sent_at: now,
+    email_message_id: lastMessageId || null,
+    sent_by: sentBy,
+    send_error: partialErrors.length ? partialErrors.join("; ").slice(0, 2000) : null,
+    // Permanent record that THIS month went out as DRAFT — the portal
+    // banner + gut-check panel key off it, and it survives graduation.
+    sent_as_draft: sentAsDraft,
+    updated_at: now,
+  };
+  let { data: finalized, error: finalizeError } = await service
     .from("month_end_packages")
-    .update({
-      status: "sent",
-      portal_published_at: now,
-      email_sent_at: now,
-      email_message_id: lastMessageId || null,
-      sent_by: sentBy,
-      send_error: partialErrors.length ? partialErrors.join("; ").slice(0, 2000) : null,
-      updated_at: now,
-    } as any)
+    .update(finalizePatch)
     .eq("id", pkg.id)
     .eq("status", "sending")
     .select("id")
     .maybeSingle();
+
+  // Pending-migration fallback: if migration 130's sent_as_draft column isn't
+  // applied yet, the patch 400s — retry without it so a schema lag can never
+  // block a close (same class as the migration-113 board blank-out).
+  if (!finalized && finalizeError) {
+    delete finalizePatch.sent_as_draft;
+    ({ data: finalized } = await service
+      .from("month_end_packages")
+      .update(finalizePatch)
+      .eq("id", pkg.id)
+      .eq("status", "sending")
+      .select("id")
+      .maybeSingle());
+  }
 
   if (!finalized) {
     throw new Error("Finalize failed — package status changed during send");
@@ -174,6 +193,43 @@ export async function deliverPackage(
     return { packageId, clientLinkId, clientName, ok: false, error: "No portal recipients" };
   }
 
+  // DRAFT vs VERIFIED stage (Mike, 2026-07-15). The client's stage decides
+  // the email framing + the portal banner — the bookkeeper's flow doesn't
+  // change. Fail-soft to draft=false so a pre-migration env sends the
+  // classic email rather than blocking the close.
+  let isDraft = false;
+  let nudge = false;
+  try {
+    const { data: stageRow } = await service
+      .from("client_links")
+      .select("statements_stage")
+      .eq("id", clientLinkId)
+      .single();
+    isDraft = stageRow?.statements_stage === "draft";
+    if (isDraft) {
+      // Nudge when an earlier month already went out as DRAFT and the client
+      // never responded in the portal (stay draft + remind, never auto-flip).
+      const { data: priorDrafts } = await service
+        .from("month_end_packages")
+        .select("id")
+        .eq("client_link_id", clientLinkId)
+        .eq("status", "sent")
+        .eq("sent_as_draft", true)
+        .neq("id", pkg.id)
+        .limit(1);
+      if (priorDrafts?.length) {
+        const { data: reviews } = await service
+          .from("statement_reviews")
+          .select("id")
+          .eq("client_link_id", clientLinkId)
+          .limit(1);
+        nudge = !reviews?.length;
+      }
+    }
+  } catch {
+    /* pre-migration env — classic verified-style email */
+  }
+
   let lastMessageId: string | undefined;
   const errors: string[] = [];
 
@@ -184,8 +240,9 @@ export async function deliverPackage(
         recipientEmail: r.email,
         recipientFirstName: r.firstName,
         period,
-        aiSummaryExcerpt: pkg.ai_summary!,
         portalUrl,
+        isDraft,
+        nudge,
       });
       if (result.ok) {
         lastMessageId = result.messageId;
@@ -199,7 +256,7 @@ export async function deliverPackage(
       return { packageId, clientLinkId, clientName, ok: false, error: errors.join("; ") };
     }
 
-    await finalizeSuccessfulSend(service, pkg, sentBy, lastMessageId, errors);
+    await finalizeSuccessfulSend(service, pkg, sentBy, lastMessageId, errors, isDraft);
 
     return {
       packageId,

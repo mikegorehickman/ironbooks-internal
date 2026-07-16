@@ -15,6 +15,9 @@ export interface PublishedMonthEndPackage {
   bsSnapshot: Record<string, unknown>;
   arApSnapshot: Record<string, unknown>;
   portalPublishedAt: string;
+  /** This month was delivered while the client was in the DRAFT stage —
+   *  the portal shows the DRAFT banner + gut-check panel. */
+  sentAsDraft: boolean;
 }
 
 export async function fetchPublishedPackage(
@@ -54,6 +57,7 @@ export async function fetchPublishedPackage(
     bsSnapshot: data.bs_snapshot || {},
     arApSnapshot: data.ar_ap_snapshot || {},
     portalPublishedAt: data.portal_published_at,
+    sentAsDraft: data.sent_as_draft === true,
   };
 }
 

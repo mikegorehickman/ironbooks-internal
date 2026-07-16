@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FileWarning } from "lucide-react";
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import { createServiceSupabase } from "@/lib/supabase";
 import { fetchPublishedPackage } from "@/lib/month-end/portal-package";
 import { PortalErrorState } from "../../../error-state";
 import type { PlSnapshot, BsSnapshot, ArApSnapshot } from "@/lib/month-end/types";
+import { DraftReviewPanel } from "./draft-review-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,20 @@ export default async function PortalStatementsPage({
   const bs = pkg.bsSnapshot as unknown as BsSnapshot;
   const arAp = pkg.arApSnapshot as unknown as ArApSnapshot;
 
+  // DRAFT months carry the gut-check panel; pull the client's existing
+  // response (if any) so an approved month shows the thank-you state.
+  let existingReviewStatus: "approved" | "questions" | "info_added" | null = null;
+  if (pkg.sentAsDraft) {
+    const { data: reviewRow } = await service
+      .from("statement_reviews" as any)
+      .select("status")
+      .eq("client_link_id", ctxResult.ctx.clientLinkId)
+      .eq("period_year", periodYear)
+      .eq("period_month", periodMonth)
+      .maybeSingle();
+    existingReviewStatus = ((reviewRow as any)?.status as any) || null;
+  }
+
   return (
     <div className="space-y-6">
       <Link href="/portal" className="inline-flex items-center gap-1 text-sm text-teal-dark hover:underline">
@@ -52,12 +67,34 @@ export default async function PortalStatementsPage({
       </Link>
 
       <div>
-        <div className="flex items-center gap-2 text-sm text-emerald-700">
-          <CheckCircle2 size={16} />
-          <span>{pkg.label} — closed and ready</span>
-        </div>
-        <h1 className="text-2xl font-bold text-navy mt-2">{pkg.label} Statements</h1>
+        {pkg.sentAsDraft ? (
+          <div className="flex items-center gap-2 text-sm text-amber-700">
+            <FileWarning size={16} />
+            <span>{pkg.label} — draft, awaiting your review</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-emerald-700">
+            <CheckCircle2 size={16} />
+            <span>{pkg.label} — closed and ready</span>
+          </div>
+        )}
+        <h1 className="text-2xl font-bold text-navy mt-2 flex items-center gap-3">
+          {pkg.label} Statements
+          {pkg.sentAsDraft && (
+            <span className="text-xs font-black tracking-widest bg-amber-600 text-white px-2.5 py-1 rounded-md align-middle">
+              DRAFT
+            </span>
+          )}
+        </h1>
       </div>
+
+      {pkg.sentAsDraft && (
+        <DraftReviewPanel
+          periodYear={periodYear}
+          periodMonth={periodMonth}
+          existingStatus={existingReviewStatus}
+        />
+      )}
 
       {pkg.aiSummary && (
         <div className="bg-gradient-to-br from-teal/10 to-teal/5 border-2 border-teal/30 rounded-2xl p-6">
