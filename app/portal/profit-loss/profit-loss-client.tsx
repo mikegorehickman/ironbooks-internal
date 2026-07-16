@@ -7,7 +7,7 @@ import {
   MessageCircleQuestion,
 } from "lucide-react";
 import type { ProfitLossData } from "@/lib/qbo-reports";
-import { classifyProfitLoss, marginVerdict, netMarginVerdict, type PortalPl, type PlBucket } from "@/lib/portal-pl";
+import { classifyProfitLoss, marginVerdict, netMarginVerdict, type PortalPl, type PlBucket, type PlLine } from "@/lib/portal-pl";
 import { AskAboutButton } from "../ask-about";
 
 /** The five ranges the server pre-fetches. */
@@ -212,6 +212,7 @@ export function ProfitLossClient({
             <BucketSection
               bucket={c.variableCosts}
               accent="amber"
+              groupByCategory
               periodLabel={range.label}
               onDrill={setDrillLine}
               onReclass={(t) => setReclassTarget(t)}
@@ -241,6 +242,7 @@ export function ProfitLossClient({
             <BucketSection
               bucket={c.fixedExpenses}
               accent="orange"
+              groupByCategory
               periodLabel={range.label}
               onDrill={setDrillLine}
               onReclass={(t) => setReclassTarget(t)}
@@ -437,6 +439,36 @@ function Legend({ color, label, value }: { color: string; label: string; value: 
 
 // ─── BUCKET SECTION ─────────────────────────────────────────────────────
 
+/** Roll a bucket's lines up into master-COA category groups with subtotal +
+ *  % of income. "Other …" categories sort last; everything else by size. */
+function groupLinesByCategory(
+  lines: PlLine[]
+): { key: string; label: string; subtotal: number; pct: number; lines: PlLine[] }[] {
+  const groups = new Map<string, { key: string; label: string; subtotal: number; pct: number; lines: PlLine[] }>();
+  for (const l of lines) {
+    const key = l.category?.key || "other_operating";
+    const label = l.category?.label || "Other Operating Expenses";
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, label, subtotal: 0, pct: 0, lines: [] };
+      groups.set(key, g);
+    }
+    g.subtotal += Math.abs(l.amount);
+    g.pct += l.pctOfIncome;
+    g.lines.push(l);
+  }
+  const arr = [...groups.values()];
+  for (const g of arr) g.lines.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  const isOther = (k: string) => k === "other_operating" || k === "cogs_other";
+  arr.sort((a, b) => {
+    const ao = isOther(a.key) ? 1 : 0;
+    const bo = isOther(b.key) ? 1 : 0;
+    if (ao !== bo) return ao - bo;
+    return b.subtotal - a.subtotal;
+  });
+  return arr;
+}
+
 function BucketSection({
   bucket,
   accent,
@@ -446,6 +478,7 @@ function BucketSection({
   range,
   note,
   emptyNote,
+  groupByCategory,
 }: {
   bucket: PlBucket;
   accent: "teal" | "amber" | "orange";
@@ -455,6 +488,9 @@ function BucketSection({
   range: { label: string; start: string; end: string };
   note?: string;
   emptyNote?: string;
+  /** Group lines under master-COA category sub-headers (Marketing, Office &
+   *  Admin, …) with a subtotal + % — for the expense buckets. */
+  groupByCategory?: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const accentBar = { teal: "bg-teal", amber: "bg-amber-400", orange: "bg-orange-500" }[accent];
@@ -494,65 +530,88 @@ function BucketSection({
           )}
           {bucket.lines.length === 0 ? (
             <div className="text-xs text-ink-light italic py-2">{emptyNote || "No items."}</div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {bucket.lines.map((l, i) => {
-                const drillable = !!l.account_id;
-                return (
-                  <div key={i} className="flex items-center justify-between gap-2 py-1.5 group">
-                    <button
-                      type="button"
-                      onClick={drillable ? () => onDrill({ label: l.label, account_id: l.account_id!, amount: l.amount }) : undefined}
-                      disabled={!drillable}
-                      className={`flex items-center gap-1 text-sm text-left min-w-0 ${
-                        drillable ? "cursor-pointer hover:text-teal-dark" : "cursor-default"
-                      }`}
-                    >
-                      {drillable && <ChevronRight size={11} className="text-ink-light group-hover:text-teal-dark flex-shrink-0" />}
-                      <span className="text-ink-slate truncate">{l.label}</span>
-                    </button>
+          ) : groupByCategory ? (
+            <div className="space-y-3">
+              {groupLinesByCategory(bucket.lines).map((grp) => (
+                <div key={grp.key}>
+                  <div className="flex items-center justify-between gap-2 pb-1 mb-0.5 border-b border-slate-200">
+                    <span className="text-[13px] font-bold text-navy">{grp.label}</span>
                     <div className="flex items-center gap-4 flex-shrink-0">
-                      <span className="font-mono text-sm text-navy w-24 text-right">{fmtMoney(l.amount)}</span>
-                      <span className="text-xs text-ink-light w-10 text-right font-mono hidden sm:block">
-                        {l.pctOfIncome >= 0.5 ? `${l.pctOfIncome.toFixed(1)}%` : "—"}
+                      <span className="font-mono text-sm font-bold text-navy w-24 text-right">{fmtMoney(grp.subtotal)}</span>
+                      <span className="text-xs font-semibold text-ink-slate w-10 text-right">
+                        {grp.pct >= 0.5 ? `${Math.round(grp.pct)}%` : "—"}
                       </span>
-                      <AskAboutButton
-                        kind={kind}
-                        label={l.label}
-                        amount={l.amount}
-                        period={periodLabel}
-                        context={{ section: bucket.label, account_id: l.account_id, pct_of_income: Math.round(l.pctOfIncome * 10) / 10 }}
-                        variant="icon"
-                      />
-                      {drillable && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onReclass({
-                              source_account_qbo_id: l.account_id!,
-                              source_account_name: l.label,
-                              period_label: range.label,
-                              period_start: range.start,
-                              period_end: range.end,
-                            });
-                          }}
-                          title="Suggest a different category for this line"
-                          className="text-ink-light hover:text-violet-600 transition-colors p-1 rounded hover:bg-violet-50"
-                        >
-                          <Tag size={13} />
-                        </button>
-                      )}
+                      <span className="w-[26px]" aria-hidden />
+                      <span className="w-[21px] hidden sm:block" aria-hidden />
                     </div>
                   </div>
-                );
-              })}
+                  <div className="divide-y divide-slate-100 pl-1">
+                    {grp.lines.map((l, i) => renderLine(l, i))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {bucket.lines.map((l, i) => renderLine(l, i))}
             </div>
           )}
         </div>
       )}
     </div>
   );
+
+  function renderLine(l: PlLine, i: number) {
+    const drillable = !!l.account_id;
+    return (
+      <div key={i} className="flex items-center justify-between gap-2 py-1.5 group">
+        <button
+          type="button"
+          onClick={drillable ? () => onDrill({ label: l.label, account_id: l.account_id!, amount: l.amount }) : undefined}
+          disabled={!drillable}
+          className={`flex items-center gap-1 text-sm text-left min-w-0 ${
+            drillable ? "cursor-pointer hover:text-teal-dark" : "cursor-default"
+          }`}
+        >
+          {drillable && <ChevronRight size={11} className="text-ink-light group-hover:text-teal-dark flex-shrink-0" />}
+          <span className="text-ink-slate truncate">{l.label}</span>
+        </button>
+        <div className="flex items-center gap-4 flex-shrink-0">
+          <span className="font-mono text-sm text-navy w-24 text-right">{fmtMoney(l.amount)}</span>
+          <span className="text-xs text-ink-light w-10 text-right font-mono hidden sm:block">
+            {l.pctOfIncome >= 0.5 ? `${l.pctOfIncome.toFixed(1)}%` : "—"}
+          </span>
+          <AskAboutButton
+            kind={kind}
+            label={l.label}
+            amount={l.amount}
+            period={periodLabel}
+            context={{ section: bucket.label, account_id: l.account_id, pct_of_income: Math.round(l.pctOfIncome * 10) / 10 }}
+            variant="icon"
+          />
+          {drillable && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onReclass({
+                  source_account_qbo_id: l.account_id!,
+                  source_account_name: l.label,
+                  period_label: range.label,
+                  period_start: range.start,
+                  period_end: range.end,
+                });
+              }}
+              title="Suggest a different category for this line"
+              className="text-ink-light hover:text-violet-600 transition-colors p-1 rounded hover:bg-violet-50"
+            >
+              <Tag size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 }
 
 // ─── RESULT BAND (Gross Profit / Net Profit) ──────────────────────────────
