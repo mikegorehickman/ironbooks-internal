@@ -31,7 +31,7 @@ export interface DriftAccount extends RetypeClientAccount {
 export interface CoaDrift {
   totalActive: number;      // active P&L/BS accounts considered
   matched: number;
-  wrongType: { name: string; currentType: string; masterType: string }[];
+  wrongType: { id: string; name: string; currentType: string; masterType: string }[];
   nonMaster: { name: string; type: string }[];
   missingRequired: string[];
   /** 0–100: matched ÷ (accounts that map to a master name). Higher = more
@@ -69,7 +69,7 @@ export function computeCoaDrift(accounts: DriftAccount[], masterRows: DriftMaste
     const inMaster = masterLeafByNorm.has(norm);
     const rt = retypeById.get(a.Id);
     if (inMaster && rt) {
-      wrongType.push({ name: a.Name, currentType: rt.current_type || "(none)", masterType: rt.new_type });
+      wrongType.push({ id: a.Id, name: a.Name, currentType: rt.current_type || "(none)", masterType: rt.new_type });
     } else if (inMaster) {
       matched++;
     } else {
