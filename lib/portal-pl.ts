@@ -22,6 +22,7 @@
  * Pure functions only — safe to import from server OR client components.
  */
 import type { ProfitLossData } from "./qbo-reports";
+import { categorizeExpenseLine } from "./pl-categories";
 
 export interface PlLine {
   label: string;
@@ -30,6 +31,10 @@ export interface PlLine {
   account_id: string | null;
   /** This line as a percent of total income (0 when income is 0). */
   pctOfIncome: number;
+  /** Master-COA display category ({key,label}); set on cost/expense lines so
+   *  the portal groups scattered accounts (e.g. all marketing) into one line
+   *  with a subtotal + %. Absent on income lines. */
+  category?: { key: string; label: string };
 }
 
 export type BucketKey = "income" | "variable" | "fixed" | "otherIncome" | "otherExpense";
@@ -196,7 +201,14 @@ export function classifyProfitLoss(pl: ProfitLossData): PortalPl {
       continue;
     }
     if (isOtherExpenseGroup(group)) {
-      otherExpenseLines.push(line);
+      // Fold "Other Expense"-typed accounts into operating expenses instead
+      // of a disconnected section below net profit (Mike, 2026-07-16: those
+      // "random expenses" belong in the standard fixed expenses). The
+      // account TYPE is still wrong in QBO — the books-standardization pass
+      // will retype them — but the client's P&L reads correctly now. Net
+      // profit is unchanged (it already subtracted them).
+      line.category = categorizeExpenseLine(item.label, false);
+      fixedLines.push(line);
       continue;
     }
     if (isIncomeGroup(group)) {
@@ -204,6 +216,7 @@ export function classifyProfitLoss(pl: ProfitLossData): PortalPl {
       continue;
     }
     if (isCogsGroup(group)) {
+      line.category = categorizeExpenseLine(item.label, true);
       variableLines.push(line);
       continue;
     }
@@ -211,10 +224,13 @@ export function classifyProfitLoss(pl: ProfitLossData): PortalPl {
     if (hasCogsSection) {
       // The file already separates direct costs via COGS — so anything left
       // here is genuine overhead.
+      line.category = categorizeExpenseLine(item.label, false);
       fixedLines.push(line);
     } else if (looksVariableByLabel(item.label)) {
+      line.category = categorizeExpenseLine(item.label, true);
       variableLines.push(line);
     } else {
+      line.category = categorizeExpenseLine(item.label, false);
       fixedLines.push(line);
     }
   }
