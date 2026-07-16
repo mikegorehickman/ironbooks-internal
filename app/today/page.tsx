@@ -9,6 +9,7 @@ import { ReclassRequestsWidget, type PendingReclassRequest } from "./reclass-req
 import { ClientInboxWidget, type InboundCommRow } from "./client-inbox-widget";
 import { CleanupDeadlinesWidget, type CleanupDeadlineRow } from "./cleanup-deadlines-widget";
 import { ClientAnswersWidget } from "./client-answers-widget";
+import { DraftApprovalsWidget, type DraftApprovalRow } from "./draft-approvals-widget";
 import { DuplicatesPanel } from "@/components/DuplicatesPanel";
 import { getClientAnswers, type ClientAnswerRow } from "@/lib/client-answers";
 import { QboHealthAlert } from "@/components/QboHealthAlert";
@@ -84,6 +85,47 @@ export default async function TodayPage({
 
   // Manager approvals, statement approvals, and escalations all moved to
   // Production → Approvals (/approvals) — no senior queues are fetched here.
+
+  // ─── Draft statement reviews (client approved / sent info) ───
+  // Clients still in the DRAFT stage whose portal response is waiting on a
+  // senior: approvals get the one-click "graduate to verified"; info/concern
+  // submissions get read before anything is flipped. Senior-only queue.
+  let draftApprovals: DraftApprovalRow[] = [];
+  if (isSenior) {
+    try {
+      const { data: reviews } = await service
+        .from("statement_reviews" as any)
+        .select("client_link_id, period_year, period_month, status, answers, note, updated_at")
+        .order("updated_at", { ascending: false });
+      const reviewRows = ((reviews as any[]) || []);
+      if (reviewRows.length > 0) {
+        const ids = Array.from(new Set(reviewRows.map((r) => r.client_link_id)));
+        const { data: cls } = await service
+          .from("client_links")
+          .select("id, client_name, statements_stage")
+          .in("id", ids);
+        const clientById = new Map(((cls as any[]) || []).map((c) => [c.id, c]));
+        const seen = new Set<string>();
+        for (const r of reviewRows) {
+          const c = clientById.get(r.client_link_id);
+          // Only clients still in draft; latest review per client wins.
+          if (!c || c.statements_stage !== "draft" || seen.has(r.client_link_id)) continue;
+          seen.add(r.client_link_id);
+          draftApprovals.push({
+            client_link_id: r.client_link_id,
+            client_name: c.client_name,
+            period_label: new Date(r.period_year, r.period_month - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" }),
+            status: r.status,
+            answers: r.answers || {},
+            note: r.note || null,
+            updated_at: r.updated_at,
+          });
+        }
+      }
+    } catch {
+      /* pre-migration env — no queue */
+    }
+  }
 
   // ─── Portal transaction flags from clients ───
   // These are independent of daily-recon enrollment — surface them even
@@ -539,6 +581,7 @@ export default async function TodayPage({
               {/* Client-waiting items first (a human is blocked on a reply),
                   then your cleanup deadlines. Each widget self-manages its
                   resolve state and hides at zero rows. */}
+              {draftApprovals.length > 0 && <DraftApprovalsWidget rows={draftApprovals} />}
               {pendingFlags.length > 0 && <ClientFlagsWidget flags={pendingFlags} />}
               {pendingReclassRequests.length > 0 && (
                 <ReclassRequestsWidget requests={pendingReclassRequests} />

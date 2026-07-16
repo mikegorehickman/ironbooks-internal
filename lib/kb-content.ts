@@ -125,6 +125,24 @@ For job costing purposes, your best source of truth is usually your payroll syst
     title: "My Financial Reports",
     items: [
       {
+        id: "draft-vs-verified",
+        question: "My statements say DRAFT — what's the difference between draft and verified?",
+        answer: `A **draft** statement is our best picture of your business from the information we have — accurate to what we can see, but not yet confirmed by the one person who knows the business best: **you**. A **verified** statement is one you've reviewed and signed off on.
+
+Why we do this: no matter how carefully we work from your bank feeds and statements, there are things we can't always see from the outside — an account or credit card we don't know about yet, cash you've paid out, or revenue that lands somewhere unexpected. A quick gut-check from you catches those fast.
+
+On the draft statement page in your portal, we ask you to confirm a few things (takes about 2 minutes):
+- Is all of your **revenue** showing?
+- Are **all** your bank accounts, credit cards, and loans included?
+- Have you paid anyone in **cash** that isn't reflected?
+
+Approve it if it looks right, or tell us what's missing and we'll fix it first. Once you've confirmed and our senior team signs off, your books become **verified** — and future statements arrive without the DRAFT label.
+
+**New clients** see drafts for the first month or two while we dial everything in. **Established clients** may see a draft too — that just means we'd like your sign-off on the accounts and revenue before we call the books verified. Either way, nothing changes about the work we're doing; the draft label simply means "please give this a look."
+
+If you never respond, your statements stay marked DRAFT — so if you see that label, the fastest fix is the quick review in your portal.`,
+      },
+      {
         id: "when-statements",
         question: "When do I get my financial statements each month?",
         answer: `Your financial statement package — P&L, balance sheet, and cash flow statement — is published in your portal by the **24th of each month**, covering the prior month.

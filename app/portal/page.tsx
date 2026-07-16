@@ -13,6 +13,7 @@ import { classifyProfitLoss, marginVerdict, netMarginVerdict, type PortalPl } fr
 import { getOrGenerateDashboardNarrative } from "@/lib/dashboard-narrative";
 import { PortalErrorState } from "./error-state";
 import { MonthEndBanner } from "./month-end-banner";
+import { DraftStageBanner } from "./draft-stage-banner";
 import { AskAboutButton } from "./ask-about";
 import { MarkdownText } from "./ask-ai/markdown-text";
 
@@ -122,6 +123,7 @@ export default async function PortalOverview() {
 
   return (
     <div className="space-y-6">
+      <DraftStageBanner clientLinkId={ctx.clientLinkId} />
       <MonthEndBanner />
 
       {/* ── Gradient hero ───────────────────────────────────────────── */}

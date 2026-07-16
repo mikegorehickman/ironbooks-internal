@@ -10,6 +10,7 @@ import {
   type DateRange,
 } from "@/lib/portal-data";
 import { PortalErrorState } from "../error-state";
+import { DraftStageBanner } from "../draft-stage-banner";
 import { StatementSwitcher } from "../financial-statements/statement-switcher";
 import { Sparkles, TrendingDown, TrendingUp } from "lucide-react";
 import { createServiceSupabase } from "@/lib/supabase";
@@ -115,6 +116,7 @@ export default async function CashFlowPage({
 
   return (
     <div className="space-y-6">
+      <DraftStageBanner clientLinkId={ctx.clientLinkId} />
       <StatementSwitcher active="cfs" />
 
       {/* ── Gradient hero ───────────────────────────────────────────── */}

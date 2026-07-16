@@ -12,6 +12,7 @@ import { createServiceSupabase } from "@/lib/supabase";
 import { PortalErrorState } from "../error-state";
 import { ProfitLossClient } from "./profit-loss-client";
 import { StatementSwitcher } from "../financial-statements/statement-switcher";
+import { DraftStageBanner } from "../draft-stage-banner";
 import { NoClosedPeriodState } from "../no-closed-period";
 
 /**
@@ -89,6 +90,7 @@ export default async function ProfitLossPage() {
 
   return (
     <div className="space-y-4">
+      <DraftStageBanner clientLinkId={ctx.clientLinkId} />
       <StatementSwitcher active="pnl" />
       <ProfitLossClient
         ranges={ranges as any}
