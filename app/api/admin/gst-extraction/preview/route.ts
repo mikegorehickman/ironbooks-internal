@@ -3,7 +3,12 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken } from "@/lib/qbo";
 import { fetchPLDetailAll, fetchProfitAndLoss } from "@/lib/qbo-reports";
 import { incomeAccountNamesFromSummary } from "@/lib/crm-invoice-revenue";
-import { buildExtractionPlan, type GstInputKind } from "@/lib/gst-extraction";
+import {
+  buildExtractionPlan,
+  classifyAccountKind,
+  normalizeAccountKey,
+  type GstInputKind,
+} from "@/lib/gst-extraction";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -67,8 +72,11 @@ export async function POST(request: Request) {
       .eq("industry", "painters")
       .not("gst_input_kind", "is", null));
   }
+  // Keyed by NORMALIZED name — live QBO names differ from master names by
+  // dash variants / "&" / punctuation (Maple City: "Subcontractors – Painting",
+  // "Telephone & Internet" all missed an exact lowercase join).
   const kindByAccount = new Map<string, GstInputKind>(
-    ((coaRows as any[]) || []).map((r) => [String(r.account_name).toLowerCase(), r.gst_input_kind as GstInputKind])
+    ((coaRows as any[]) || []).map((r) => [normalizeAccountKey(String(r.account_name)), r.gst_input_kind as GstInputKind])
   );
   if (kindByAccount.size === 0) {
     return NextResponse.json(
@@ -85,6 +93,24 @@ export async function POST(request: Request) {
       fetchProfitAndLoss(realm, token, start, end, "Cash"),
     ]);
     const incomeAccounts = incomeAccountNamesFromSummary(plSummary);
+
+    // Heuristic fallback for off-master expense accounts: classify by name
+    // pattern (same rules migration 130 seeded with) so "Rent - storage" or
+    // "Online Advertising – Google Ads" still get a plan. Every heuristic
+    // assignment is returned for review — only null-classified names stay
+    // unknown (and get no split).
+    const heuristicKinds: Array<{ account: string; kind: GstInputKind }> = [];
+    for (const row of plDetail) {
+      const key = normalizeAccountKey(row.account);
+      if (!key || kindByAccount.has(key)) continue;
+      const kind = classifyAccountKind(row.account);
+      if (kind) {
+        kindByAccount.set(key, kind);
+        heuristicKinds.push({ account: row.account, kind });
+      }
+    }
+    heuristicKinds.sort((a, b) => a.account.localeCompare(b.account));
+
     const plan = buildExtractionPlan(plDetail, province, incomeAccounts, kindByAccount);
     if (!plan) {
       return NextResponse.json(
@@ -104,6 +130,8 @@ export async function POST(request: Request) {
       accounts: plan.accounts,
       totals: plan.totals,
       skipped: plan.skipped,
+      // Off-master accounts classified by name heuristics — the review list.
+      heuristic_kinds: heuristicKinds,
       deposit_count: plan.deposits.length,
       expense_count: plan.expenses.length,
       deposits: plan.deposits.slice(0, CAP),

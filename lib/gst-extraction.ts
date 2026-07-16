@@ -29,6 +29,51 @@ import type { PLDetailRow } from "./qbo-reports";
 
 export type GstInputKind = "goods" | "service" | "none";
 
+/**
+ * Normalize an account name for master-COA joining: live QBO names differ from
+ * master names by dash variants, "&" vs "and", and stray punctuation (the same
+ * brittleness the bank-rules master resolution hit). "Subcontractors – Painting"
+ * and "subcontractors - painting" both normalize identically.
+ */
+export function normalizeAccountKey(s: string | null | undefined): string {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[‒–—―]/g, "-")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Heuristic input-kind for an account name that has NO master-COA match —
+ * mirrors migration 130's seeding rules so off-master client accounts
+ * ("Telephone & Internet", "Rent - storage") still get a plan instead of
+ * landing in the unknown bucket. Order matters: 'none' patterns win first
+ * (never claim ITCs on payroll/insurance/meals by accident). Returns null
+ * when genuinely unclassifiable — those stay "unknown" for human review.
+ */
+export function classifyAccountKind(name: string | null | undefined): GstInputKind | null {
+  const n = normalizeAccountKey(name);
+  if (!n) return null;
+  // Plural-safe: \b(word)\b misses "Materials"/"Donations", so suffixes use \w*.
+  if (
+    /\b(payroll|wages?|salar\w*|cpp|ei|wsib|workers? comp\w*|insurance|interest|bank charges?|loans?|meals?|entertainment|draws?|dividends?|income tax\w*|gst|hst|pst|qst|sales tax\w*|penalt\w*|fines?|donation\w*|amortiz\w*|depreciat\w*|owner\w*|shareholder\w*)\b/.test(n)
+  ) {
+    return "none";
+  }
+  if (
+    /\b(materials?|suppl\w*|tools?|equipment|software|phones?|telephone|internet|uniforms?|office|computers?|hardware)\b/.test(n)
+  ) {
+    return "goods";
+  }
+  if (
+    /\b(subcontract\w*|fuel|advertis\w*|marketing|promotions?|rent\w*|leas\w*|storage|repairs?|maintenance|accounting|bookkeep\w*|legal|professional|training|education|coach\w*|development|travel|parking|tolls?|utilit\w*|electric\w*|hydro|water|heat|gas bill|recruit\w*|processing fees?|dues|subscriptions?|memberships?|website|hosting|freight|shipping|disposal|waste|licens\w*)\b/.test(n)
+  ) {
+    return "service";
+  }
+  return null;
+}
+
 /** Provinces whose PST applies to GOODS purchases/sales. */
 const GOODS_PST = new Set(["BC", "SK", "MB"]);
 /** Provinces whose PST ALSO applies to (painting) SERVICES. */
@@ -196,8 +241,9 @@ const isDeposit = (t: string | null | undefined) => /^deposit$/i.test((t || "").
  * Build the full per-line plan for one client from cash-basis P&L detail.
  * - incomeAccounts: the client's real income account names (summary P&L) —
  *   only deposits into those are split.
- * - kindByAccount: master-COA gst_input_kind by lowercased account name;
- *   expense accounts missing from it are collected as unknown (no split).
+ * - kindByAccount: gst_input_kind keyed by normalizeAccountKey(account name)
+ *   (master-COA seeds + heuristic fallbacks — the caller builds it); expense
+ *   accounts missing from it are collected as unknown (no split).
  * - Idempotency: any txn that already has a line in a tax account is skipped
  *   entirely (the apply also re-checks the memo marker server-side).
  */
@@ -212,12 +258,12 @@ export function buildExtractionPlan(
   const accounts = taxAccountNamesFor(province);
 
   const rows = plDetail || [];
-  const taxAcctLc = new Set(ALL_TAX_ACCOUNT_NAMES.map((a) => a.toLowerCase()));
-  const incomeLc = new Set([...incomeAccounts].map((a) => a.toLowerCase()));
+  const taxAcctLc = new Set(ALL_TAX_ACCOUNT_NAMES.map((a) => normalizeAccountKey(a)));
+  const incomeLc = new Set([...incomeAccounts].map((a) => normalizeAccountKey(a)));
 
   // Idempotency: txns already carrying a tax-account line.
   const alreadySplitTxnIds = new Set(
-    rows.filter((r) => taxAcctLc.has((r.account || "").toLowerCase())).map((r) => r.txn_id)
+    rows.filter((r) => taxAcctLc.has(normalizeAccountKey(r.account))).map((r) => r.txn_id)
   );
 
   const deposits: DepositLinePlan[] = [];
@@ -229,7 +275,7 @@ export function buildExtractionPlan(
     if (!row.txn_id || alreadySplitTxnIds.has(row.txn_id)) continue;
     const rates = ratesFor(province, row.date);
     if (!rates) continue;
-    const acctLc = (row.account || "").toLowerCase();
+    const acctLc = normalizeAccountKey(row.account);
     const amount = Number(row.amount) || 0;
     if (!amount) continue;
 
