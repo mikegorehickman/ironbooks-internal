@@ -151,10 +151,13 @@ export async function POST(request: Request) {
     });
   } catch {}
 
-  // Server-side chain when the cron secret exists; the admin screen also
-  // drives the chain from the browser using next_offset (works either way,
-  // and double-firing a chunk is harmless — findings are newest-wins).
-  if (!done && process.env.CRON_SECRET) {
+  // Self-chain ONLY for cron-triggered runs (the caller carries the CRON_SECRET
+  // bearer). A browser/admin-initiated sweep must NOT hand off to a background
+  // self-fetch — that `after()` chain isn't reliably completing on Vercel, so
+  // the sweep silently stalled after the first 8-client chunk (Macatawa and
+  // everything past offset 8 never got scanned). Browser runs drive every
+  // chunk themselves via next_offset; cron runs self-chain here.
+  if (!done && cronOk) {
     const next = `${url.origin}${url.pathname}?offset=${nextOffset}&start=${start}&end=${end}`;
     after(async () => {
       try {
@@ -174,7 +177,8 @@ export async function POST(request: Request) {
     window: { start, end },
     chunk: { offset, scanned: totals.scanned, with_invoices: totals.with_invoices, flagged: totals.flagged, errors: errors.length, error_samples: errors.slice(0, 8) },
     next_offset: done ? null : nextOffset,
-    server_chained: !done && !!process.env.CRON_SECRET,
+    // Only true when THIS run self-chains (cron). Browser runs keep paginating.
+    server_chained: !done && cronOk,
     done,
   });
 }
