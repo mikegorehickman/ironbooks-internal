@@ -126,13 +126,21 @@ export function taxAccountNamesFor(province: string | null | undefined): {
   };
 }
 
-/** All tax-account names (any province variant) — used to detect already-split rows. */
+/** All tax-account names (any province variant) — used to detect already-split
+ *  rows. Includes the "Collected" fallbacks used when QBO's built-in
+ *  agency-linked account owns the primary name (it rejects direct postings —
+ *  "Tax Liability Account" 400, proven live on Maple City). */
 export const ALL_TAX_ACCOUNT_NAMES = [
   "GST/HST Payable",
   "GST/QST Payable",
   "GST/HST Recoverable (ITCs)",
   "GST/QST Recoverable (ITRs)",
   "PST Payable",
+  "GST/HST Collected",
+  "GST/QST Collected",
+  "PST Collected",
+  "GST/HST Recoverable (ITCs) - SNAP",
+  "GST/QST Recoverable (ITRs) - SNAP",
 ];
 
 export interface IncomeSplit {

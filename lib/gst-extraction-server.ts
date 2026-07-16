@@ -115,8 +115,70 @@ export interface TaxAccountIds {
 }
 
 /**
- * Find (normalized-name match) or create the tax accounts. When dryRun, never
- * creates — missing ones are reported in `created` as "would create: X".
+ * QBO's built-in sales-tax accounts are AGENCY-LINKED (AccountSubType
+ * GlobalTaxPayable / GlobalTaxSuspense) and the API REJECTS direct postings to
+ * them — proven live on Maple City: deposit update → 400 "Tax Liability
+ * Account". They also own the name "GST/HST Payable", so we can neither post
+ * to them nor create a same-named account.
+ */
+export function isAgencyLinkedAccount(a: { AccountSubType?: string | null }): boolean {
+  return /globaltax/i.test(String(a?.AccountSubType || ""));
+}
+
+export type TaxAccountTarget =
+  | { action: "use"; id: string; name: string }
+  | { action: "create"; name: string };
+
+/**
+ * Pick the postable account for a primary/fallback name pair. Pure.
+ *   - primary name exists and is postable → use it
+ *   - primary name owned by an agency-linked account → fallback name
+ *     (use if postable, else create fallback)
+ *   - nothing exists → create primary
+ */
+export function pickTaxAccountTarget(
+  accounts: Array<{ Id: string; Name: string; Active?: boolean; AccountSubType?: string }>,
+  primaryName: string,
+  fallbackName: string
+): TaxAccountTarget {
+  const byName = (name: string) =>
+    accounts.filter((a) => a.Active !== false && normalizeAccountKey(a.Name) === normalizeAccountKey(name));
+
+  const primaries = byName(primaryName);
+  const postablePrimary = primaries.find((a) => !isAgencyLinkedAccount(a));
+  if (postablePrimary) return { action: "use", id: postablePrimary.Id, name: postablePrimary.Name };
+
+  if (primaries.length > 0) {
+    // Name owned by an agency-linked account → fall back.
+    const fallbacks = byName(fallbackName);
+    const postableFallback = fallbacks.find((a) => !isAgencyLinkedAccount(a));
+    if (postableFallback) return { action: "use", id: postableFallback.Id, name: postableFallback.Name };
+    return { action: "create", name: fallbackName };
+  }
+  return { action: "create", name: primaryName };
+}
+
+/** Fallback ("Collected") names when QBO's agency account owns the primary. */
+export function taxFallbackNamesFor(province: string | null | undefined): {
+  payable: string;
+  recoverable: string;
+  pstPayable: string;
+} {
+  const qc = (province || "").toUpperCase() === "QC";
+  return {
+    payable: qc ? "GST/QST Collected" : "GST/HST Collected",
+    // The recoverable asset is OURS by construction — but a name collision
+    // with something unpostable is still possible; suffix keeps it distinct.
+    recoverable: qc ? "GST/QST Recoverable (ITRs) - SNAP" : "GST/HST Recoverable (ITCs) - SNAP",
+    pstPayable: "PST Collected",
+  };
+}
+
+/**
+ * Find (normalized-name match, agency-linked excluded) or create the tax
+ * accounts. When dryRun, never creates — reported as "would create: X".
+ * A duplicate-name create error (name reserved by an inactive account) falls
+ * back to the Collected name.
  */
 export async function ensureTaxAccounts(
   realm: string,
@@ -126,40 +188,49 @@ export async function ensureTaxAccounts(
   dryRun: boolean
 ): Promise<TaxAccountIds> {
   const names = taxAccountNamesFor(province);
+  const fallbacks = taxFallbackNamesFor(province);
   const all = await fetchAllAccounts(realm, token);
-  const byKey = new Map<string, QBOAccount>();
-  for (const a of all) {
-    if (a.Active === false) continue;
-    byKey.set(normalizeAccountKey(a.Name), a);
-  }
 
   const created: string[] = [];
   const resolve = async (
-    name: string,
+    primaryName: string,
+    fallbackName: string,
     accountType: string,
     accountSubType: string
   ): Promise<{ id: string; name: string }> => {
-    const hit = byKey.get(normalizeAccountKey(name));
-    if (hit) return { id: hit.Id, name: hit.Name };
+    const target = pickTaxAccountTarget(all as any[], primaryName, fallbackName);
+    if (target.action === "use") return { id: target.id, name: target.name };
     if (dryRun) {
-      created.push(`would create: ${name}`);
-      return { id: "", name };
+      created.push(`would create: ${target.name}`);
+      return { id: "", name: target.name };
     }
-    const acc = await createAccount(realm, token, {
-      name,
-      accountType,
-      accountSubType,
-      description: `Created by SNAP GST/HST extraction — ${GST_EXTRACTION_MEMO}`,
-    });
-    created.push(name);
-    byKey.set(normalizeAccountKey(name), acc);
-    return { id: acc.Id, name: acc.Name };
+    const make = async (name: string) =>
+      createAccount(realm, token, {
+        name,
+        accountType,
+        accountSubType,
+        description: `Created by SNAP GST/HST extraction — ${GST_EXTRACTION_MEMO}`,
+      });
+    try {
+      const acc = await make(target.name);
+      created.push(acc.Name);
+      return { id: acc.Id, name: acc.Name };
+    } catch (e: any) {
+      // Name reserved (e.g. inactive holder, or an agency account we couldn't
+      // see) → one fallback attempt with the Collected name.
+      if (target.name !== fallbackName) {
+        const acc = await make(fallbackName);
+        created.push(acc.Name);
+        return { id: acc.Id, name: acc.Name };
+      }
+      throw e;
+    }
   };
 
-  const payable = await resolve(names.payable, "Other Current Liability", "OtherCurrentLiabilities");
-  const recoverable = await resolve(names.recoverable, "Other Current Asset", "OtherCurrentAssets");
+  const payable = await resolve(names.payable, fallbacks.payable, "Other Current Liability", "OtherCurrentLiabilities");
+  const recoverable = await resolve(names.recoverable, fallbacks.recoverable, "Other Current Asset", "OtherCurrentAssets");
   const pstPayable = needPst
-    ? await resolve(names.pstPayable, "Other Current Liability", "OtherCurrentLiabilities")
+    ? await resolve(names.pstPayable, fallbacks.pstPayable, "Other Current Liability", "OtherCurrentLiabilities")
     : null;
   return { payable, recoverable, pstPayable, created };
 }
