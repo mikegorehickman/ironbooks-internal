@@ -4,6 +4,7 @@ import { fetchBalanceSheetSummary } from "@/lib/portal-data";
 import { PortalErrorState } from "../error-state";
 import { AskAboutButton } from "../ask-about";
 import { StatementSwitcher } from "../financial-statements/statement-switcher";
+import { DraftStageBanner } from "../draft-stage-banner";
 import { Sparkles, MessageSquare, Wallet, CreditCard, PiggyBank } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -91,6 +92,7 @@ export default async function BalanceSheetPage() {
 
   return (
     <div className="space-y-6">
+      <DraftStageBanner clientLinkId={ctx.clientLinkId} />
       <StatementSwitcher active="bs" />
 
       {/* ── Gradient hero ───────────────────────────────────────────── */}

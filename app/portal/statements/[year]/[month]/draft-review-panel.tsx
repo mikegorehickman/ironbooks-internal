@@ -94,20 +94,36 @@ export function DraftReviewPanel({
   }
 
   return (
-    <div className="rounded-2xl border-2 border-amber-300 bg-amber-50/70 p-5 space-y-4">
+    <div className="rounded-2xl border-2 border-amber-300 bg-white p-6 space-y-4">
       <div>
-        <div className="text-xs font-bold text-amber-800 uppercase tracking-wider">
-          Draft review — you know your business best
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black tracking-widest bg-amber-600 text-white px-2 py-0.5 rounded">
+            DRAFT
+          </span>
+          <span className="text-sm font-bold text-navy">
+            Why is this a draft — and what we need from you
+          </span>
         </div>
-        <p className="text-sm text-amber-900/90 mt-1 leading-relaxed">
-          This is our best picture from the information we have so far. Please take 2 minutes to
-          gut-check it — your answers are what let us mark your books <strong>verified</strong>.
+        <p className="text-sm text-ink-slate mt-2.5 leading-relaxed">
+          For the first month or two of doing your books, your statements go out as a{" "}
+          <strong>draft</strong> — this is completely normal and happens with every new client.
+          We&apos;ve built these numbers from the bank feeds, statements, and records we have so
+          far, but early on there can be things we can&apos;t see from the outside: an account or
+          credit card we don&apos;t know about yet, cash jobs, or revenue that lands somewhere
+          unexpected.
+        </p>
+        <p className="text-sm text-ink-slate mt-2 leading-relaxed">
+          <strong>You know your business best.</strong> Take 2 minutes to gut-check the numbers
+          above and answer the questions below. Once you confirm everything looks right — and our
+          senior team signs off — your books are marked <strong>verified</strong>, and future
+          statements arrive without the draft label. If anything looks off, tell us below and
+          we&apos;ll chase it down before anything is finalized.
         </p>
       </div>
 
       <div className="space-y-2.5">
         {QUESTIONS.map((q) => (
-          <div key={q.id} className="flex items-center justify-between gap-3 bg-white rounded-lg border border-amber-200 px-3 py-2.5">
+          <div key={q.id} className="flex items-center justify-between gap-3 bg-amber-50/50 rounded-lg border border-amber-200 px-3 py-2.5">
             <span className="text-sm text-navy">{q.label}</span>
             <div className="flex gap-1.5 flex-shrink-0">
               {([true, false] as const).map((v) => (
@@ -132,7 +148,7 @@ export function DraftReviewPanel({
       </div>
 
       <div>
-        <label className="text-xs font-semibold text-amber-900 block mb-1">
+        <label className="text-xs font-semibold text-navy block mb-1">
           Anything else that looks off, or info we&apos;re missing? {anyConcern && <span className="text-amber-700">(tell us more below)</span>}
         </label>
         <textarea
@@ -141,7 +157,7 @@ export function DraftReviewPanel({
           rows={3}
           maxLength={2000}
           placeholder="e.g. We opened a new credit card in May that I don't see here…"
-          className="w-full text-sm rounded-lg border border-amber-200 bg-white px-3 py-2 text-navy placeholder:text-gray-400 focus:outline-none focus:border-amber-500"
+          className="w-full text-sm rounded-lg border border-amber-200 bg-amber-50/30 px-3 py-2 text-navy placeholder:text-gray-400 focus:outline-none focus:border-amber-500"
         />
       </div>
 

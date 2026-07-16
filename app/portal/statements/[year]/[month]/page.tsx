@@ -88,13 +88,6 @@ export default async function PortalStatementsPage({
         </h1>
       </div>
 
-      {pkg.sentAsDraft && (
-        <DraftReviewPanel
-          periodYear={periodYear}
-          periodMonth={periodMonth}
-          existingStatus={existingReviewStatus}
-        />
-      )}
 
       {pkg.aiSummary && (
         <div className="bg-gradient-to-br from-teal/10 to-teal/5 border-2 border-teal/30 rounded-2xl p-6">
@@ -114,7 +107,7 @@ export default async function PortalStatementsPage({
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <div className="border rounded-xl p-5">
+        <div className="border rounded-xl p-5 bg-white">
           <h2 className="font-bold text-navy mb-3">Balance sheet (as of {bs.asOfDate})</h2>
           <dl className="space-y-2 text-sm">
             <Row label="Total assets" value={bs.totalAssets} />
@@ -123,7 +116,7 @@ export default async function PortalStatementsPage({
             <Row label="Cash on hand" value={bs.cashOnHand} />
           </dl>
         </div>
-        <div className="border rounded-xl p-5">
+        <div className="border rounded-xl p-5 bg-white">
           <h2 className="font-bold text-navy mb-3">Receivables & payables</h2>
           <dl className="space-y-2 text-sm">
             <Row label="Open A/R" value={arAp.openARTotal} suffix={` (${arAp.openARCount} invoices)`} />
@@ -132,6 +125,16 @@ export default async function PortalStatementsPage({
           </dl>
         </div>
       </div>
+
+      {/* Draft gut-check LAST — the client reads their statements first, then
+          confirms below (Mike, 2026-07-15: statements on top, review under). */}
+      {pkg.sentAsDraft && (
+        <DraftReviewPanel
+          periodYear={periodYear}
+          periodMonth={periodMonth}
+          existingStatus={existingReviewStatus}
+        />
+      )}
     </div>
   );
 }
@@ -146,7 +149,7 @@ function MetricCard({
   highlight?: boolean;
 }) {
   return (
-    <div className={`rounded-xl border p-4 ${highlight ? "border-teal/40 bg-teal/5" : ""}`}>
+    <div className={`rounded-xl border p-4 ${highlight ? "border-teal/40 bg-teal/5" : "bg-white"}`}>
       <div className="text-xs text-ink-slate uppercase tracking-wide">{label}</div>
       <div className="text-xl font-bold text-navy mt-1">
         ${Math.round(value).toLocaleString()}

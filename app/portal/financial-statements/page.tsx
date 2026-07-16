@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import { PortalErrorState } from "../error-state";
+import { DraftStageBanner } from "../draft-stage-banner";
 import { STATEMENTS } from "./statement-switcher";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export default async function FinancialStatementsHub() {
 
   return (
     <div className="space-y-6">
+      <DraftStageBanner clientLinkId={ctxResult.ctx.clientLinkId} />
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
         <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
         <div className="relative">
