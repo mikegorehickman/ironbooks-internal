@@ -32,7 +32,7 @@ export interface CoaDrift {
   totalActive: number;      // active P&L/BS accounts considered
   matched: number;
   wrongType: { id: string; name: string; currentType: string; masterType: string }[];
-  nonMaster: { name: string; type: string }[];
+  nonMaster: { id: string; name: string; type: string }[];
   missingRequired: string[];
   /** 0–100: matched ÷ (accounts that map to a master name). Higher = more
    *  conformant. Non-master accounts drag it down. */
@@ -73,7 +73,7 @@ export function computeCoaDrift(accounts: DriftAccount[], masterRows: DriftMaste
     } else if (inMaster) {
       matched++;
     } else {
-      nonMaster.push({ name: a.Name, type: a.AccountType || "(none)" });
+      nonMaster.push({ id: a.Id, name: a.Name, type: a.AccountType || "(none)" });
     }
   }
 
