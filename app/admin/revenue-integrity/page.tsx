@@ -19,12 +19,15 @@ export default async function RevenueIntegrityPage() {
   const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
   if ((actor as any)?.role !== "admin") redirect("/today");
 
+  // audit_log's timestamp column is `occurred_at`, not created_at — the old
+  // created_at select/order errored the query and this page silently showed no
+  // findings (same latent bug as the CRM-invoice page).
   const { data: rows } = await service
     .from("audit_log")
-    .select("created_at, event_type, request_payload")
+    .select("occurred_at, event_type, request_payload")
     .in("event_type", ["revenue_integrity_finding", "revenue_integrity_completed"])
-    .order("created_at", { ascending: false })
-    .limit(300);
+    .order("occurred_at", { ascending: false })
+    .limit(500);
 
   const all = ((rows as any[]) || []);
   const completed = all.find((r) => r.event_type === "revenue_integrity_completed");
@@ -34,7 +37,7 @@ export default async function RevenueIntegrityPage() {
     if (r.event_type !== "revenue_integrity_finding") continue;
     const p = r.request_payload || {};
     if (p.client_link_id && !byClient.has(p.client_link_id)) {
-      byClient.set(p.client_link_id, { ...p, found_at: r.created_at });
+      byClient.set(p.client_link_id, { ...p, found_at: r.occurred_at });
     }
   }
   const findings = [...byClient.values()].sort(
@@ -66,7 +69,7 @@ export default async function RevenueIntegrityPage() {
 
       {completed && (
         <p className="text-[11px] text-ink-light mb-4">
-          Last sweep completed {new Date(completed.created_at).toLocaleString()} ·{" "}
+          Last sweep completed {new Date(completed.occurred_at).toLocaleString()} ·{" "}
           {completed.request_payload?.window?.start} → {completed.request_payload?.window?.end}
         </p>
       )}

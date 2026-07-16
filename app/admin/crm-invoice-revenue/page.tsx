@@ -25,12 +25,16 @@ export default async function CrmInvoiceRevenuePage() {
   const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
   if (!["admin", "lead"].includes((actor as any)?.role || "")) redirect("/today");
 
+  // audit_log's timestamp column is `occurred_at` (NOT created_at) — selecting/
+  // ordering by a nonexistent column errors the query → null rows → the page
+  // showed "no findings" even after a sweep wrote dozens. Pull a generous limit
+  // so the newest run's findings (one row per client + prior runs) are covered.
   const { data: rows } = await service
     .from("audit_log")
-    .select("created_at, event_type, request_payload")
+    .select("occurred_at, event_type, request_payload")
     .in("event_type", ["crm_invoice_revenue_finding", "crm_invoice_sweep_completed"])
-    .order("created_at", { ascending: false })
-    .limit(400);
+    .order("occurred_at", { ascending: false })
+    .limit(2000);
 
   const all = (rows as any[]) || [];
   const completed = all.find((r) => r.event_type === "crm_invoice_sweep_completed");
@@ -40,7 +44,7 @@ export default async function CrmInvoiceRevenuePage() {
     if (r.event_type !== "crm_invoice_revenue_finding") continue;
     const p = r.request_payload || {};
     if (p.client_link_id && !byClient.has(p.client_link_id)) {
-      byClient.set(p.client_link_id, { ...p, found_at: r.created_at });
+      byClient.set(p.client_link_id, { ...p, found_at: r.occurred_at });
     }
   }
 
@@ -81,7 +85,7 @@ export default async function CrmInvoiceRevenuePage() {
       </p>
       <CrmInvoiceRevenueClient
         findings={findings}
-        lastCompletedAt={completed?.created_at || null}
+        lastCompletedAt={completed?.occurred_at || null}
         lastWindow={completed?.request_payload?.window || null}
       />
     </div>
