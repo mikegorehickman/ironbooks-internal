@@ -114,37 +114,41 @@ export async function POST(request: Request) {
     };
 
     const results: { deposits: WriteOutcome[]; expenses: WriteOutcome[] } = { deposits: [], expenses: [] };
-    let processed = 0;
+    // Cap counts WRITE ATTEMPTS only (split/failed). skipped_already /
+    // skipped_closed cost one throttled GET and must NOT consume the cap —
+    // the plan can't see the balance-sheet tax lines, so every already-done
+    // transaction reappears in the plan forever; counting them starved the
+    // queue and the run treadmilled at a fixed `remaining` (Maple City
+    // expenses: 8 identical passes stuck at 109).
+    let writes = 0;
     let remainingDeposits = 0;
     let remainingExpenses = 0;
 
     for (const [txnId, plans] of depositPlans) {
-      if (Date.now() - startTime > BUDGET_MS || processed >= MAX_TXNS_PER_PASS) {
+      if (Date.now() - startTime > BUDGET_MS || writes >= MAX_TXNS_PER_PASS) {
         remainingDeposits++;
         continue;
       }
-      processed++;
-      results.deposits.push(
-        await splitDepositTxn(realm, token, txnId, plans, accounts, {
-          dryRun,
-          closingDate,
-          snapshot: snapshot("Deposit", txnId),
-        })
-      );
+      const outcome = await splitDepositTxn(realm, token, txnId, plans, accounts, {
+        dryRun,
+        closingDate,
+        snapshot: snapshot("Deposit", txnId),
+      });
+      if (outcome.outcome === "split" || outcome.outcome === "failed") writes++;
+      results.deposits.push(outcome);
     }
     for (const [txnId, group] of expensePlans) {
-      if (Date.now() - startTime > BUDGET_MS || processed >= MAX_TXNS_PER_PASS) {
+      if (Date.now() - startTime > BUDGET_MS || writes >= MAX_TXNS_PER_PASS) {
         remainingExpenses++;
         continue;
       }
-      processed++;
-      results.expenses.push(
-        await splitExpenseTxn(realm, token, group.txnType, txnId, group.rows, accounts, {
-          dryRun,
-          closingDate,
-          snapshot: snapshot(group.txnType, txnId),
-        })
-      );
+      const outcome = await splitExpenseTxn(realm, token, group.txnType, txnId, group.rows, accounts, {
+        dryRun,
+        closingDate,
+        snapshot: snapshot(group.txnType, txnId),
+      });
+      if (outcome.outcome === "split" || outcome.outcome === "failed") writes++;
+      results.expenses.push(outcome);
     }
 
     const tally = (list: WriteOutcome[]) => ({

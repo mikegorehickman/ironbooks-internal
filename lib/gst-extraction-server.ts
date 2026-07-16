@@ -419,7 +419,7 @@ export async function splitDepositTxn(
     await updateEntity(realm, token, "deposit", entity, res.lines!);
     return { txn_id: txnId, outcome: "split" };
   } catch (e: any) {
-    return { txn_id: txnId, outcome: "failed", detail: String(e?.message || e).slice(0, 160) };
+    return { txn_id: txnId, outcome: "failed", detail: String(e?.message || e).slice(0, 500) };
   }
 }
 
@@ -451,7 +451,7 @@ export async function splitExpenseTxn(
     await updateEntity(realm, token, resource, entity, res.lines!);
     return { txn_id: txnId, outcome: "split" };
   } catch (e: any) {
-    return { txn_id: txnId, outcome: "failed", detail: String(e?.message || e).slice(0, 160) };
+    return { txn_id: txnId, outcome: "failed", detail: String(e?.message || e).slice(0, 500) };
   }
 }
 
