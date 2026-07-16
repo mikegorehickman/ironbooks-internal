@@ -8,13 +8,24 @@ interface ClientRow {
   client_name: string;
 }
 
+interface MergeProposal {
+  sourceId: string;
+  sourceName: string;
+  sourceType: string;
+  targetId: string | null;
+  targetName: string | null;
+  confident: boolean;
+}
+
 interface Drift {
   totalActive: number;
   matched: number;
   wrongType: { id: string; name: string; currentType: string; masterType: string }[];
-  nonMaster: { name: string; type: string }[];
+  nonMaster: { id: string; name: string; type: string }[];
   missingRequired: string[];
   conformancePct: number;
+  mergeTargets?: { id: string; name: string }[];
+  mergeProposals?: MergeProposal[];
 }
 
 interface RowState {
@@ -42,15 +53,54 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
   // Per-client selection of which fixes to apply.
   const [retypeSel, setRetypeSel] = useState<Record<string, Set<string>>>({});
   const [createSel, setCreateSel] = useState<Record<string, Set<string>>>({});
+  // Merge: chosen target per source account (clientId → sourceId → targetId),
+  // in-flight source, and per-source result message.
+  const [mergeSel, setMergeSel] = useState<Record<string, Record<string, string>>>({});
+  const [mergeBusy, setMergeBusy] = useState<string | null>(null);
+  const [mergeMsg, setMergeMsg] = useState<Record<string, string>>({});
 
   function patch(id: string, p: Partial<RowState>) {
     setRows((prev) => ({ ...prev, [id]: { ...prev[id], ...p } }));
   }
 
-  // When drift arrives, default every fixable item to selected.
+  // When drift arrives, default every fixable item to selected + pre-fill each
+  // merge's target with the suggestion.
   function seedSelection(id: string, d: Drift) {
     setRetypeSel((prev) => ({ ...prev, [id]: new Set(d.wrongType.map((w) => w.id)) }));
     setCreateSel((prev) => ({ ...prev, [id]: new Set(d.missingRequired) }));
+    const m: Record<string, string> = {};
+    for (const p of d.mergeProposals || []) m[p.sourceId] = p.targetId || "";
+    setMergeSel((prev) => ({ ...prev, [id]: m }));
+  }
+
+  async function applyMerge(clientId: string, clientName: string, p: MergeProposal, targets: { id: string; name: string }[]) {
+    const targetId = mergeSel[clientId]?.[p.sourceId] || "";
+    if (!targetId) return;
+    const targetName = targets.find((t) => t.id === targetId)?.name || "the target";
+    if (!confirm(`Merge "${p.sourceName}" → "${targetName}" for ${clientName}?\n\nThis moves ALL year-to-date transactions (including already-closed months) onto "${targetName}" and deactivates "${p.sourceName}". This rewrites the books.`)) return;
+    setMergeBusy(p.sourceId);
+    setMergeMsg((m) => ({ ...m, [p.sourceId]: "" }));
+    try {
+      const res = await fetch("/api/admin/coa-audit/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_link_id: clientId, source_account_id: p.sourceId, target_account_id: targetId }),
+      });
+      const data = await res.json();
+      if (data.reauth) { setMergeMsg((m) => ({ ...m, [p.sourceId]: "QBO reconnect needed" })); return; }
+      if (data.tooLarge) { setMergeMsg((m) => ({ ...m, [p.sourceId]: data.error })); return; }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const parts = [`${data.linesMoved} line(s) moved`];
+      if (data.inactivated) parts.push("source deactivated");
+      if (data.failures?.length) parts.push(`${data.failures.length} failed`);
+      setMergeMsg((m) => ({ ...m, [p.sourceId]: parts.join(" · ") }));
+      // Re-scan to refresh conformance + drop the merged account.
+      await scan(clientId);
+    } catch (e: any) {
+      setMergeMsg((m) => ({ ...m, [p.sourceId]: e.message }));
+    } finally {
+      setMergeBusy(null);
+    }
   }
 
   async function scan(id: string): Promise<void> {
@@ -229,11 +279,48 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
                             </div>
                           </div>
                         )}
-                        {d.nonMaster.length > 0 && (
+                        {(d.mergeProposals?.length ?? 0) > 0 && (
                           <div>
-                            <span className="font-semibold text-orange-600">Non-master ({d.nonMaster.length}):</span>{" "}
-                            {d.nonMaster.map((n) => n.name).join(" · ")}
-                            <div className="text-ink-light mt-0.5 italic">These need merging/renaming into the master accounts — done in the reviewed per-client COA cleanup (they move transactions), not here.</div>
+                            <div className="font-semibold text-orange-600 mb-1">
+                              Merge duplicates into the master account ({d.mergeProposals!.length}) — approve one at a time; moves all YTD transactions
+                            </div>
+                            <div className="space-y-1.5">
+                              {d.mergeProposals!.map((p) => {
+                                const targets = d.mergeTargets || [];
+                                const sel = mergeSel[c.id]?.[p.sourceId] ?? "";
+                                return (
+                                  <div key={p.sourceId} className="flex items-center gap-2 flex-wrap bg-white border border-orange-100 rounded-lg px-2.5 py-1.5">
+                                    <span className="font-medium text-navy">{p.sourceName}</span>
+                                    <span className="text-ink-light">→</span>
+                                    <select
+                                      value={sel}
+                                      onChange={(e) => setMergeSel((prev) => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [p.sourceId]: e.target.value } }))}
+                                      className="text-xs border border-gray-300 rounded px-1.5 py-1 bg-white text-navy max-w-[220px]"
+                                    >
+                                      <option value="">Pick target…</option>
+                                      {targets.map((t) => (
+                                        <option key={t.id} value={t.id}>{t.name}</option>
+                                      ))}
+                                    </select>
+                                    {p.confident && sel === p.targetId && (
+                                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">suggested</span>
+                                    )}
+                                    <button
+                                      onClick={() => applyMerge(c.id, c.client_name, p, targets)}
+                                      disabled={!sel || mergeBusy === p.sourceId || !!mergeBusy}
+                                      className="text-[11px] font-bold text-white bg-orange-600 hover:bg-orange-700 px-2.5 py-1 rounded disabled:opacity-50 inline-flex items-center gap-1"
+                                    >
+                                      {mergeBusy === p.sourceId ? <Loader2 size={11} className="animate-spin" /> : null}
+                                      Approve merge
+                                    </button>
+                                    {mergeMsg[p.sourceId] && (
+                                      <span className="text-[11px] text-navy">{mergeMsg[p.sourceId]}</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="text-ink-light mt-1 italic">Renames/deletes and anything without an obvious target still go through the full per-client COA cleanup.</div>
                           </div>
                         )}
                         <div className="flex items-center gap-3 pt-1">

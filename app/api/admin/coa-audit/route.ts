@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, fetchAllAccounts, QBOReauthRequiredError } from "@/lib/qbo";
 import { computeCoaDrift, type DriftMasterRow } from "@/lib/coa-drift";
+import { suggestMergeTarget, type MergeTarget } from "@/lib/coa-merge-suggest";
+import { normalizeAccountName } from "@/lib/account-name";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -66,11 +68,36 @@ export async function POST(request: Request) {
     const accessToken = await getValidToken(clientLink.id, service as any, "ironbooks/api/admin/coa-audit");
     const accounts = await fetchAllAccounts(clientLink.qbo_realm_id, accessToken);
     const drift = computeCoaDrift(accounts as any, masterRows as DriftMasterRow[]);
+
+    // Merge proposals: the client's own accounts that already match a master
+    // name are the valid merge TARGETS; suggest the best target for each
+    // non-master ("sprawl") account so the bookkeeper can approve/override
+    // one at a time. Suggestion only — the merge route re-validates + a human
+    // confirms before any transactions move.
+    const masterNorm = new Set(masterRows.map((m: any) => normalizeAccountName(m.account_name)));
+    const mergeTargets: MergeTarget[] = accounts
+      .filter((a) => a.Active !== false && masterNorm.has(normalizeAccountName(a.Name)))
+      .map((a) => ({ id: a.Id, name: a.Name }));
+    const mergeProposals = drift.nonMaster.map((nm) => {
+      const isCogs = /cost of goods/i.test(nm.type);
+      const s = suggestMergeTarget(nm.name, isCogs, mergeTargets);
+      return {
+        sourceId: nm.id,
+        sourceName: nm.name,
+        sourceType: nm.type,
+        targetId: s.target?.id || null,
+        targetName: s.target?.name || null,
+        confident: s.confident,
+      };
+    });
+
     return NextResponse.json({
       client_link_id: clientLink.id,
       client_name: clientLink.client_name,
       jurisdiction,
       ...drift,
+      mergeTargets,
+      mergeProposals,
     });
   } catch (err: any) {
     if (err instanceof QBOReauthRequiredError) {
