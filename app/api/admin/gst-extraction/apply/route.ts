@@ -75,8 +75,12 @@ export async function POST(request: Request) {
     const token = await getValidToken(clientLinkId, service as any);
     const realm = (client as any).qbo_realm_id as string;
 
-    // Re-plan live (guard 3).
-    const ctx = await resolveExtractionContext(service, client as any, token, start, end);
+    // Re-plan live (guard 3). exclude_vendors carries through so ITC-excluded
+    // vendors (unregistered small suppliers) hold on the real run too.
+    const excludeVendors: string[] = Array.isArray(body.exclude_vendors)
+      ? body.exclude_vendors.map(String)
+      : [];
+    const ctx = await resolveExtractionContext(service, client as any, token, start, end, excludeVendors);
     if ("error" in ctx) return NextResponse.json({ error: ctx.error }, { status: 400 });
     const { plan } = ctx;
 

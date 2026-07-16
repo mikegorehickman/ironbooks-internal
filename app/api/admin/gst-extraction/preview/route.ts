@@ -48,11 +48,15 @@ export async function POST(request: Request) {
     );
   }
 
+  const excludeVendors: string[] = Array.isArray(body.exclude_vendors)
+    ? body.exclude_vendors.map(String)
+    : [];
+
   try {
     const token = await getValidToken(clientLinkId, service as any);
     // SHARED resolver (lib/gst-extraction-server.ts) — the exact same context
     // the apply endpoint rebuilds, so preview and apply can never drift.
-    const ctx = await resolveExtractionContext(service, client as any, token, start, end);
+    const ctx = await resolveExtractionContext(service, client as any, token, start, end, excludeVendors);
     if ("error" in ctx) return NextResponse.json({ error: ctx.error }, { status: 400 });
     const { plan, heuristicKinds } = ctx;
 
@@ -69,6 +73,9 @@ export async function POST(request: Request) {
       skipped: plan.skipped,
       // Off-master accounts classified by name heuristics — the review list.
       heuristic_kinds: heuristicKinds,
+      // ITC per vendor, largest first — spot unregistered small suppliers
+      // (person-named vendors) and pass them back as exclude_vendors.
+      vendor_itc_summary: plan.vendorItcSummary.slice(0, 100),
       deposit_count: plan.deposits.length,
       expense_count: plan.expenses.length,
       deposits: plan.deposits.slice(0, CAP),

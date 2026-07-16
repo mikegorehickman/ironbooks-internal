@@ -45,7 +45,9 @@ export async function resolveExtractionContext(
   client: { qbo_realm_id: string; state_province: string | null; industry: string | null },
   token: string,
   start: string,
-  end: string
+  end: string,
+  /** Raw vendor names to exclude from ITC splitting (normalized internally). */
+  excludeVendors?: string[]
 ): Promise<ExtractionContext | { error: string }> {
   const province = (client.state_province || "").toUpperCase();
   const industry = client.industry || "painters";
@@ -92,7 +94,11 @@ export async function resolveExtractionContext(
   }
   heuristicKinds.sort((a, b) => a.account.localeCompare(b.account));
 
-  const plan = buildExtractionPlan(plDetail, province, incomeAccounts, kindByAccount);
+  const plan = buildExtractionPlan(plDetail, province, incomeAccounts, kindByAccount, {
+    excludeVendors: excludeVendors?.length
+      ? new Set(excludeVendors.map((v) => normalizeAccountKey(v)).filter(Boolean))
+      : undefined,
+  });
   if (!plan) {
     return { error: `Province "${province || "(none)"}" isn't a recognized Canadian province — set it on the client profile first` };
   }
