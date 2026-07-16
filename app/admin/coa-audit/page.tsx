@@ -1,0 +1,41 @@
+import { AppShell } from "@/components/AppShell";
+import { TopBar } from "@/components/TopBar";
+import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { redirect } from "next/navigation";
+import { CoaAuditClient } from "./audit-client";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * /admin/coa-audit — READ-ONLY fleet drift report: how conformant each
+ * client's live QBO chart is to the master COA. Triage layer for the
+ * "apply the master COA to every client" standardization phase. No writes.
+ */
+export default async function CoaAuditPage() {
+  const supabase = await createServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/auth/login");
+
+  const service = createServiceSupabase();
+  const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
+  if ((actor as any)?.role !== "admin") redirect("/");
+
+  const { data: clients } = await service
+    .from("client_links")
+    .select("id, client_name")
+    .eq("is_active", true)
+    .not("qbo_realm_id", "is", null)
+    .order("client_name");
+
+  return (
+    <AppShell>
+      <TopBar
+        title="COA Audit"
+        subtitle="How close each client's QuickBooks chart is to the master COA — read-only triage"
+      />
+      <div className="px-8 py-6 max-w-5xl">
+        <CoaAuditClient clients={(clients || []).map((c) => ({ id: c.id, client_name: c.client_name }))} />
+      </div>
+    </AppShell>
+  );
+}
