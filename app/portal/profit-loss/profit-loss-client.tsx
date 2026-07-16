@@ -31,10 +31,15 @@ export function ProfitLossClient({
   ranges,
   data,
   closedSource,
+  singleMonth = false,
 }: {
   ranges: Record<FixedRangeKey, { label: string; start: string; end: string }>;
   data: Record<FixedRangeKey, ProfitLossData | null>;
   closedSource: "reclass_job_closed" | "cleanup_completed" | "calendar_default";
+  /** Embedded on the draft statement page for ONE fixed month — hide the
+   *  gradient hero + range switcher; keep the full P&L + line drill-down
+   *  (Mike, 2026-07-16). */
+  singleMonth?: boolean;
 }) {
   const [activeRange, setActiveRange] = useState<RangeKey>("lastMonth");
   const [drillLine, setDrillLine] = useState<{
@@ -99,7 +104,8 @@ export function ProfitLossClient({
 
   return (
     <div className="space-y-6">
-      {/* ── Gradient hero ───────────────────────────────────────────── */}
+      {/* ── Gradient hero ── hidden when embedded for a single month ──── */}
+      {!singleMonth && (
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
         <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
         <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
@@ -124,6 +130,7 @@ export function ProfitLossClient({
           </div>
         </div>
       </div>
+      )}
 
       {/* Notice to Reader — cash-basis framing so clients read the numbers right */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-ink-slate leading-relaxed">

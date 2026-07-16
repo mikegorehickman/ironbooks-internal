@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen, ChevronDown, ChevronRight, Loader2, Search, Sparkles, X,
 } from "lucide-react";
@@ -79,6 +79,18 @@ export function KnowledgeBaseClient({ categories }: { categories: KBCategory[] }
   const [error, setError] = useState<string | null>(null);
   const [openItems, setOpenItems] = useState<Set<string>>(new Set());
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // Deep link: /portal/knowledge-base?open=<id> expands + scrolls to a
+  // specific answer (e.g. the "What's this?" link beside the DRAFT badge).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (!id) return;
+    setOpenItems((prev) => new Set(prev).add(id));
+    const t = setTimeout(() => {
+      itemRefs.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+    return () => clearTimeout(t);
+  }, []);
 
   const totalCount = useMemo(
     () => categories.reduce((s, c) => s + c.items.length, 0),

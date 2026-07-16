@@ -127,17 +127,20 @@ For job costing purposes, your best source of truth is usually your payroll syst
       {
         id: "draft-vs-verified",
         question: "My statements say DRAFT — what's the difference between draft and verified?",
-        answer: `For your first month or two with us, your statements go out marked **DRAFT**. That's on purpose.
+        answer: `A **draft** statement is our best picture of your business from the information we have — accurate to what we can see, but not yet confirmed by the one person who knows the business best: **you**. A **verified** statement is one you've reviewed and signed off on.
 
-A draft is our best picture of your business from the information we have so far — but **you know your business best**. Before we call your books verified, we need you to gut-check a few things right in your portal:
+Why we do this: no matter how carefully we work from your bank feeds and statements, there are things we can't always see from the outside — an account or credit card we don't know about yet, cash you've paid out, or revenue that lands somewhere unexpected. A quick gut-check from you catches those fast.
+
+On the draft statement page in your portal, we ask you to confirm a few things (takes about 2 minutes):
 - Is all of your **revenue** showing?
 - Are **all** your bank accounts, credit cards, and loans included?
 - Have you paid anyone in **cash** that isn't reflected?
-- Does the **sales tax** look right?
 
-Answer those questions on the draft statement page (takes about 2 minutes), and either approve it or tell us what's missing. Once you've confirmed everything and our senior team signs off, your books graduate to **verified** — and every statement after that goes out without the DRAFT label.
+Approve it if it looks right, or tell us what's missing and we'll fix it first. Once you've confirmed and our senior team signs off, your books become **verified** — and future statements arrive without the DRAFT label.
 
-If you never respond, your statements simply stay marked DRAFT — so if you're seeing that label after a few months, the fastest fix is to complete the quick review in your portal.`,
+**New clients** see drafts for the first month or two while we dial everything in. **Established clients** may see a draft too — that just means we'd like your sign-off on the accounts and revenue before we call the books verified. Either way, nothing changes about the work we're doing; the draft label simply means "please give this a look."
+
+If you never respond, your statements stay marked DRAFT — so if you see that label, the fastest fix is the quick review in your portal.`,
       },
       {
         id: "when-statements",
