@@ -30,6 +30,7 @@ import { analyzeDepositsToIncome } from "./revenue-integrity";
 import { computeRevenueAdjustment, normalizeRevenueMode } from "./revenue-recognition";
 import { analyzeCrmInvoiceRevenue } from "./crm-invoice-revenue";
 import { detectLaborDuplication, PAYROLL_ACCOUNT_NAME_REGEX } from "./payroll-double-entry";
+import { normalizeAccountName } from "./account-name";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -130,14 +131,14 @@ const PILLARS_FULL: { key: PillarKey; weight: number; alloc: Record<string, numb
   { key: "reconciliation", weight: 0.35, alloc: { bank_tieout: 50, cc_tieout: 30, undeposited_funds: 20 } },
   { key: "categorization", weight: 0.25, alloc: { uncategorized: 50, daily_queue_clear: 30, suspense_ama: 20 } },
   { key: "bs_integrity", weight: 0.2, alloc: { negative_banks: 30, negative_liabilities: 25, obe: 20, ar_ap_negative: 25 } },
-  { key: "anomalies", weight: 0.15, alloc: { duplicates: 20, deposits_in_revenue: 15, crm_invoice_revenue: 15, payroll_duplication: 20, mom_variance: 15, large_round_jes: 10, overdue_ar: 5 } },
+  { key: "anomalies", weight: 0.15, alloc: { duplicates: 15, deposits_in_revenue: 10, crm_invoice_revenue: 15, payroll_duplication: 15, cogs_ratio: 10, net_margin: 10, mom_variance: 10, large_round_jes: 10, overdue_ar: 5 } },
   { key: "documentation", weight: 0.05, alloc: { statement_coverage: 100 } },
 ];
 
 /** P&L-only clients: no BS/reconciliation/documentation pillars. */
 const PILLARS_PL_ONLY: { key: PillarKey; weight: number; alloc: Record<string, number> }[] = [
   { key: "categorization", weight: 0.6, alloc: { uncategorized: 50, daily_queue_clear: 30, suspense_ama: 20 } },
-  { key: "anomalies", weight: 0.4, alloc: { duplicates: 20, deposits_in_revenue: 15, crm_invoice_revenue: 15, payroll_duplication: 20, mom_variance: 15, large_round_jes: 10, overdue_ar: 5 } },
+  { key: "anomalies", weight: 0.4, alloc: { duplicates: 15, deposits_in_revenue: 10, crm_invoice_revenue: 15, payroll_duplication: 15, cogs_ratio: 10, net_margin: 10, mom_variance: 10, large_round_jes: 10, overdue_ar: 5 } },
 ];
 
 const fmt = (n: number) =>
@@ -229,6 +230,54 @@ export function scoreVerification(
     score >= 95 ? "certified" : score >= SEND_MIN_SCORE ? "minor" : "not_ready";
 
   return { score, band, hardFail, hardFailKeys, pillars };
+}
+
+// ─── Red-flag approval gate (Mike 2026-07-17) ────────────────────────────
+// "Duplicate expenses, duplicate revenue, COGS <20%/>65%, net profit
+// <10%/>35% are all red flags that we need to manually approve during the
+// final step of the month end." A fail finding in any of these checks
+// blocks the client send until someone either fixes it (re-verify clears
+// it) or explicitly approves it — the dismiss-with-reason flow, which
+// records who and why. Always enforced, independent of the score gate.
+export const RED_FLAG_APPROVAL_KEYS = [
+  "duplicates", // duplicate expenses
+  "payroll_duplication", // duplicate expenses (gross+net labor)
+  "deposits_in_revenue", // duplicate revenue (deposit leg)
+  "crm_invoice_revenue", // duplicate revenue (invoice leg)
+  "cogs_ratio",
+  "net_margin",
+] as const;
+
+export interface RedFlag {
+  check_key: string;
+  check_label: string;
+  fingerprint: string;
+  message: string;
+  amount?: number;
+  senior_only?: boolean;
+  fix?: string;
+}
+
+/** Open (non-dismissed) fail-severity findings among the red-flag checks. */
+export function openRedFlags(result: VerificationResult): RedFlag[] {
+  const keys = new Set<string>(RED_FLAG_APPROVAL_KEYS as readonly string[]);
+  const out: RedFlag[] = [];
+  for (const c of result.checks || []) {
+    if (!keys.has(c.key)) continue;
+    for (const f of c.findings || []) {
+      if (f.severity !== "fail" || f.dismissed) continue;
+      out.push({
+        check_key: c.key,
+        check_label: c.label,
+        fingerprint: f.fingerprint,
+        message: f.message,
+        amount: f.amount,
+        senior_only: f.senior_only,
+        fix: c.fix,
+      });
+    }
+  }
+  return out;
 }
 
 /** Recompute a stored result against the current dismissal set — no QBO. */
@@ -954,6 +1003,135 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
         },
         fix: "revenue_check",
       });
+    }
+
+    // Statement-sanity ratio bands (Mike 2026-07-17): for a painting
+    // contractor, COGS outside 20–65% of revenue or net margin outside
+    // 10–35% is nearly always a bookkeeping error — duplicate/missing
+    // postings, misclassified labor, double-counted revenue — not a real
+    // business outcome. Computed from the same cash P&L detail joined to
+    // the COA by account TYPE (section strings on this report are
+    // unreliable — see the "Ordinary Income/Expenses" gotcha).
+    if (plDetail === null) {
+      for (const [key, label] of [
+        ["cogs_ratio", "COGS % of revenue"],
+        ["net_margin", "Net margin"],
+      ] as const) {
+        checks.push({
+          key,
+          label,
+          pillar: "anomalies",
+          status: "skipped",
+          detail: "P&L detail unavailable",
+          skipReason: "QBO P&L detail report failed — re-run verification.",
+          findings: [],
+        });
+      }
+    } else {
+      const typeByName = new Map(
+        accounts.map((a: any) => [normalizeAccountName(String(a.Name || "")), String(a.AccountType || "")])
+      );
+      let income = 0, otherIncome = 0, cogsTotal = 0, opex = 0, otherExpense = 0, unmatched = 0;
+      for (const r of plDetail as any[]) {
+        const t = typeByName.get(normalizeAccountName(String(r.account || "")));
+        const amt = Number(r.amount) || 0;
+        if (t === "Income") income += amt;
+        else if (t === "Other Income") otherIncome += amt;
+        else if (t === "Cost of Goods Sold") cogsTotal += amt;
+        else if (t === "Expense" || t === "Expenses") opex += amt;
+        else if (t === "Other Expense") otherExpense += amt;
+        else unmatched++;
+      }
+      // deposits_only clients: ratio against the revenue the statements
+      // actually show (invoice-recognized income excluded).
+      if (revenueMode === "deposits_only") {
+        income -= computeRevenueAdjustment(plDetail as any, "deposits_only").excludedInvoiceRevenue;
+      }
+      const revenue = Math.round(income * 100) / 100;
+      const net = Math.round((income + otherIncome - cogsTotal - opex - otherExpense) * 100) / 100;
+      const RATIO_REVENUE_FLOOR = 2500; // off-season months are ratio noise
+      const ratioMeta = {
+        revenue,
+        cogs: Math.round(cogsTotal * 100) / 100,
+        opex: Math.round(opex * 100) / 100,
+        otherIncome: Math.round(otherIncome * 100) / 100,
+        otherExpense: Math.round(otherExpense * 100) / 100,
+        net,
+        unmatchedRows: unmatched,
+        revenueMode,
+      };
+
+      if (revenue < RATIO_REVENUE_FLOOR) {
+        for (const [key, label] of [
+          ["cogs_ratio", "COGS % of revenue"],
+          ["net_margin", "Net margin"],
+        ] as const) {
+          checks.push({
+            key,
+            label,
+            pillar: "anomalies",
+            status: "skipped",
+            detail: `Revenue this period is ${fmt(revenue)} — below ${fmt(RATIO_REVENUE_FLOOR)}, too small for ratio checks`,
+            skipReason: "Ratios on near-zero revenue are noise (off-season month).",
+            findings: [],
+            meta: ratioMeta,
+          });
+        }
+      } else {
+        const cogsPct = (cogsTotal / revenue) * 100;
+        const cogsOut = cogsPct < 20 || cogsPct > 65;
+        checks.push({
+          key: "cogs_ratio",
+          label: "COGS % of revenue",
+          pillar: "anomalies",
+          status: "pass",
+          detail: `COGS is ${cogsPct.toFixed(1)}% of revenue (${fmt(cogsTotal)} on ${fmt(revenue)})${cogsOut ? " — outside the 20–65% band" : " — inside the 20–65% band"}`,
+          findings: cogsOut
+            ? [
+                {
+                  fingerprint: fingerprintFor("cogs", period),
+                  severity: "fail" as const,
+                  message:
+                    `COGS is ${cogsPct.toFixed(1)}% of revenue (${fmt(cogsTotal)} COGS on ${fmt(revenue)} revenue) — outside the healthy 20–65% band for a painting contractor. ` +
+                    (cogsPct < 20
+                      ? "Low COGS usually means materials/subs/direct labor are missing or sitting in operating expenses — or revenue is double-counted."
+                      : "High COGS usually means duplicate expenses (payroll double-count, duplicate bills), owner pay in COGS, or missing revenue.") +
+                    " Approve with a reason if this month is genuinely unusual.",
+                  amount: Math.abs(cogsTotal),
+                  dismissable: true,
+                },
+              ]
+            : [],
+          meta: { ...ratioMeta, cogsPct: Math.round(cogsPct * 10) / 10 },
+        });
+
+        const netPct = (net / revenue) * 100;
+        const netOut = netPct < 10 || netPct > 35;
+        checks.push({
+          key: "net_margin",
+          label: "Net margin",
+          pillar: "anomalies",
+          status: "pass",
+          detail: `Net ${net >= 0 ? "profit" : "loss"} is ${netPct.toFixed(1)}% of revenue (${fmt(net)} on ${fmt(revenue)})${netOut ? " — outside the 10–35% band" : " — inside the 10–35% band"}`,
+          findings: netOut
+            ? [
+                {
+                  fingerprint: fingerprintFor("margin", period),
+                  severity: "fail" as const,
+                  message:
+                    `Net ${net >= 0 ? "profit" : "loss"} is ${netPct.toFixed(1)}% of revenue (${net < 0 ? "-" : ""}${fmt(net)} on ${fmt(revenue)}) — outside the expected 10–35% band. ` +
+                    (netPct < 10
+                      ? "Check for duplicate expenses (payroll double-count, duplicate charges) or missing revenue."
+                      : "Check for duplicate revenue (CRM invoices + deposits both counted) or missing expenses.") +
+                    " Approve with a reason if this month is genuinely unusual.",
+                  amount: Math.abs(net),
+                  dismissable: true,
+                },
+              ]
+            : [],
+          meta: { ...ratioMeta, netPct: Math.round(netPct * 10) / 10 },
+        });
+      }
     }
 
     // Large / round journal entries with no memo.

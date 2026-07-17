@@ -12,6 +12,7 @@ import {
   runBooksVerification,
   recomputeStoredVerification,
   SEND_MIN_SCORE,
+  openRedFlags,
   type DismissalRow,
   type VerificationResult,
 } from "@/lib/books-verification";
@@ -75,7 +76,7 @@ export async function POST(
 
   const { data: actor } = await service
     .from("users")
-    .select("role")
+    .select("role, full_name")
     .eq("id", user.id)
     .single();
   const isSenior = ["admin", "lead"].includes((actor as any)?.role || "");
@@ -100,6 +101,8 @@ export async function POST(
     check_key?: string;
     fingerprint?: string;
     reason?: string;
+    /** send_draft: the question for the client. */
+    question?: string;
   };
   try {
     body = await request.json();
@@ -107,7 +110,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const action = body.action;
-  if (!["run", "statements", "spot_check", "submit", "send", "reopen", "board", "mark_complete", "verify", "dismiss_finding", "undismiss_finding"].includes(action || "")) {
+  if (!["run", "statements", "spot_check", "submit", "send", "send_draft", "reopen", "board", "mark_complete", "verify", "dismiss_finding", "undismiss_finding"].includes(action || "")) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
@@ -484,6 +487,121 @@ export async function POST(
     return NextResponse.json({ ok: true, run });
   }
 
+  if (action === "send_draft") {
+    // The bookkeeper's "not sure yet" path (Mike 2026-07-17): send the client
+    // their numbers marked DRAFT plus a question — portal message + email.
+    // The month STAYS OPEN: no close, no QBO closing date, no month-end
+    // package, no statement archive. After the client answers, fix the books
+    // (or approve the red flags) and do the real close.
+    const question = (body.question || "").trim().slice(0, 2000);
+    if (!question) {
+      return NextResponse.json({ error: "Write the question you want to ask the client." }, { status: 400 });
+    }
+    const { data: draftRun } = await (service as any)
+      .from("monthly_rec_runs")
+      .select("*")
+      .eq("client_link_id", clientLinkId)
+      .eq("period", period)
+      .maybeSingle();
+    if (draftRun?.status === "complete") {
+      return NextResponse.json({ error: "This month is already closed — the final statements went out." }, { status: 409 });
+    }
+    if (!draftRun?.statements) {
+      return NextResponse.json({ error: "Load the statements first — the draft includes this month's numbers." }, { status: 400 });
+    }
+
+    const clientName = (client as any).client_name || "your business";
+    const [y, m] = period.split("-").map(Number);
+    const monthLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    const glance = atAGlanceLines(draftRun.statements, monthLabel);
+    const draftBody = [
+      `Before we finalize your ${monthLabel} books, we have a quick question:`,
+      ``,
+      `❓ ${question}`,
+      ``,
+      `Your DRAFT ${monthLabel} numbers so far:`,
+      ...glance.slice(1),
+      ``,
+      `These are draft figures — we'll finalize and send your official statements once we hear back. Just reply to this message.`,
+    ].join("\n");
+    const draftSubject = `DRAFT ${monthLabel} financials — quick question`;
+
+    // Portal message (expects a reply) + branded email.
+    let commError: string | null = null;
+    try {
+      await (service as any).from("client_communications").insert({
+        client_link_id: clientLinkId,
+        sender_user_id: user.id,
+        direction: "to_client",
+        kind: "message",
+        subject: draftSubject,
+        body: draftBody,
+        attachments: [],
+      });
+    } catch (e: any) {
+      commError = e?.message || "portal message insert failed";
+    }
+    const emailDelivery = await emailPortalUsersAboutMessage(service, {
+      clientLinkId,
+      clientName,
+      kind: "message",
+      subject: draftSubject,
+      body: draftBody,
+      portalOrigin: new URL(request.url).origin,
+      snippetChars: 1200, // the question + numbers must survive into the email
+    });
+
+    // Record the draft on the run (migration 131) + audit trail. The send
+    // already happened — a missing column degrades to a warning, not a 500.
+    const draftEntry = {
+      at: new Date().toISOString(),
+      by: user.id,
+      by_name: (actor as any)?.full_name || null,
+      question,
+      email_sent: !!(emailDelivery as any)?.sent,
+    };
+    let draftRecordError: string | null = null;
+    let run: any = draftRun;
+    {
+      const prev = Array.isArray((draftRun as any).draft_sends) ? (draftRun as any).draft_sends : [];
+      const { data: updated, error: uErr } = await (service as any)
+        .from("monthly_rec_runs")
+        .update({ draft_sends: [...prev, draftEntry] })
+        .eq("id", draftRun.id)
+        .select("*")
+        .single();
+      if (uErr) draftRecordError = `Draft sent, but couldn't record it on the month (migration 131 applied?): ${uErr.message}`;
+      else run = updated;
+    }
+    try {
+      await (service as any).from("audit_log").insert({
+        event_type: "statements_draft_sent",
+        user_id: user.id,
+        request_payload: {
+          client_link_id: clientLinkId,
+          client_name: clientName,
+          period,
+          question,
+          email_delivery: emailDelivery,
+        },
+      });
+    } catch {
+      /* best-effort */
+    }
+
+    return NextResponse.json({
+      ok: true,
+      run,
+      email_delivery: emailDelivery,
+      comm_error: commError,
+      draft_record_error: draftRecordError,
+    });
+  }
+
   if (action === "send" || action === "mark_complete") {
     const isMarkComplete = action === "mark_complete";
     // Completing a month always closes + sends statements through SNAP now
@@ -509,7 +627,7 @@ export async function POST(
     }
     let { data: existing } = await (service as any)
       .from("monthly_rec_runs")
-      .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at, verification_score, verification_ran_at, manager_reviewed_by, manager_reviewed_at")
+      .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at, verification, verification_score, verification_ran_at, manager_reviewed_by, manager_reviewed_at")
       .eq("client_link_id", clientLinkId)
       .eq("period", period)
       .maybeSingle();
@@ -545,7 +663,7 @@ export async function POST(
               },
               { onConflict: "client_link_id,period" }
             )
-            .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at, verification_score, verification_ran_at, manager_reviewed_by, manager_reviewed_at")
+            .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at, verification, verification_score, verification_ran_at, manager_reviewed_by, manager_reviewed_at")
             .single();
           if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
           existing = up;
@@ -644,6 +762,76 @@ export async function POST(
       }
     }
 
+    // ── RED-FLAG APPROVAL GATE (Mike 2026-07-17) — ALWAYS ON ────────────
+    // Duplicate expenses, duplicate revenue, COGS outside 20–65%, net margin
+    // outside 10–35%: each open red flag must be FIXED (re-verify clears it)
+    // or explicitly APPROVED (dismissed with a reason — recorded who/why)
+    // before anything goes to the client. Unlike the score gate above, this
+    // does not wait for VERIFICATION_GATE_ENFORCE.
+    {
+      let verification = (existing as any)?.verification as VerificationResult | null;
+      if (!verification) {
+        // Board completes / backfills arrive unverified — run it now so the
+        // gate always judges real findings (and the card gets a score).
+        try {
+          const accessToken = await getValidToken(clientLinkId, service as any);
+          verification = await runBooksVerification({
+            service: service as any,
+            clientLinkId,
+            realmId: (client as any).qbo_realm_id,
+            accessToken,
+            period,
+            periodStart,
+            periodEnd,
+            includeBS,
+            kind: ((existing as any)?.kind as any) || "production_me",
+            ranBy: user.id,
+          });
+          const { data: vUp } = await (service as any)
+            .from("monthly_rec_runs")
+            .update({
+              verification,
+              verification_score: verification.score,
+              verification_ran_at: verification.ranAt,
+            })
+            .eq("id", (existing as any).id)
+            .select("id, checks_ran_at, statements, status, kind, attested_by, attested_at, verification, verification_score, verification_ran_at, manager_reviewed_by, manager_reviewed_at")
+            .single();
+          if (vUp) existing = vUp;
+        } catch (err: any) {
+          return NextResponse.json(
+            {
+              error: `Books can't go out unverified — and verification failed to run: ${String(err?.message || err).slice(0, 300)}. Fix the QBO connection (or run Verify books on the month card) and try again.`,
+            },
+            { status: 502 }
+          );
+        }
+      }
+      // Judge against the CURRENT dismissal set so an approval made a moment
+      // ago counts without a full re-verify.
+      const { data: dRows } = await (service as any)
+        .from("verification_dismissals")
+        .select("check_key, fingerprint, reason, dismissed_at, active")
+        .eq("client_link_id", clientLinkId)
+        .eq("active", true);
+      const gateDismissals: DismissalRow[] = ((dRows as any[]) || []).map((d) => ({
+        ...d,
+        dismissed_by_name: null,
+      }));
+      const recomputed = recomputeStoredVerification(verification!, gateDismissals, includeBS);
+      const redFlags = openRedFlags(recomputed);
+      if (redFlags.length > 0) {
+        return NextResponse.json(
+          {
+            error: `${redFlags.length} red flag${redFlags.length === 1 ? "" : "s"} need${redFlags.length === 1 ? "s" : ""} manual approval before this month goes to the client — fix and re-verify, or approve each with a reason.`,
+            requires_red_flag_approval: true,
+            red_flags: redFlags,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     const concerns = (body.concerns || "").trim().slice(0, 4000) || null;
     const now = new Date().toISOString();
     const clientName = (client as any).client_name || "your business";
@@ -655,33 +843,7 @@ export async function POST(
     });
 
     const st = existing.statements as any;
-    const fmt = (n: number) =>
-      `$${Math.abs(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    // Signed format for the "other income/(expense)" reconciling line.
-    const fmtSigned = (n: number) => (n < 0 ? `-${fmt(n)}` : fmt(n));
-    const revenue = Number(st?.pl?.totalIncome || 0);
-    const cogs = Number(st?.pl?.cogs || 0);
-    const opex = Number(st?.pl?.totalExpenses || 0);
-    const net = Number(st?.pl?.netIncome || 0);
-    const hasCogs = cogs > 0.005;
-    const grossProfit = Number(
-      st?.pl?.grossProfit != null ? st.pl.grossProfit : revenue - cogs
-    );
-    // Build a breakdown that always reconciles to net: Revenue − COGS = Gross
-    // profit, then − Operating expenses. Any remainder (other income/expense)
-    // becomes an explicit line so the figures the client sees add up.
-    const lines: string[] = [`${monthLabel} at a glance:`, `• Revenue: ${fmt(revenue)}`];
-    if (hasCogs) {
-      lines.push(`• Cost of goods sold: ${fmt(cogs)}`);
-      lines.push(`• Gross profit: ${fmt(grossProfit)}`);
-    }
-    lines.push(`• Operating expenses: ${fmt(opex)}`);
-    const subtotal = (hasCogs ? grossProfit : revenue) - opex;
-    const other = net - subtotal;
-    if (Math.abs(other) > 0.5) {
-      lines.push(`• Other income/(expense): ${fmtSigned(other)}`);
-    }
-    lines.push(`• Net ${net >= 0 ? "profit" : "loss"}: ${fmt(net)}`);
+    const lines = atAGlanceLines(st, monthLabel);
     const summaryBody = [
       `Your ${monthLabel} books are closed and your financial statements are ready. ✅`,
       ``,
@@ -874,4 +1036,39 @@ export async function POST(
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, run });
+}
+
+/**
+ * "Month at a glance" bullet lines from a statements snapshot. Builds a
+ * breakdown that always reconciles to net: Revenue − COGS = Gross profit,
+ * then − Operating expenses; any remainder (other income/expense) becomes an
+ * explicit line so the figures the client sees add up. Shared by the close
+ * email and DRAFT sends.
+ */
+function atAGlanceLines(st: any, monthLabel: string): string[] {
+  const fmt = (n: number) =>
+    `$${Math.abs(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Signed format for the "other income/(expense)" reconciling line.
+  const fmtSigned = (n: number) => (n < 0 ? `-${fmt(n)}` : fmt(n));
+  const revenue = Number(st?.pl?.totalIncome || 0);
+  const cogs = Number(st?.pl?.cogs || 0);
+  const opex = Number(st?.pl?.totalExpenses || 0);
+  const net = Number(st?.pl?.netIncome || 0);
+  const hasCogs = cogs > 0.005;
+  const grossProfit = Number(
+    st?.pl?.grossProfit != null ? st.pl.grossProfit : revenue - cogs
+  );
+  const lines: string[] = [`${monthLabel} at a glance:`, `• Revenue: ${fmt(revenue)}`];
+  if (hasCogs) {
+    lines.push(`• Cost of goods sold: ${fmt(cogs)}`);
+    lines.push(`• Gross profit: ${fmt(grossProfit)}`);
+  }
+  lines.push(`• Operating expenses: ${fmt(opex)}`);
+  const subtotal = (hasCogs ? grossProfit : revenue) - opex;
+  const other = net - subtotal;
+  if (Math.abs(other) > 0.5) {
+    lines.push(`• Other income/(expense): ${fmtSigned(other)}`);
+  }
+  lines.push(`• Net ${net >= 0 ? "profit" : "loss"}: ${fmt(net)}`);
+  return lines;
 }

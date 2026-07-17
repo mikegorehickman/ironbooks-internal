@@ -96,6 +96,8 @@ interface Run {
   // gate in app/api/clients/[id]/monthly-rec/route.ts when no longer needed.
   manager_reviewed_at?: string | null;
   manager_review_override?: { by: string; at: string; reason: string } | null;
+  // Draft-with-a-question sends (migration 131) — month stays open.
+  draft_sends?: Array<{ at: string; by: string; by_name?: string | null; question: string; email_sent?: boolean }> | null;
 }
 
 export interface ProdClient {
@@ -163,6 +165,14 @@ export function ClientRecCard({
   const [reviewing, setReviewing] = useState(false);
   const [attested, setAttested] = useState(false);
   const [sendWarning, setSendWarning] = useState<string | null>(null);
+  // Red-flag approval gate: the server 409s the send with the open flags
+  // (duplicate expenses/revenue, COGS band, net-margin band); each must be
+  // approved with a reason or fixed + re-verified before sending.
+  const [redFlags, setRedFlags] = useState<any[] | null>(null);
+  // Draft-with-a-question path — sends DRAFT numbers, month stays open.
+  const [draftQuestion, setDraftQuestion] = useState("");
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalRun(client.run);
@@ -270,6 +280,12 @@ export function ClientRecCard({
       });
       const json = await res.json();
       if (!res.ok) {
+        // Red-flag approval gate: the flags render inline with per-flag
+        // Approve buttons — no override prompt, each needs its own reason.
+        if (res.status === 409 && json.requires_red_flag_approval) {
+          setRedFlags(json.red_flags || []);
+          throw new Error(json.error || "Red flags need manual approval before this month can be sent.");
+        }
         // Books Reliability gate: score below the bar — a senior can override
         // with a written reason (recorded on the run + audited).
         if (res.status === 409 && json.requires_override) {
@@ -303,12 +319,66 @@ export function ClientRecCard({
             : "Month closed and portal updated — but the email notification failed to send."
         );
       }
+      setRedFlags(null);
       playSound("client_graduated");
       onChanged();
     } catch (e: any) {
       setError(e?.message || "Couldn't send");
     } finally {
       setCompleting(false);
+    }
+  }
+
+  // Approve ONE red flag = dismiss-with-reason (recorded who/why). The server
+  // recomputes the score instantly; when the list empties, send again.
+  async function approveRedFlag(flag: any) {
+    const reason = window.prompt(
+      `APPROVE this red flag? The statements go to the client as-is — recorded with your name.\n\n${flag.check_label}: ${flag.message}\n\nReason (required):`
+    );
+    if (!reason || !reason.trim()) return;
+    setError("");
+    try {
+      const r = await act({
+        action: "dismiss_finding",
+        fingerprint: flag.fingerprint,
+        check_key: flag.check_key,
+        reason: reason.trim(),
+      });
+      setLocalRun(r);
+      setRedFlags((prev) => (prev || []).filter((f) => f.fingerprint !== flag.fingerprint));
+    } catch (e: any) {
+      setError(e?.message || "Couldn't approve the flag");
+    }
+  }
+
+  // The "not sure yet" path: DRAFT numbers + a question to the client
+  // (portal message + email). The month stays open.
+  async function sendDraft() {
+    if (!draftQuestion.trim()) return;
+    setDraftBusy(true);
+    setError("");
+    setDraftNotice(null);
+    try {
+      const res = await fetch(`/api/clients/${client.id}/monthly-rec`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_draft", period, question: draftQuestion.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      if (json.run) setLocalRun(json.run);
+      setDraftQuestion("");
+      setDraftNotice(
+        (json.email_delivery?.sent
+          ? "Draft sent — portal message + email are out. The month stays open; close it after the client replies."
+          : "Draft posted to the client's portal, but no email went out (no portal login on file?). The month stays open.") +
+          (json.draft_record_error ? ` ${json.draft_record_error}` : "")
+      );
+      playSound("scan_complete");
+    } catch (e: any) {
+      setError(e?.message || "Couldn't send the draft");
+    } finally {
+      setDraftBusy(false);
     }
   }
 
@@ -549,6 +619,50 @@ export function ClientRecCard({
                 />
               </div>
 
+              {/* Draft-with-a-question — the "not sure yet" path. Sends the
+                  client DRAFT numbers + your question; the month stays open. */}
+              {(run?.draft_sends?.length || 0) > 0 && (
+                <div className="text-[11px] font-semibold text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-1.5">
+                  DRAFT sent {new Date(run!.draft_sends![run!.draft_sends!.length - 1].at).toLocaleDateString()}
+                  {run!.draft_sends![run!.draft_sends!.length - 1].by_name
+                    ? ` by ${run!.draft_sends![run!.draft_sends!.length - 1].by_name}`
+                    : ""}{" "}
+                  — waiting on the client&apos;s answer. Send the final statements once it&apos;s resolved.
+                </div>
+              )}
+              <div className="bg-sky-50/60 border border-sky-200 rounded-xl px-3 py-3 space-y-2">
+                <div className="text-xs font-bold text-navy flex items-center gap-1.5">
+                  <AlertCircle size={13} className="text-sky-600" />
+                  Not sure about something? Send a DRAFT with a question instead
+                </div>
+                <textarea
+                  value={draftQuestion}
+                  onChange={(e) => setDraftQuestion(e.target.value)}
+                  rows={2}
+                  maxLength={2000}
+                  placeholder="e.g. We see two Lowe's charges for $2,226 on May 8 and 9 — were both real purchases?"
+                  className="w-full px-3 py-2 text-sm border border-sky-200 rounded-lg bg-white focus:border-sky-400 focus:outline-none"
+                />
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    onClick={sendDraft}
+                    disabled={draftBusy || !draftQuestion.trim()}
+                    className="inline-flex items-center gap-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-50"
+                  >
+                    {draftBusy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                    Send DRAFT + question
+                  </button>
+                  <span className="text-[11px] text-ink-light">
+                    Portal + email, numbers marked DRAFT. Does <strong>not</strong> close the month.
+                  </span>
+                </div>
+                {draftNotice && (
+                  <div className="text-[11px] text-sky-900 bg-white border border-sky-200 rounded-lg px-2.5 py-1.5">
+                    {draftNotice}
+                  </div>
+                )}
+              </div>
+
               <label className="flex items-start gap-2.5 cursor-pointer bg-white border border-gray-200 rounded-xl px-3 py-3">
                 <input
                   type="checkbox"
@@ -565,6 +679,52 @@ export function ClientRecCard({
                   ready to share with the client.
                 </span>
               </label>
+
+              {/* Red-flag approval gate — the server refuses the send while
+                  any of these are open. Approve = dismiss with a reason. */}
+              {redFlags && redFlags.length > 0 && (
+                <div className="bg-red-50 border-2 border-red-300 rounded-xl px-3 py-3 space-y-2">
+                  <div className="text-xs font-bold text-red-900 flex items-center gap-1.5">
+                    <AlertTriangle size={13} />
+                    {redFlags.length} red flag{redFlags.length === 1 ? "" : "s"} need manual approval before this month goes out
+                  </div>
+                  <ul className="space-y-2">
+                    {redFlags.map((f) => {
+                      const link = vFixLink(f.fix, client.id);
+                      return (
+                        <li key={f.fingerprint} className="bg-white border border-red-200 rounded-lg px-2.5 py-2">
+                          <div className="text-[11px] font-bold text-red-800 uppercase tracking-wide">{f.check_label}</div>
+                          <p className="text-xs text-navy mt-0.5">{f.message}</p>
+                          <div className="flex items-center gap-2.5 mt-1.5">
+                            <button
+                              onClick={() => approveRedFlag(f)}
+                              className="text-[11px] font-bold text-red-700 border border-red-300 rounded-lg px-2 py-1 hover:bg-red-100"
+                            >
+                              Approve with reason…
+                            </button>
+                            {link && (
+                              <Link
+                                href={link.href}
+                                className="text-[11px] font-semibold text-teal-dark hover:underline inline-flex items-center gap-0.5"
+                              >
+                                {link.label} <ArrowUpRight size={10} />
+                              </Link>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="text-[11px] text-red-800">
+                    Fix it in QuickBooks and re-verify, or approve each flag with a reason (recorded with your name) — then send again.
+                  </p>
+                </div>
+              )}
+              {redFlags && redFlags.length === 0 && (
+                <div className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
+                  All red flags approved — click send again.
+                </div>
+              )}
 
               {isSenior ? (
                 <>
