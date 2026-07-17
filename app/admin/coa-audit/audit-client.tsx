@@ -92,9 +92,12 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
       const data = await res.json();
       if (data.reauth) { setMergeMsg((m) => ({ ...m, [p.sourceId]: "QBO reconnect needed" })); return; }
       if (data.tooLarge) { setMergeMsg((m) => ({ ...m, [p.sourceId]: data.error })); return; }
+      if (data.ok === false) { setMergeMsg((m) => ({ ...m, [p.sourceId]: data.error || "merge failed" })); return; }
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      const parts = [`${data.linesMoved} line(s) moved`];
-      if (data.inactivated) parts.push("source deactivated");
+      const parts = data.method === "native_merge"
+        ? [data.merged ? "merged — all transactions moved" : "merge attempted; verify in QBO"]
+        : [`${data.linesMoved} line(s) moved`];
+      if (data.method !== "native_merge" && data.inactivated) parts.push("source deactivated");
       if (data.failures?.length) parts.push(`${data.failures.length} failed`);
       setMergeMsg((m) => ({ ...m, [p.sourceId]: parts.join(" · ") }));
       // Re-scan to refresh conformance + drop the merged account.
@@ -220,6 +223,7 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
           const data = await res.json();
           if (data.reauth) { mergeFail++; continue; }
           if (data.tooLarge) { tooLarge++; continue; }
+          if (data.ok === false) { mergeFail++; continue; }
           if (!res.ok) { mergeFail++; continue; }
           if (data.failures?.length && !data.inactivated) mergeFail++;
           else merged++;
