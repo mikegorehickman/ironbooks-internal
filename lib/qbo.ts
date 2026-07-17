@@ -857,7 +857,11 @@ export async function createAccount(
     body.ParentRef = { value: params.parentRefId };
     body.SubAccount = true;
   }
-  if (params.description) body.Description = params.description;
+  // QBO caps Account.Description at 100 chars ("String length ... Max:100
+  // supported" — a 123-char description 400'd the payroll-resolve clearing
+  // account on its first live run). Truncate defensively so no caller can
+  // trip this again.
+  if (params.description) body.Description = params.description.slice(0, 100);
   if (params.taxCodeRef) body.TaxCodeRef = { value: params.taxCodeRef };
 
   const data = await qboRequest<{ Account: QBOAccount }>(

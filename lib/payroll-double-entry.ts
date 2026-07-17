@@ -315,6 +315,14 @@ export type PayrollPaymentKind = "invoice" | "cash";
 const PAYCHEQUE_TXN_TYPE = /paycheque|paycheck|pay check|payroll check|payroll adjustment|payroll liability/i;
 // The money-movement postings that should never re-expense wages.
 const RECORDABLE_TXN_TYPE = /expense|deposit|transfer|check|cheque|journal|bill|purchase/i;
+// A payment to a payroll employee whose memo names a SPECIFIC non-wage
+// purpose (fuel, mileage, tools, a personal-card repayment, …) is an expense
+// REIMBURSEMENT, not the employee's net pay landing on a second labor
+// account. Confirmed false positive on BMD: "5730 Fuel – Admin & Sales
+// Vehicles" got flagged for "Reimbursement for vehicle fuel" / "Repayment for
+// Fuel purchased through personal card" postings to the same crew who also
+// have paycheques — real fuel reimbursements, not wage duplication.
+const REIMBURSEMENT_MEMO = /\b(reimburs\w*|repa(?:id|yment)|expense\s*report|mileage|per\s*diem)\b/i;
 
 /**
  * Classify a posting as the payroll INVOICE (accrual paycheque/JE) or the CASH
@@ -425,6 +433,7 @@ export function detectLaborDuplication(
     for (const r of rows) {
       if (paychequeAccounts.has(r.account)) continue;      // legit paycheque line
       if (!RECORDABLE_TXN_TYPE.test(r.txn_type)) continue;
+      if (REIMBURSEMENT_MEMO.test(r.memo || "")) continue; // expense reimbursement, not wage dup
       const p = normPerson(r.name);
       if (!p || !employees.has(p)) continue;
       const e = byAccount.get(r.account) || { account: r.account, postings: 0, total: 0, employees: 0, by_type: {}, sample_memos: [], cash_total: 0, invoice_total: 0, reason: "", txns: [] };

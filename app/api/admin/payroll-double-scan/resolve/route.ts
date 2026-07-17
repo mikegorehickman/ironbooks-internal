@@ -92,7 +92,9 @@ export async function POST(request: Request) {
         name: CLEARING_NAME,
         accountType: "Other Current Liability",
         accountSubType: "OtherCurrentLiabilities",
-        description: "Payroll wash account — net-pay bank payments land here to net against QBO Payroll paycheques (SNAP payroll-double resolve).",
+        // QBO caps Account.Description at 100 chars ("String length ... Max:100
+        // supported") — the first live resolve on BMD 400'd on a longer string.
+        description: "Payroll wash account — nets net-pay deposits against QBO Payroll paycheques.",
       }) as QBOAccount;
       createdClearing = true;
     }
