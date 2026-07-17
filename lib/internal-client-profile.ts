@@ -295,10 +295,20 @@ export type ProgressStageStatus =
   | "complete"     // all good (emerald)
   | "in_progress"  // started but not done (amber)
   | "blocked"      // failed / stuck (red)
-  | "not_started"; // gray
+  | "not_started"  // gray
+  | "skipped";     // intentionally not applicable (e.g. Stripe not required)
 
 export interface ProgressStage {
-  key: "setup" | "coa" | "reclass" | "rules" | "recon" | "maintenance";
+  key:
+    | "setup"
+    | "coa"
+    | "reclass"
+    | "rules"
+    | "stripe"
+    | "bs"
+    | "signoff"
+    | "production"
+    | "close";
   label: string;
   status: ProgressStageStatus;
   /** One-line summary rendered under the label. */
@@ -307,10 +317,24 @@ export interface ProgressStage {
   href: string | null;
 }
 
+/** The ONE thing to do next for this client — drives the Continue banner. */
+export interface NextAction {
+  stageKey: ProgressStage["key"];
+  label: string;
+  /** One line: what to actually do. */
+  detail: string;
+  /** Button text. */
+  cta: string;
+  href: string | null;
+  phase: "setup" | "cleanup" | "production";
+}
+
 export interface ClientProgress {
   stages: ProgressStage[];
-  /** 0-100 % of stages that are "complete". Useful for a top-line "X% set up". */
+  /** 0-100 % of applicable (non-skipped) stages that are "complete". */
   percentComplete: number;
+  /** First not-done stage, resolved to a concrete action. null = all done. */
+  nextAction: NextAction | null;
 }
 
 /**
@@ -326,6 +350,10 @@ export async function fetchClientProgress(
     qbo_realm_id: string | null;
     industry: string | null;
     double_client_id: string | null;
+    daily_recon_enabled?: boolean | null;
+    daily_recon_paused?: boolean | null;
+    cleanup_completed_at?: string | null;
+    cleanup_review_state?: string | null;
   }
 ): Promise<ClientProgress> {
   const stages: ProgressStage[] = [];
@@ -359,7 +387,7 @@ export async function fetchClientProgress(
       setupOkCount === setupChecks.length
         ? "QBO + industry + Double linked"
         : `Missing: ${setupMissing.join(", ")}`,
-    href: `/clients/${clientLinkId}`, // stays on profile; matcher reachable from here
+    href: null, // fixed on this page (details card + Double matcher below)
   });
 
   // ── 2. COA Cleanup ──────────────────────────────────────────────────
@@ -484,83 +512,201 @@ export async function fetchClientProgress(
         : "No rules yet",
     href: latestDiscovery
       ? `/rules/${(latestDiscovery as any).id}/review`
-      : `/clients`,
+      : `/rules/new?client=${clientLinkId}`,
   });
 
-  // ── 5. Daily Recon ──────────────────────────────────────────────────
-  // "Active" = client_links.daily_recon_paused is false/null AND we've
-  // seen ≥1 audit log entry mentioning recon for this client recently.
-  // The audit-log check guards against "we set up recon but nothing fires"
-  // — the gap surfaced in the LT Woodworks investigation (task #46).
-  const dailyReconPaused = (clientLink as any).daily_recon_paused === true;
+  // ── 5. Stripe ───────────────────────────────────────────────────────
+  // Same source of truth as the cleanup board: stripe_connection_status +
+  // stripe_request_sent_at + the "not required" flag. Fetched here (not
+  // threaded from the page) so a missing column degrades this one stage,
+  // never the whole profile.
+  let stripeStatus: string | null = null;
+  let stripeRequestedAt: string | null = null;
+  let stripeNotRequired = false;
+  try {
+    const { data: sRow } = await (service as any)
+      .from("client_links")
+      .select("stripe_connection_status, stripe_request_sent_at, stripe_not_required")
+      .eq("id", clientLinkId)
+      .maybeSingle();
+    stripeStatus = sRow?.stripe_connection_status ?? null;
+    stripeRequestedAt = sRow?.stripe_request_sent_at ?? null;
+    stripeNotRequired = !!sRow?.stripe_not_required;
+  } catch {
+    /* stage degrades to not_started */
+  }
+  const stripeConnected = stripeStatus === "connected";
+  stages.push({
+    key: "stripe",
+    label: "Stripe",
+    status: stripeNotRequired
+      ? "skipped"
+      : stripeConnected
+      ? "complete"
+      : stripeStatus === "pending" || stripeRequestedAt
+      ? "in_progress"
+      : "not_started",
+    detail: stripeNotRequired
+      ? "Marked not required"
+      : stripeConnected
+      ? "Connected — payouts visible"
+      : stripeStatus === "pending" || stripeRequestedAt
+      ? "Connect request sent — waiting on the client"
+      : "Send the client a Stripe connect request (Clients board), or mark not required",
+    href: stripeConnected ? `/stripe-recon/new?client=${clientLinkId}` : `/clients`,
+  });
+
+  // ── 6. BS Cleanup ───────────────────────────────────────────────────
+  // Mirrors the cleanup board: any bank_recon_jobs row = started; latest
+  // row complete = done.
+  let bsLatest: { id: string; status: string } | null = null;
+  try {
+    const { data: bsRow } = await (service as any)
+      .from("bank_recon_jobs")
+      .select("id, status")
+      .eq("client_link_id", clientLinkId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    bsLatest = bsRow || null;
+  } catch {
+    /* stage degrades to not_started */
+  }
+  stages.push({
+    key: "bs",
+    label: "BS Cleanup",
+    status: !bsLatest
+      ? "not_started"
+      : bsLatest.status === "complete"
+      ? "complete"
+      : "in_progress",
+    detail: !bsLatest
+      ? "Balance-sheet reconciliation not started"
+      : bsLatest.status === "complete"
+      ? "Balance sheet reconciled"
+      : "Reconciliation in progress",
+    href: `/balance-sheet/${clientLinkId}/cleanup`,
+  });
+
+  // ── 7. Statements sign-off ──────────────────────────────────────────
+  // cleanup_completed_at is THE graduation stamp (set when a manager
+  // approves + sends the cleanup statements); cleanup_review_state
+  // "in_review" = submitted and waiting on the manager.
+  const cleanupDone = !!clientLink.cleanup_completed_at;
+  const signoffInReview = clientLink.cleanup_review_state === "in_review";
+  stages.push({
+    key: "signoff",
+    label: "Sign-off",
+    status: cleanupDone ? "complete" : signoffInReview ? "in_progress" : "not_started",
+    detail: cleanupDone
+      ? `Cleanup signed off ${new Date(clientLink.cleanup_completed_at!).toLocaleDateString()}`
+      : signoffInReview
+      ? "Submitted — awaiting manager review"
+      : "Submit statements for manager sign-off on the Cleanup board",
+    href: `/cleanup`,
+  });
+
+  // ── 8. Production (daily recon) ─────────────────────────────────────
+  // Enrolled = daily_recon_enabled; "fired" = ≥1 recon audit event in 14d
+  // (guards against "enabled but the engine never runs" — LT Woodworks).
+  const enrolled = clientLink.daily_recon_enabled === true;
+  const dailyReconPaused = clientLink.daily_recon_paused === true;
   const { count: recentReconCount } = await service
     .from("audit_log")
     .select("id", { count: "exact", head: true })
     .filter("request_payload->>client_link_id", "eq", clientLinkId)
     .ilike("event_type", "%recon%")
     .gte("occurred_at", new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString());
-
   const reconFired = (recentReconCount ?? 0) > 0;
   stages.push({
-    key: "recon",
-    label: "Daily Recon",
+    key: "production",
+    label: "Production",
     status: dailyReconPaused
       ? "blocked"
-      : reconFired
-      ? "complete"
-      : active > 0
-      ? "in_progress" // rules exist but recon hasn't fired yet
+      : enrolled
+      ? reconFired
+        ? "complete"
+        : "in_progress"
       : "not_started",
     detail: dailyReconPaused
-      ? "Paused — needs unpause"
-      : reconFired
-      ? `Active · fired in last 14d`
-      : active > 0
-      ? "Rules ready but engine hasn't fired"
-      : "Needs active rules first",
-    href: `/clients/${clientLinkId}`,
+      ? "Daily recon paused — needs unpause"
+      : enrolled
+      ? reconFired
+        ? "Daily recon live · fired in last 14d"
+        : "Enrolled — engine hasn't fired yet"
+      : "Move to production to start daily recon",
+    // Enrolled → their daily queue; not enrolled → the panel below.
+    href: enrolled ? `/today/${clientLinkId}` : "#move-to-production",
   });
 
-  // ── 6. Maintenance / Month Close ────────────────────────────────────
-  // "Done" if any reclass_job has month_closed_at within last 35 days
-  // (a calendar month + slack). The 35-day window stops a long-ago close
-  // from masking a current backlog.
-  const thirtyFiveDaysAgo = new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString();
-  // Cast the whole chain to `any` because month_closed_at is missing from
-  // the stale generated types — the column is real (used by other API
-  // routes) but TS can't see it without a types regen.
-  const recentCloseRes: any = await (service as any)
-    .from("reclass_jobs")
-    .select("month_closed_at")
-    .eq("client_link_id", clientLinkId)
-    .not("month_closed_at", "is", null)
-    .gte("month_closed_at", thirtyFiveDaysAgo)
-    .order("month_closed_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const recentCloseRow = recentCloseRes?.data;
-  const closedRecently = !!recentCloseRow?.month_closed_at;
+  // ── 9. Month Close ──────────────────────────────────────────────────
+  // Done = a completed production month-end in the last 35 days (a
+  // calendar month + slack) on monthly_rec_runs — the actual close path.
+  let lastClose: { period: string; completed_at: string } | null = null;
+  try {
+    const { data: closeRow } = await (service as any)
+      .from("monthly_rec_runs")
+      .select("period, completed_at")
+      .eq("client_link_id", clientLinkId)
+      .eq("kind", "production_me")
+      .eq("status", "complete")
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    lastClose = closeRow || null;
+  } catch {
+    /* stage degrades below */
+  }
+  const closeRecent =
+    !!lastClose?.completed_at &&
+    Date.now() - new Date(lastClose.completed_at).getTime() < 35 * 24 * 60 * 60 * 1000;
   stages.push({
-    key: "maintenance",
+    key: "close",
     label: "Month Close",
-    status: closedRecently
-      ? "complete"
-      : rcComplete > 0
-      ? "in_progress" // history of work, but no recent close
-      : "not_started",
-    detail: closedRecently
-      ? `Closed ${new Date(recentCloseRow.month_closed_at).toLocaleDateString()}`
-      : rcComplete > 0
-      ? "No recent month close on file"
-      : "Awaiting reclass first",
-    href: `/clients/${clientLinkId}`,
+    status: closeRecent ? "complete" : lastClose ? "in_progress" : "not_started",
+    detail: closeRecent
+      ? `${lastClose!.period} closed ${new Date(lastClose!.completed_at).toLocaleDateString()}`
+      : lastClose
+      ? `Last close ${lastClose.period} — none in the last 35 days`
+      : cleanupDone
+      ? "First month-end close pending"
+      : "First close comes after cleanup sign-off",
+    href: `/production`,
   });
 
-  const completed = stages.filter((s) => s.status === "complete").length;
+  // ── Next action: the FIRST stage that still needs a human ───────────
+  const NEXT_COPY: Record<
+    ProgressStage["key"],
+    { phase: NextAction["phase"]; start: string; going: string }
+  > = {
+    setup: { phase: "setup", start: "Fix setup below", going: "Fix setup below" },
+    coa: { phase: "cleanup", start: "Start COA cleanup", going: "Open COA job" },
+    reclass: { phase: "cleanup", start: "Start reclass", going: "Open reclass job" },
+    rules: { phase: "cleanup", start: "Generate bank rules", going: "Review bank rules" },
+    stripe: { phase: "cleanup", start: "Open Clients board", going: "Open Clients board" },
+    bs: { phase: "cleanup", start: "Start BS Cleanup", going: "Open BS Cleanup" },
+    signoff: { phase: "cleanup", start: "Open Cleanup board", going: "Open Cleanup board" },
+    production: { phase: "production", start: "Move to production", going: "Open Today queue" },
+    close: { phase: "production", start: "Open Production board", going: "Open Production board" },
+  };
+  const next = stages.find((s) => s.status !== "complete" && s.status !== "skipped") || null;
+  const nextAction: NextAction | null = next
+    ? {
+        stageKey: next.key,
+        label: next.label,
+        detail: next.detail,
+        cta: next.status === "not_started" ? NEXT_COPY[next.key].start : NEXT_COPY[next.key].going,
+        href: next.href,
+        phase: NEXT_COPY[next.key].phase,
+      }
+    : null;
+
+  const applicable = stages.filter((s) => s.status !== "skipped");
+  const completed = applicable.filter((s) => s.status === "complete").length;
   return {
     stages,
-    percentComplete: Math.round((completed / stages.length) * 100),
+    percentComplete: Math.round((completed / Math.max(1, applicable.length)) * 100),
+    nextAction,
   };
 }
 

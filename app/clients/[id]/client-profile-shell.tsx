@@ -384,8 +384,44 @@ function DeleteClientButton({ clientLinkId, clientName }: { clientLinkId: string
 // ─── PROGRESS FLOW CHART ───────────────────────────────────────────────
 
 function ProgressFlowChart({ progress }: { progress: ClientProgress }) {
+  const next = progress.nextAction;
   return (
     <section>
+      {/* THE next action — one obvious "Continue" for this client (Mike
+          2026-07-17: "it just needs to be smart and obvious on what we
+          need to do to move to the next step"). */}
+      {next && (
+        <div className="mb-4 rounded-2xl bg-gradient-to-r from-teal to-teal-dark text-white p-4 flex items-center justify-between gap-4 flex-wrap shadow-md">
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-white/70">
+              {next.phase === "cleanup"
+                ? "Onboarding · Cleanup"
+                : next.phase === "production"
+                ? "Production"
+                : "Setup"}
+            </div>
+            <div className="font-bold text-sm mt-0.5">Next up: {next.label}</div>
+            <p className="text-xs text-white/85 mt-0.5">{next.detail}</p>
+          </div>
+          {next.href && (
+            <Link
+              href={next.href}
+              className="shrink-0 inline-flex items-center gap-2 bg-white text-teal-dark text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-50 shadow-sm"
+            >
+              {next.cta} <ArrowRight size={15} />
+            </Link>
+          )}
+        </div>
+      )}
+      {!next && (
+        <div className="mb-4 rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-3.5 flex items-center gap-2.5">
+          <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+          <div className="text-sm text-emerald-900">
+            <strong>Fully live.</strong> Cleanup done, daily recon firing, month closed within 35 days — just keep the monthly rhythm.
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-bold text-navy">Client progress</h2>
         <div className="text-xs text-ink-slate">
@@ -467,6 +503,12 @@ function ProgressStageCard({
       pill: "bg-gray-400",
       pillText: "Not started",
       icon: "text-ink-slate",
+    },
+    skipped: {
+      card: "bg-gray-50/60 border-gray-200 opacity-70",
+      pill: "bg-gray-300",
+      pillText: "Skipped",
+      icon: "text-ink-light",
     },
   };
   const s = styles[stage.status];
@@ -865,16 +907,18 @@ function OverviewTab({
           every morning." Auto-hides for clients with no QBO connection
           since promotion is pointless without working tokens. */}
       {qboStatus === "connected" && (
-        <ProductionStatusCard
-          clientLinkId={clientLink.id}
-          clientName={clientLink.client_name}
-          dailyReconEnabled={!!clientLink.daily_recon_enabled}
-          dailyReconPaused={!!clientLink.daily_recon_paused}
-          pausedReason={clientLink.daily_recon_paused_reason || null}
-          enabledAt={clientLink.daily_recon_enabled_at || null}
-          cleanupCompletedAt={clientLink.cleanup_completed_at || null}
-          reachedBsStage={reachedBsStage}
-        />
+        <div id="move-to-production" className="scroll-mt-24">
+          <ProductionStatusCard
+            clientLinkId={clientLink.id}
+            clientName={clientLink.client_name}
+            dailyReconEnabled={!!clientLink.daily_recon_enabled}
+            dailyReconPaused={!!clientLink.daily_recon_paused}
+            pausedReason={clientLink.daily_recon_paused_reason || null}
+            enabledAt={clientLink.daily_recon_enabled_at || null}
+            cleanupCompletedAt={clientLink.cleanup_completed_at || null}
+            reachedBsStage={reachedBsStage}
+          />
+        </div>
       )}
 
       {/* Closing the month lives on the production board — ONE close path,
