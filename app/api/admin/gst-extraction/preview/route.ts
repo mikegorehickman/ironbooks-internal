@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken } from "@/lib/qbo";
-import { fetchPLDetailAll, fetchProfitAndLoss } from "@/lib/qbo-reports";
-import { incomeAccountNamesFromSummary } from "@/lib/crm-invoice-revenue";
-import {
-  buildExtractionPlan,
-  classifyAccountKind,
-  normalizeAccountKey,
-  type GstInputKind,
-} from "@/lib/gst-extraction";
+import { resolveExtractionContext } from "@/lib/gst-extraction-server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -55,69 +48,17 @@ export async function POST(request: Request) {
     );
   }
 
-  // Category input-kinds from the master COA (client industry, painters
-  // fallback — same fallback chain the bank-rules page uses).
-  const industry = ((client as any).industry as string) || "painters";
-  let { data: coaRows } = await (service as any)
-    .from("master_coa")
-    .select("account_name, gst_input_kind")
-    .eq("jurisdiction", "CA")
-    .eq("industry", industry)
-    .not("gst_input_kind", "is", null);
-  if (!coaRows || coaRows.length === 0) {
-    ({ data: coaRows } = await (service as any)
-      .from("master_coa")
-      .select("account_name, gst_input_kind")
-      .eq("jurisdiction", "CA")
-      .eq("industry", "painters")
-      .not("gst_input_kind", "is", null));
-  }
-  // Keyed by NORMALIZED name — live QBO names differ from master names by
-  // dash variants / "&" / punctuation (Maple City: "Subcontractors – Painting",
-  // "Telephone & Internet" all missed an exact lowercase join).
-  const kindByAccount = new Map<string, GstInputKind>(
-    ((coaRows as any[]) || []).map((r) => [normalizeAccountKey(String(r.account_name)), r.gst_input_kind as GstInputKind])
-  );
-  if (kindByAccount.size === 0) {
-    return NextResponse.json(
-      { error: "master_coa has no gst_input_kind data — run migration 130 first" },
-      { status: 400 }
-    );
-  }
+  const excludeVendors: string[] = Array.isArray(body.exclude_vendors)
+    ? body.exclude_vendors.map(String)
+    : [];
 
   try {
     const token = await getValidToken(clientLinkId, service as any);
-    const realm = (client as any).qbo_realm_id as string;
-    const [plDetail, plSummary] = await Promise.all([
-      fetchPLDetailAll(realm, token, start, end, "Cash"),
-      fetchProfitAndLoss(realm, token, start, end, "Cash"),
-    ]);
-    const incomeAccounts = incomeAccountNamesFromSummary(plSummary);
-
-    // Heuristic fallback for off-master expense accounts: classify by name
-    // pattern (same rules migration 130 seeded with) so "Rent - storage" or
-    // "Online Advertising – Google Ads" still get a plan. Every heuristic
-    // assignment is returned for review — only null-classified names stay
-    // unknown (and get no split).
-    const heuristicKinds: Array<{ account: string; kind: GstInputKind }> = [];
-    for (const row of plDetail) {
-      const key = normalizeAccountKey(row.account);
-      if (!key || kindByAccount.has(key)) continue;
-      const kind = classifyAccountKind(row.account);
-      if (kind) {
-        kindByAccount.set(key, kind);
-        heuristicKinds.push({ account: row.account, kind });
-      }
-    }
-    heuristicKinds.sort((a, b) => a.account.localeCompare(b.account));
-
-    const plan = buildExtractionPlan(plDetail, province, incomeAccounts, kindByAccount);
-    if (!plan) {
-      return NextResponse.json(
-        { error: `Province "${province || "(none)"}" isn't a recognized Canadian province — set it on the client profile first` },
-        { status: 400 }
-      );
-    }
+    // SHARED resolver (lib/gst-extraction-server.ts) — the exact same context
+    // the apply endpoint rebuilds, so preview and apply can never drift.
+    const ctx = await resolveExtractionContext(service, client as any, token, start, end, excludeVendors);
+    if ("error" in ctx) return NextResponse.json({ error: ctx.error }, { status: 400 });
+    const { plan, heuristicKinds } = ctx;
 
     const CAP = 2000;
     return NextResponse.json({
@@ -132,6 +73,9 @@ export async function POST(request: Request) {
       skipped: plan.skipped,
       // Off-master accounts classified by name heuristics — the review list.
       heuristic_kinds: heuristicKinds,
+      // ITC per vendor, largest first — spot unregistered small suppliers
+      // (person-named vendors) and pass them back as exclude_vendors.
+      vendor_itc_summary: plan.vendorItcSummary.slice(0, 100),
       deposit_count: plan.deposits.length,
       expense_count: plan.expenses.length,
       deposits: plan.deposits.slice(0, CAP),

@@ -126,13 +126,21 @@ export function taxAccountNamesFor(province: string | null | undefined): {
   };
 }
 
-/** All tax-account names (any province variant) — used to detect already-split rows. */
+/** All tax-account names (any province variant) — used to detect already-split
+ *  rows. Includes the "Collected" fallbacks used when QBO's built-in
+ *  agency-linked account owns the primary name (it rejects direct postings —
+ *  "Tax Liability Account" 400, proven live on Maple City). */
 export const ALL_TAX_ACCOUNT_NAMES = [
   "GST/HST Payable",
   "GST/QST Payable",
   "GST/HST Recoverable (ITCs)",
   "GST/QST Recoverable (ITRs)",
   "PST Payable",
+  "GST/HST Collected",
+  "GST/QST Collected",
+  "PST Collected",
+  "GST/HST Recoverable (ITCs) - SNAP",
+  "GST/QST Recoverable (ITRs) - SNAP",
 ];
 
 export interface IncomeSplit {
@@ -230,7 +238,12 @@ export interface ExtractionPlan {
     nonRecoverableLines: number;
     /** Expense accounts we couldn't classify — surfaced for review, never guessed. */
     unknownAccounts: string[];
+    /** Expense lines skipped because their vendor is excluded (no ITC). */
+    excludedVendorLines: number;
   };
+  /** ITC per vendor (largest first) — the review surface for spotting
+   *  unregistered small suppliers before the expense-side apply. */
+  vendorItcSummary: Array<{ vendor: string; lines: number; itc: number }>;
 }
 
 /** Expense-family txn types whose lines we split (posting rows on the P&L detail). */
@@ -251,7 +264,13 @@ export function buildExtractionPlan(
   plDetail: PLDetailRow[] | null | undefined,
   province: string,
   incomeAccounts: Set<string>,
-  kindByAccount: Map<string, GstInputKind>
+  kindByAccount: Map<string, GstInputKind>,
+  opts?: {
+    /** Vendors (normalized via normalizeAccountKey) whose expense lines get NO
+     *  ITC split — unregistered small suppliers ("Ryan") charge no tax, so
+     *  claiming 13/113 on their lines over-claims. Income side unaffected. */
+    excludeVendors?: Set<string>;
+  }
 ): ExtractionPlan | null {
   const probeRates = ratesFor(province, "2026-01-01");
   if (!probeRates) return null;
@@ -270,6 +289,8 @@ export function buildExtractionPlan(
   const expenses: ExpenseLinePlan[] = [];
   const unknown = new Set<string>();
   let nonRecoverable = 0;
+  let excludedVendorLines = 0;
+  const excludeVendors = opts?.excludeVendors;
 
   for (const row of rows) {
     if (!row.txn_id || alreadySplitTxnIds.has(row.txn_id)) continue;
@@ -295,6 +316,11 @@ export function buildExtractionPlan(
       }
       if (kind === "none") {
         nonRecoverable++;
+        continue;
+      }
+      // Excluded vendor (unregistered small supplier — no tax embedded).
+      if (excludeVendors && row.name && excludeVendors.has(normalizeAccountKey(row.name))) {
+        excludedVendorLines++;
         continue;
       }
       const split = splitExpense(amount, rates, kind);
@@ -323,6 +349,20 @@ export function buildExtractionPlan(
     itcTotal: r2(expenses.reduce((s, e) => s + e.split.itc, 0)),
   };
 
+  // ITC by vendor, largest first — the "is this vendor actually registered?"
+  // review surface (a person-named vendor with ITCs is the tell).
+  const byVendor = new Map<string, { lines: number; itc: number }>();
+  for (const e of expenses) {
+    const v = (e.vendor || "(no vendor)").trim() || "(no vendor)";
+    const g = byVendor.get(v) || { lines: 0, itc: 0 };
+    g.lines++;
+    g.itc = r2(g.itc + Math.abs(e.split.itc));
+    byVendor.set(v, g);
+  }
+  const vendorItcSummary = [...byVendor.entries()]
+    .map(([vendor, g]) => ({ vendor, ...g }))
+    .sort((a, b) => b.itc - a.itc);
+
   return {
     province,
     accounts,
@@ -333,6 +373,8 @@ export function buildExtractionPlan(
       alreadySplitTxns: alreadySplitTxnIds.size,
       nonRecoverableLines: nonRecoverable,
       unknownAccounts: [...unknown].sort(),
+      excludedVendorLines,
     },
+    vendorItcSummary,
   };
 }

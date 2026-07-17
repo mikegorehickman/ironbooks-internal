@@ -6,8 +6,31 @@
  * target resolves on every client (and the KB-fallback remediation has real
  * destination accounts to point at).
  */
-import { fetchAllAccounts, createAccount } from "@/lib/qbo";
+import { fetchAllAccounts, createAccount, updateAccountType, type QBOAccount } from "@/lib/qbo";
 import { normalizeAccountName } from "@/lib/account-name";
+
+/**
+ * Pure nesting decision for a leaf's master parent (fixture-tested):
+ *  - 'nest'    — existing parent is postable as-is (right type, top-level)
+ *  - 'detach'  — existing parent matches by name but is ITSELF a sub-account
+ *                while the master defines it top-level → un-nest it first
+ *                (the Maple City bug: client had Marketing under "Advertising
+ *                and Promotion", so new leaves became sub-of-sub)
+ *  - 'no-nest' — wrong type (or detach impossible): create the leaf top-level
+ *                and let the retype/re-parent engine sort it later
+ */
+export function parentNestAction(p: {
+  exists: boolean;
+  typeMatches: boolean;
+  isSubAccount: boolean;
+  masterTopLevel: boolean;
+}): "nest" | "detach" | "no-nest" {
+  if (!p.exists) return "no-nest";
+  if (!p.typeMatches) return "no-nest";
+  if (p.isSubAccount && p.masterTopLevel) return "detach";
+  if (p.isSubAccount) return "no-nest";
+  return "nest";
+}
 
 export interface MasterCoaRow {
   account_name: string;
@@ -22,6 +45,10 @@ export interface ApplyResult {
   client_name: string;
   missing: string[];            // master leaves absent from the client's QBO
   created: string[];            // accounts actually created this run
+  /** Existing parent accounts un-nested to match the master's top-level
+   *  placement (e.g. client's "Marketing" pulled out from under
+   *  "Advertising and Promotion" before nesting leaves beneath it). */
+  detached: string[];
   errors: { account: string; message: string }[];
   dry_run: boolean;
 }
@@ -46,11 +73,13 @@ export async function applyMasterCoaToClient(params: {
   const qboAccounts = await fetchAllAccounts(realmId, accessToken);
   // Existing names — include INACTIVE accounts too: QBO rejects creating a
   // name that collides with a deleted account, so we treat those as present
-  // rather than failing the create.
-  const existing = new Map<string, { id: string; active: boolean; type: string }>(
+  // rather than failing the create. `sub`/`raw` carry the account's own
+  // nesting so we never blindly nest a leaf under a parent that is itself a
+  // sub-account (the sub-of-sub bug).
+  const existing = new Map<string, { id: string; active: boolean; type: string; sub: boolean; raw: QBOAccount }>(
     qboAccounts.map((a: any) => [
       normalizeAccountName(a.Name),
-      { id: a.Id, active: a.Active !== false, type: a.AccountType || "" },
+      { id: a.Id, active: a.Active !== false, type: a.AccountType || "", sub: a.SubAccount === true, raw: a },
     ])
   );
 
@@ -96,25 +125,61 @@ export async function applyMasterCoaToClient(params: {
     client_name: clientName,
     missing: missingLeaves.map((m) => m.account_name),
     created: [],
+    detached: [],
     errors: [],
     dry_run: dryRun,
   };
   if (dryRun || missingLeaves.length === 0) return result;
 
-  // Parent cache: existing QBO parents (id + type) by normalized name, plus
-  // ones we create. Type matters: QBO refuses to nest a child under a parent
-  // of a different AccountType, and many client charts hold wrongly-typed
-  // parents (e.g. "Salaries & Payroll" as Other Expense — JP's finding).
-  const parentByName = new Map<string, { id: string; type: string }>();
+  // Parent cache: existing QBO parents (id + type + own nesting) by
+  // normalized name, plus ones we create. Type matters: QBO refuses to nest a
+  // child under a parent of a different AccountType. Nesting matters too: a
+  // name-matched "parent" that is ITSELF a sub-account would make the new
+  // leaf a sub-of-sub (Advertising and Promotion → Marketing → leaf), so it
+  // must be detached to the master's top level first — or not used at all.
+  const parentByName = new Map<string, { id: string; type: string; sub: boolean; raw?: QBOAccount }>();
   for (const [norm, acc] of existing) {
-    if (acc.active) parentByName.set(norm, { id: acc.id, type: acc.type });
+    if (acc.active) parentByName.set(norm, { id: acc.id, type: acc.type, sub: acc.sub, raw: acc.raw });
   }
 
-  async function ensureParent(parentName: string, childType: string): Promise<{ id: string; type: string } | undefined> {
+  async function ensureParent(
+    parentName: string,
+    childType: string
+  ): Promise<{ id: string; type: string; sub: boolean } | undefined> {
     const norm = normalizeAccountName(parentName);
-    const cached = parentByName.get(norm);
-    if (cached) return cached;
     const masterParent = parents.get(parentName);
+    // 2-level master: a referenced parent is top-level unless the master row
+    // itself declares a parent (none do today).
+    const masterTopLevel = !masterParent?.parent_account_name;
+    const cached = parentByName.get(norm);
+
+    if (cached) {
+      const action = parentNestAction({
+        exists: true,
+        typeMatches: cached.type === (masterParent?.qbo_account_type || childType),
+        isSubAccount: cached.sub,
+        masterTopLevel,
+      });
+      if (action === "detach" && cached.raw) {
+        try {
+          const raw: any = cached.raw;
+          await updateAccountType(realmId, accessToken, cached.id, String(raw.SyncToken ?? "0"), {
+            newType: raw.AccountType,
+            newSubType: raw.AccountSubType || "OtherMiscellaneousExpense",
+            currentAccount: cached.raw,
+            detachFromParent: true,
+          });
+          cached.sub = false;
+          result.detached.push(parentName);
+        } catch (err: any) {
+          // Couldn't un-nest — report it and leave the leaf top-level rather
+          // than create a sub-of-sub.
+          result.errors.push({ account: parentName, message: `detach failed: ${err.message}` });
+        }
+      }
+      return cached;
+    }
+
     const type = masterParent?.qbo_account_type || childType;
     try {
       const created = await createWithRetry({
@@ -122,7 +187,7 @@ export async function applyMasterCoaToClient(params: {
         accountType: type,
         accountSubType: masterParent?.qbo_account_subtype || "OtherMiscellaneousExpense",
       });
-      const entry = { id: created.Id, type };
+      const entry = { id: created.Id, type, sub: false };
       parentByName.set(norm, entry);
       result.created.push(parentName);
       return entry;
@@ -142,8 +207,9 @@ export async function applyMasterCoaToClient(params: {
         // (e.g. "Salaries & Payroll" as Other Expense). Correct TYPE beats
         // correct NESTING — type drives P&L placement, nesting is a rollup —
         // so create the account top-level with the master's type and let the
-        // retype engine fix the parent + re-nest later.
-        if (parent && parent.type === leaf.qbo_account_type) {
+        // retype engine fix the parent + re-nest later. Same rule when the
+        // parent is still a sub-account (detach failed): never sub-of-sub.
+        if (parent && parent.type === leaf.qbo_account_type && !parent.sub) {
           parentRefId = parent.id;
         }
       }
@@ -154,7 +220,7 @@ export async function applyMasterCoaToClient(params: {
         parentRefId,
       });
       result.created.push(leaf.account_name);
-      parentByName.set(normalizeAccountName(created.Name), { id: created.Id, type: leaf.qbo_account_type });
+      parentByName.set(normalizeAccountName(created.Name), { id: created.Id, type: leaf.qbo_account_type, sub: !!parentRefId });
     } catch (err: any) {
       result.errors.push({ account: leaf.account_name, message: err.message });
     }
