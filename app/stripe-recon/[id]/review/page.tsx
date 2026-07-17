@@ -261,6 +261,7 @@ export default async function StripeReconReviewPage({
             stripeConnected={clientLink?.stripe_connection_status === "connected"}
             dateRangeStart={(job.date_range_start as unknown as string) || null}
             dateRangeEnd={(job.date_range_end as unknown as string) || null}
+            reconMethod={((job as any).method as "stripe_api" | "qbo_invoice_match" | null) ?? null}
           />
           <div className="max-w-2xl">
             <MarkCleanupCompleteButton
