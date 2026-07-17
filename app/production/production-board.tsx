@@ -513,18 +513,26 @@ function BoardCard({
       }`}
     >
       <div className="flex items-start gap-1">
-        <button onClick={onSelect} className="flex-1 min-w-0 text-left">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-sm font-semibold text-navy">{client.client_name}</span>
+            <a
+              href={`/clients/${client.id}`}
+              className="text-sm font-semibold text-navy hover:text-teal hover:underline"
+              title="Open client profile"
+            >
+              {client.client_name}
+            </a>
             {client.paused && (
               <span className="text-[9px] font-bold bg-gray-100 text-ink-slate px-1 py-0.5 rounded">PAUSED</span>
             )}
             <ClientBadges attention={attention} stage="production" max={2} />
           </div>
           {client.contact_name && (
-            <div className="text-[11px] text-gray-400 truncate">{client.contact_name}</div>
+            <button onClick={onSelect} className="text-left w-full">
+              <div className="text-[11px] text-gray-400 truncate">{client.contact_name}</div>
+            </button>
           )}
-        </button>
+        </div>
         <EscalateMenu
           clientLinkId={client.id}
           clientName={client.client_name}
