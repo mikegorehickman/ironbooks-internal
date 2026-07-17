@@ -18,7 +18,7 @@
  * Idempotent: createJournalEntry hashes (realm, date, note, lines), so re-running
  * the same reclass won't double-post.
  */
-import { createJournalEntry, type JournalEntryLine, type QBOAccount } from "@/lib/qbo";
+import { createJournalEntry, qboRequest, type JournalEntryLine, type QBOAccount } from "@/lib/qbo";
 import { fetchProfitAndLossByMonth } from "@/lib/qbo-pl-by-month";
 import { normalizeAccountName } from "@/lib/account-name";
 
@@ -117,6 +117,66 @@ export async function reclassAccountViaJournalEntry(params: {
       result.moved += amount;
     } catch (e: any) {
       result.failures.push(`${pl.months[i]?.title || date}: ${String(e?.message || e).slice(0, 200)}`);
+    }
+  }
+  return result;
+}
+
+export interface ItemRepointResult {
+  repointed: number;
+  failures: string[];
+}
+
+/**
+ * Re-point every QBO Item (product/service) that uses `fromAccountId` as its
+ * income or expense account onto `toAccountId`. Required before an account can
+ * be inactivated — QBO blocks it ("used by a product or service") — and so
+ * future invoices/bills using those items post to the target, not the retired
+ * source. Sparse Item update (Id + SyncToken + Name + Type + the changed ref).
+ */
+export async function repointItemsToAccount(params: {
+  realmId: string;
+  accessToken: string;
+  fromAccountId: string;
+  toAccountId: string;
+  toAccountName?: string;
+}): Promise<ItemRepointResult> {
+  const { realmId, accessToken, fromAccountId, toAccountId, toAccountName } = params;
+  const result: ItemRepointResult = { repointed: 0, failures: [] };
+
+  // Find items referencing the source account on either side.
+  const items: any[] = [];
+  const pageSize = 500;
+  for (let page = 0; page < 40; page++) {
+    const q = encodeURIComponent(
+      `SELECT Id, Name, Type, IncomeAccountRef, ExpenseAccountRef, SyncToken, Active FROM Item STARTPOSITION ${page * pageSize + 1} MAXRESULTS ${pageSize}`
+    );
+    const data: any = await qboRequest(realmId, accessToken, `/query?query=${q}`);
+    const batch: any[] = data?.QueryResponse?.Item || [];
+    for (const it of batch) {
+      if (
+        String(it.IncomeAccountRef?.value || "") === fromAccountId ||
+        String(it.ExpenseAccountRef?.value || "") === fromAccountId
+      ) {
+        items.push(it);
+      }
+    }
+    if (batch.length < pageSize) break;
+  }
+
+  for (const it of items) {
+    const body: any = { Id: it.Id, SyncToken: it.SyncToken, sparse: true, Name: it.Name, Type: it.Type };
+    if (String(it.IncomeAccountRef?.value || "") === fromAccountId) {
+      body.IncomeAccountRef = { value: toAccountId, ...(toAccountName && { name: toAccountName }) };
+    }
+    if (String(it.ExpenseAccountRef?.value || "") === fromAccountId) {
+      body.ExpenseAccountRef = { value: toAccountId, ...(toAccountName && { name: toAccountName }) };
+    }
+    try {
+      await qboRequest(realmId, accessToken, `/item?minorversion=70`, { method: "POST", body: JSON.stringify(body) });
+      result.repointed++;
+    } catch (e: any) {
+      result.failures.push(`item "${it.Name}": ${String(e?.message || e).slice(0, 200)}`);
     }
   }
   return result;

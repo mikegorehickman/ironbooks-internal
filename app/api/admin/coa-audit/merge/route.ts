@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, fetchAllAccounts, inactivateAccount, QBOReauthRequiredError } from "@/lib/qbo";
-import { reclassAccountViaJournalEntry } from "@/lib/coa-reclass-je";
+import { reclassAccountViaJournalEntry, repointItemsToAccount } from "@/lib/coa-reclass-je";
 import { computeCoaDrift, type DriftMasterRow } from "@/lib/coa-drift";
 
 export const dynamic = "force-dynamic";
@@ -125,6 +125,17 @@ export async function POST(request: Request) {
       memo: jeMemo,
     });
 
+    // Re-point any Items (products/services) that post to the source account
+    // onto the target — otherwise QBO blocks inactivation ("used by a product
+    // or service") and future invoices/bills keep landing on the retired
+    // account. Failures fold into je.failures so we never retire a source that
+    // still has live item links.
+    const repoint = await repointItemsToAccount({
+      realmId: clientLink.qbo_realm_id, accessToken,
+      fromAccountId: sourceId, toAccountId: target.Id, toAccountName: target.Name,
+    });
+    for (const f of repoint.failures) je.failures.push(`re-point ${f}`);
+
     // Retire the drained source only if every month posted cleanly. An empty
     // source (no P&L activity in range) is also safe to inactivate.
     let inactivated = false;
@@ -168,6 +179,7 @@ export async function POST(request: Request) {
         ytd_start: ytdStart, ytd_end: ytdEnd,
         amount_moved: je.moved, jes_posted: je.jesPosted,
         months_with_activity: je.monthsWithActivity, found_in_report: je.foundInReport,
+        items_repointed: repoint.repointed,
         failures: je.failures, inactivated,
       } as any,
     } as any);
@@ -176,7 +188,7 @@ export async function POST(request: Request) {
       ok: je.failures.length === 0,
       method: "je_reclass",
       source: source.Name, target: target.Name,
-      amountMoved: je.moved, jesPosted: je.jesPosted,
+      amountMoved: je.moved, jesPosted: je.jesPosted, itemsRepointed: repoint.repointed,
       monthsWithActivity: je.monthsWithActivity, foundInReport: je.foundInReport,
       inactivated, failures: je.failures,
       linesMoved: je.jesPosted, unsupported: 0, // back-compat for the existing UI

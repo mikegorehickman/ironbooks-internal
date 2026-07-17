@@ -97,6 +97,7 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
       const parts = data.method === "je_reclass"
         ? [`moved $${Math.round(data.amountMoved || 0).toLocaleString()} via ${data.jesPosted || 0} JE${(data.jesPosted || 0) === 1 ? "" : "s"}`]
         : [`${data.linesMoved} line(s) moved`];
+      if (data.itemsRepointed > 0) parts.push(`${data.itemsRepointed} item(s) re-pointed`);
       if (data.inactivated) parts.push("source retired");
       if (data.failures?.length) parts.push(`${data.failures.length} failed`);
       setMergeMsg((m) => ({ ...m, [p.sourceId]: parts.join(" · ") }));
