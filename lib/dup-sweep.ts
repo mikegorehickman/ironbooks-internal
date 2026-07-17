@@ -148,9 +148,11 @@ export async function scanClientForDuplicates(
 
   const counts = { certain: 0, likely: 0, possible: 0 };
   let enriched = 0;
+  const seenFingerprints = new Set<string>();
 
   for (const f of findings) {
     const fingerprint = `${f.kind}:${[...f.txn_ids].sort().join(",")}`;
+    seenFingerprints.add(fingerprint);
 
     // Never resurrect a finding a human already resolved or kept.
     const { data: existing } = await svc
@@ -194,6 +196,22 @@ export async function scanClientForDuplicates(
     } else {
       await svc.from("dup_findings").insert(payload);
     }
+  }
+
+  // Supersede stale OPEN findings this re-scan no longer detects (e.g. the
+  // recurring-payroll false positives the old same-amount/placeholder-doc
+  // logic raised). Only touch status='open' — human decisions (kept/resolved)
+  // are never disturbed.
+  const { data: openRows } = await svc
+    .from("dup_findings")
+    .select("id, fingerprint")
+    .eq("client_link_id", clientLink.id)
+    .eq("status", "open");
+  const staleIds = ((openRows as any[]) || [])
+    .filter((r) => !seenFingerprints.has(r.fingerprint))
+    .map((r) => r.id);
+  if (staleIds.length > 0) {
+    await svc.from("dup_findings").delete().in("id", staleIds);
   }
 
   return {
