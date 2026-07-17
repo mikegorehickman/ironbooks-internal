@@ -1360,23 +1360,68 @@ export async function executeJob(jobId: string): Promise<{
               source_now_named: renamedTo || currentSourceName,
             });
           } else {
-            // FULL MERGE — source is fully drained, safe to inactivate.
-            await qbo.inactivateAccount(
-              ctx.realmId,
-              ctx.accessToken,
-              action.qbo_account_id,
-              sourceAccount.SyncToken,
-              sourceAccount
-            );
-            await markActionComplete(ctx, action.id, targetAccount.Id, {
-              merged_into: action.new_name,
-              lines_moved: linesReclassed,
-            });
-            await logActionResult(ctx, action.id, "qbo_merge", {
-              from: action.current_name,
-              into: action.new_name,
-              lines_moved: linesReclassed,
-            });
+            // FULL MERGE — the PLAN says drained, but the plan only sees
+            // expense-family lines (fetchAllTransactionLines). Income-account
+            // activity — deposit lines, JEs, CC credits — is invisible to it,
+            // so "fully drained" sources were inactivated while still carrying
+            // P&L activity and showed up as "Cash Back Rewards (deleted)"
+            // $653 on statements (Mike's screenshot). VERIFY against QBO
+            // before inactivating; anything left → keep the source ACTIVE and
+            // report it, never inactivate-with-history.
+            let residualReason: string | null = null;
+            if (linesNotApplied > 0) {
+              residualReason = `${linesNotApplied} line(s) failed to move`;
+            } else {
+              try {
+                const stillHasActivity = await qbo.accountHasTransactions(
+                  ctx.realmId,
+                  ctx.accessToken,
+                  action.qbo_account_id
+                );
+                if (stillHasActivity) {
+                  residualReason =
+                    "account still has activity this stage can't move (deposit lines / JEs / invoice items)";
+                }
+              } catch (verifyErr: any) {
+                // Can't prove it's empty → don't inactivate. Safe default.
+                residualReason = `could not verify account is empty (${String(verifyErr?.message || verifyErr).slice(0, 120)})`;
+              }
+            }
+
+            if (residualReason) {
+              await markActionComplete(ctx, action.id, targetAccount.Id, {
+                merged_into: action.new_name,
+                lines_moved: linesReclassed,
+                partial_merge: true,
+                source_kept_active: residualReason,
+              });
+              await logActionResult(ctx, action.id, "qbo_merge_source_kept_active", {
+                from: action.current_name,
+                into: action.new_name,
+                lines_moved: linesReclassed,
+                reason: residualReason,
+              });
+              await logProgress(ctx, "merge_source_kept_active",
+                `⚠ Merged "${action.current_name}" → "${action.new_name}" but the source was NOT inactivated: ${residualReason}. Reclassify the remaining activity, then inactivate via QBO UI.`,
+                { source: action.current_name, target: action.new_name, reason: residualReason });
+            } else {
+              await qbo.inactivateAccount(
+                ctx.realmId,
+                ctx.accessToken,
+                action.qbo_account_id,
+                sourceAccount.SyncToken,
+                sourceAccount
+              );
+              await markActionComplete(ctx, action.id, targetAccount.Id, {
+                merged_into: action.new_name,
+                lines_moved: linesReclassed,
+              });
+              await logActionResult(ctx, action.id, "qbo_merge", {
+                from: action.current_name,
+                into: action.new_name,
+                lines_moved: linesReclassed,
+              });
+            }
           }
 
           // Surface partial-apply failures loudly. Previously, the executor

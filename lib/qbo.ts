@@ -1675,13 +1675,22 @@ export async function accountHasTransactions(
   accessToken: string,
   accountId: string
 ): Promise<boolean> {
-  // The most reliable single-query is to check whether the account has been
-  // referenced in any Journal Entry line. JournalEntries touch every account
-  // type. Other transaction types are also possible but JEs are universal.
+  // Entity-level queries (never the TransactionList report — its account=
+  // filter is silently ignored). LINE-level refs matter as much as header
+  // refs: `Deposit WHERE DepositToAccountRef` is only the BANK the deposit
+  // lands in — an INCOME account credited by deposit lines matches none of
+  // the header queries, which is how "Cash Back Rewards" passed every guard
+  // and got inactivated with $653 of activity (Mike's screenshot). Invoice /
+  // SalesReceipt income flows through Items and isn't directly queryable by
+  // account — the caller should treat this check as necessary-not-sufficient
+  // for income accounts fed by invoicing.
   const queries = [
     `SELECT Id FROM JournalEntry WHERE Line.JournalEntryLineDetail.AccountRef = '${accountId}' MAXRESULTS 1`,
     `SELECT Id FROM Purchase WHERE AccountRef = '${accountId}' MAXRESULTS 1`,
+    `SELECT Id FROM Purchase WHERE Line.AccountBasedExpenseLineDetail.AccountRef = '${accountId}' MAXRESULTS 1`,
+    `SELECT Id FROM Bill WHERE Line.AccountBasedExpenseLineDetail.AccountRef = '${accountId}' MAXRESULTS 1`,
     `SELECT Id FROM Deposit WHERE DepositToAccountRef = '${accountId}' MAXRESULTS 1`,
+    `SELECT Id FROM Deposit WHERE Line.DepositLineDetail.AccountRef = '${accountId}' MAXRESULTS 1`,
   ];
 
   for (const q of queries) {
