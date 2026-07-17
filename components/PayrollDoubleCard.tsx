@@ -119,7 +119,7 @@ export function PayrollDoubleCard({ clientLinkId, clientName }: { clientLinkId: 
                     className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-white bg-teal hover:bg-teal-dark px-2.5 py-1 rounded disabled:opacity-50"
                   >
                     {resolveBusy === s.account ? <Loader2 size={11} className="animate-spin" /> : <Wrench size={11} />}
-                    Move cash to clearing
+                    Move cash to Payroll Clearing
                   </button>
                 )}
               </div>

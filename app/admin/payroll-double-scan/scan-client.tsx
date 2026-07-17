@@ -258,7 +258,7 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                                     title={`Move ${money(cash)} of net-pay to Payroll Clearing`}
                                   >
                                     {resolveBusy === key ? <Loader2 size={11} className="animate-spin" /> : <Wrench size={11} />}
-                                    Move cash to clearing
+                                    Move cash to Payroll Clearing
                                   </button>
                                 )}
                               </div>
@@ -293,7 +293,7 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                             </div>
                           );
                         })}
-                        <div className="text-ink-light">Cash basis: the <span className="font-semibold">cash that left the bank</span> is the real expense. <span className="font-semibold">Move cash to clearing</span> keeps the paycheques as the wage record and moves the duplicate net-pay onto a balance-sheet Payroll Clearing account (nets to ~0 against the paycheques) — reviewed, one line at a time; closed-period locks are reported.</div>
+                        <div className="text-ink-light">Gross paycheques already include the withheld taxes (see Direct Labour Taxes) — the net-pay bank line is a SUBSET of that gross wage, not a separate cost. <span className="font-semibold">Move cash to Payroll Clearing</span> keeps the paycheques as the one wage record on the P&amp;L and relocates the duplicate net-pay onto a balance-sheet Payroll Clearing account (nets to ~0 against the paycheques) — reviewed, one line at a time; closed-period locks are reported. Nothing about the bank transaction itself changes, only which account absorbs it.</div>
                       </td>
                     </tr>
                   )}

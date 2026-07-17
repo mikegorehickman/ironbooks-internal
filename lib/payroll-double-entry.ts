@@ -464,7 +464,10 @@ export function detectLaborDuplication(
       const cashN = e.txns.filter((t) => t.kind === "cash").length;
       e.reason =
         `${cashN} payment${cashN === 1 ? "" : "s"} to payroll ${e.employees === 1 ? "employee" : "employees"} ` +
-        `(${names.join(", ")}${e.employees > names.length ? ", …" : ""}) posted to "${e.account}" — these are the CASH that left the bank to pay staff who ALSO have QBO Payroll paycheques, so the wages are expensed twice. Move the cash to Payroll Clearing; the paycheques stay as the wage record.`;
+        `(${names.join(", ")}${e.employees > names.length ? ", …" : ""}) posted to "${e.account}" — ` +
+        `these are the NET-PAY bank withdrawals for staff whose GROSS wages are already booked via QBO Payroll paycheques ` +
+        `(gross = net pay + withheld taxes, so net pay is a subset of the paycheque, not an additional cost). ` +
+        `Move this net-pay to Payroll Clearing so it stops being counted as a second wage expense; the paycheques stay as the one wage record on the P&L.`;
       return e;
     })
     .filter((e) => Math.abs(e.total) >= minSuspectTotal)
