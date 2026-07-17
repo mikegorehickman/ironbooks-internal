@@ -401,10 +401,25 @@ export function CleanupWizardClient({
     setAttested(false);
   }, [activeModule]);
 
+  // UF / A/R / OBE / bank reconciliation now resolve on the main Balance
+  // Sheet page (all in one spot). "Fix →" for those deep-links there and
+  // opens the right resolver; everything else still routes to its module.
+  const MODULE_TO_LANDING_HASH: Record<string, string> = {
+    undeposited_funds: "uf",
+    accounts_receivable: "ar",
+    obe_uncategorized: "obe",
+    bank_recon: "reconcile",
+  };
+
   // "Fix →" on a What-needs-fixing line: jump to the modules step and pulse
-  // the module card that fixes it.
+  // the module card that fixes it (for non-merged modules).
   const [focusModuleKey, setFocusModuleKey] = useState<string | null>(null);
   function jumpToModule(module?: string | null) {
+    const hash = module ? MODULE_TO_LANDING_HASH[module] : undefined;
+    if (hash) {
+      window.location.assign(`/balance-sheet/${clientLinkId}#${hash}`);
+      return;
+    }
     setStep("modules");
     if (!module) return;
     setFocusModuleKey(module);

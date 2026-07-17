@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import {
   Loader2, ArrowRight, RefreshCw, AlertCircle, Sparkles, Wallet,
   CheckCircle2, Save, FileText, Landmark, CreditCard, FileSpreadsheet,
-  HomeIcon, Search, Send, X, ExternalLink, ChevronRight,
+  HomeIcon, Search, Send, X, ExternalLink, ChevronRight, ChevronDown,
+  Banknote, ScrollText, Scale,
 } from "lucide-react";
 import { ExternalInvoiceUpload } from "./external-invoice-upload";
+import { UfAuditClient } from "./uf-audit/uf-audit-client";
+import { QboRemediationPanel } from "@/components/QboRemediationPanel";
 
 interface BSAccount {
   qbo_account_id: string;
@@ -110,6 +113,21 @@ export function BalanceSheetLanding({
   clientName: string;
 }) {
   const router = useRouter();
+
+  // Deep-link section (#reconcile | #uf | #ar | #obe) — the wizard's "Fix"
+  // buttons and the client-profile Continue banner land here and open the
+  // right resolver. Read after mount so SSR + first client render match.
+  const [sectionHash, setSectionHash] = useState("");
+  useEffect(() => {
+    const h = window.location.hash.replace("#", "");
+    if (!h) return;
+    setSectionHash(h);
+    const t = setTimeout(
+      () => document.getElementById(h)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      250
+    );
+    return () => clearTimeout(t);
+  }, []);
 
   const [accounts, setAccounts] = useState<BSAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -511,6 +529,31 @@ export function BalanceSheetLanding({
         </a>
       </div>
 
+      {/* Resolve issues — this page is the ONE place to fix the balance sheet.
+          Each chip jumps to and opens its resolver below. */}
+      <div className="rounded-2xl bg-white border border-gray-200 p-4">
+        <div className="text-xs font-bold uppercase tracking-wide text-ink-slate mb-2">
+          Resolve balance-sheet issues here
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { id: "reconcile", label: "Reconcile accounts", icon: Scale },
+            { id: "uf", label: "Undeposited Funds", icon: Banknote },
+            { id: "ar", label: "A/R vs duplicates", icon: ScrollText },
+            { id: "obe", label: "Opening Balance Equity", icon: Landmark },
+          ].map((s) => (
+            <a
+              key={s.id}
+              href={`#${s.id}`}
+              onClick={() => setSectionHash(s.id)}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-navy hover:border-teal/50 hover:bg-teal/5"
+            >
+              <s.icon size={13} className="text-teal" /> {s.label}
+            </a>
+          ))}
+        </div>
+      </div>
+
       {/* Job-app CSV import card — sits above UF→A/R so the bookkeeper
           uploads source-of-truth invoices first; the duplicate detector
           downstream consumes the lineage_key to label estimate revisions
@@ -734,7 +777,7 @@ export function BalanceSheetLanding({
       </details>
 
       {/* Account reconciliation form — the main event */}
-      <div className="rounded-2xl bg-white border border-gray-200 overflow-hidden">
+      <div id="reconcile" className="rounded-2xl bg-white border border-gray-200 overflow-hidden scroll-mt-24">
         <div className="px-5 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-base font-bold text-navy">
@@ -1143,6 +1186,264 @@ export function BalanceSheetLanding({
           </div>
         )}
       </div>
+
+      {/* ── Undeposited Funds — orphan-payment resolver, merged in-page ── */}
+      <CollapsibleSection
+        id="uf"
+        currentHash={sectionHash}
+        icon={Banknote}
+        title="Undeposited Funds"
+        subtitle="Find payments stuck in Undeposited Funds, match them to their real deposits, and post the clearing entries to QuickBooks. Whatever the client can't confirm becomes a one-click Ask."
+      >
+        <UfAuditClient clientLinkId={clientLinkId} clientName={clientName} latestScan={null} />
+      </CollapsibleSection>
+
+      {/* ── A/R vs CRM duplicates — the inflated-A/R fix ── */}
+      <CollapsibleSection
+        id="ar"
+        currentHash={sectionHash}
+        icon={ScrollText}
+        title="Accounts Receivable — verify against duplicates"
+        subtitle="Most inflated A/R is CRM invoices whose cash already arrived as a bank deposit. This checks every open invoice against the deposits and lets you void the duplicate invoice or apply the deposit to it — so A/R reflects what's genuinely still owed."
+      >
+        <ArSection clientLinkId={clientLinkId} clientName={clientName} />
+      </CollapsibleSection>
+
+      {/* ── Opening Balance Equity — one-click zero ── */}
+      <CollapsibleSection
+        id="obe"
+        currentHash={sectionHash}
+        icon={Landmark}
+        title="Opening Balance Equity"
+        subtitle="A clean balance sheet has $0 here. One click proposes the entry that moves whatever's sitting in OBE into Retained Earnings — you review it before it posts."
+      >
+        <ObeCard clientLinkId={clientLinkId} />
+      </CollapsibleSection>
+    </div>
+  );
+}
+
+/**
+ * Collapsible resolver section. Opens automatically when the page's deep-link
+ * hash matches its id (so the wizard's "Fix →" buttons land open). Children
+ * only mount while open, so the embedded UF audit / A/R panels don't fetch
+ * QBO until the bookkeeper actually opens the section.
+ */
+function CollapsibleSection({
+  id,
+  currentHash,
+  icon: Icon,
+  title,
+  subtitle,
+  children,
+}: {
+  id: string;
+  currentHash: string;
+  icon: any;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (currentHash === id) setOpen(true);
+  }, [currentHash, id]);
+  return (
+    <section id={id} className="rounded-2xl bg-white border border-gray-200 overflow-hidden scroll-mt-24">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left hover:bg-gray-50/60"
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Icon size={16} className="text-teal shrink-0" />
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-navy">{title}</h2>
+            {subtitle && <p className="text-xs text-ink-slate mt-0.5 leading-relaxed">{subtitle}</p>}
+          </div>
+        </div>
+        <ChevronDown size={18} className={`text-ink-slate shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && <div className="px-5 pb-5 border-t border-gray-100 pt-4">{children}</div>}
+    </section>
+  );
+}
+
+/**
+ * A/R resolver — a look-back range selector feeding the shared CRM-invoice
+ * remediation panel (void the duplicate invoice OR apply its matched deposit).
+ * Default is "since last year" because the CRM double-counts usually go back
+ * further than the current cleanup window.
+ */
+function ArSection({ clientLinkId, clientName }: { clientLinkId: string; clientName: string }) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const today = now.toISOString().slice(0, 10);
+  const RANGES = [
+    { key: "ytd", label: "This year", start: `${year}-01-01`, end: today },
+    { key: "prev", label: `Since Jan ${year - 1}`, start: `${year - 1}-01-01`, end: today },
+    { key: "all", label: `All history (since ${year - 5})`, start: `${year - 5}-01-01`, end: today },
+  ];
+  const [rangeKey, setRangeKey] = useState("prev");
+  const range = RANGES.find((r) => r.key === rangeKey) || RANGES[1];
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <span className="text-ink-slate font-semibold">Look back:</span>
+        {RANGES.map((r) => (
+          <button
+            key={r.key}
+            onClick={() => setRangeKey(r.key)}
+            className={`px-2.5 py-1 rounded-lg border font-semibold ${
+              rangeKey === r.key ? "bg-teal text-white border-teal" : "border-gray-200 text-ink-slate hover:border-teal/50"
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+      {/* key forces a clean remount (resets the panel's preview) on range change */}
+      <QboRemediationPanel
+        key={`${range.start}-${range.end}`}
+        clientLinkId={clientLinkId}
+        clientName={clientName}
+        start={range.start}
+        end={range.end}
+      />
+    </div>
+  );
+}
+
+/**
+ * Opening Balance Equity one-click. Reads the live OBE balance + a proposed
+ * zeroing entry (OBE → Retained Earnings) from /api/balance-sheet/obe, shows
+ * the exact debits/credits, and posts via /api/balance-sheet/post-je on
+ * confirm. Read-only until the bookkeeper clicks Post.
+ */
+function ObeCard({ clientLinkId }: { clientLinkId: string }) {
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [posted, setPosted] = useState<{ doc_number: string | null; qbo_je_id: string } | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    setPosted(null);
+    try {
+      const res = await fetch(`/api/balance-sheet/obe?client_link_id=${clientLinkId}`);
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setData(j);
+    } catch (e: any) {
+      setError(e?.message || "Couldn't read the OBE balance");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientLinkId]);
+
+  async function postJE() {
+    if (!data?.proposed_lines?.length) return;
+    setPosting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/balance-sheet/post-je", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_link_id: clientLinkId,
+          lines: data.proposed_lines,
+          txn_date: data.txn_date,
+          memo: data.memo,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.ok === false) throw new Error(j.error || j.reason || `HTTP ${res.status}`);
+      setPosted({ doc_number: j.doc_number ?? null, qbo_je_id: j.qbo_je_id });
+    } catch (e: any) {
+      setError(e?.message || "Post failed");
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  const money = (n: number) =>
+    `$${Math.abs(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  if (loading) {
+    return (
+      <div className="text-sm text-ink-slate flex items-center gap-2">
+        <Loader2 size={14} className="animate-spin" /> Reading Opening Balance Equity…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+        <button onClick={load} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-gray-200 hover:border-teal/50">
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (!data?.obe) {
+    return <div className="text-sm text-emerald-700 flex items-center gap-2"><CheckCircle2 size={14} /> No Opening Balance Equity account on this file — nothing to clear.</div>;
+  }
+  if (data.is_clean) {
+    return (
+      <div className="text-sm text-emerald-700 flex items-center gap-2">
+        <CheckCircle2 size={14} /> {data.obe.name} is already $0 — clean.
+      </div>
+    );
+  }
+  if (posted) {
+    return (
+      <div className="text-sm text-emerald-700 flex items-center gap-2">
+        <CheckCircle2 size={14} /> Posted to QuickBooks as JE #{posted.doc_number || posted.qbo_je_id} — {data.obe.name} is now zeroed.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 flex-wrap text-sm">
+        <span className="text-navy font-semibold">{data.obe.name}</span>
+        <span className="font-mono text-red-700 font-bold">{money(data.obe.balance)}</span>
+        <span className="text-xs text-ink-light">needs to be zeroed into {data.target?.name || "Retained Earnings"}</span>
+      </div>
+      <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light mb-1.5">Proposed journal entry</div>
+        <table className="w-full text-xs">
+          <tbody>
+            {(data.proposed_lines || []).map((l: any, i: number) => (
+              <tr key={i} className="border-b border-gray-100 last:border-0">
+                <td className="py-1.5 text-navy">{l.account_hint}</td>
+                <td className="py-1.5 text-right font-mono text-ink-slate">{l.side === "debit" ? money(l.amount) : ""}</td>
+                <td className="py-1.5 text-right font-mono text-ink-slate">{l.side === "credit" ? money(l.amount) : ""}</td>
+              </tr>
+            ))}
+            <tr className="text-[10px] uppercase tracking-wider text-ink-light">
+              <td></td>
+              <td className="text-right pt-1">Debit</td>
+              <td className="text-right pt-1">Credit</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <button
+        onClick={postJE}
+        disabled={posting}
+        className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+      >
+        {posting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+        {posting ? "Posting…" : "Post entry to QuickBooks"}
+      </button>
     </div>
   );
 }
