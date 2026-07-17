@@ -2003,6 +2003,8 @@ function NeedFromClientPanel({
           kind: "message",
           subject: `We need ${totalCount} thing${totalCount === 1 ? "" : "s"} to finish cleaning up your books`,
           body,
+          // Track this send so its status is visible + syncable from Resend.
+          email_log_type: "bs_statements",
         }),
       });
       const data = await res.json();
@@ -2036,12 +2038,34 @@ function NeedFromClientPanel({
               : "The notification email failed to send — the message is in their portal, but follow up directly."
             : null,
       });
+      loadEmailLog(); // refresh the sent-status line
     } catch (err: any) {
       setError(err.message);
     } finally {
       setSending(false);
     }
   }
+
+  // Sent-request email history (client_email_log, email_type bs_statements) —
+  // delivery status kept live by the Resend webhook; "View email" pulls the
+  // actual sent email back from Resend.
+  const [emailLog, setEmailLog] = useState<any[]>([]);
+  const [previewLogId, setPreviewLogId] = useState<string | null>(null);
+  async function loadEmailLog() {
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/email-log?type=bs_statements&limit=5`);
+      if (res.ok) {
+        const j = await res.json();
+        setEmailLog(j.emails || []);
+      }
+    } catch {
+      /* best-effort */
+    }
+  }
+  useEffect(() => {
+    loadEmailLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientLinkId]);
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
@@ -2154,6 +2178,137 @@ function NeedFromClientPanel({
           </div>
         </>
       )}
+
+      {/* Sent-request history — was the email sent, and what did it look like
+          (synced from Resend). Delivery status is kept live by the Resend
+          webhook (sent → delivered → opened). */}
+      {emailLog.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-gray-100">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light mb-2">
+            Request emails sent
+          </div>
+          <ul className="space-y-1.5">
+            {emailLog.map((e) => {
+              const meta = emailStatusMeta(e);
+              return (
+                <li key={e.id} className="flex items-center gap-2 text-xs flex-wrap">
+                  <span className={`inline-flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded ${meta.cls}`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" /> {meta.label}
+                  </span>
+                  <span className="text-ink-slate">{new Date(e.created_at).toLocaleString()}</span>
+                  <span className="text-ink-light truncate max-w-[220px]">→ {e.to_address}</span>
+                  <button
+                    onClick={() => setPreviewLogId(e.id)}
+                    className="ml-auto text-teal font-semibold hover:underline inline-flex items-center gap-1"
+                  >
+                    <FileText size={11} /> View email
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {previewLogId && (
+        <EmailPreviewModal
+          clientLinkId={clientLinkId}
+          logId={previewLogId}
+          onClose={() => setPreviewLogId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Colour + label for a client_email_log row's current delivery state. */
+function emailStatusMeta(e: any): { label: string; cls: string } {
+  const s = String(e?.status || "sent");
+  if (e?.opened_at || s === "opened" || s === "clicked")
+    return { label: "opened", cls: "bg-emerald-100 text-emerald-700" };
+  if (e?.delivered_at || s === "delivered")
+    return { label: "delivered", cls: "bg-teal/15 text-teal-dark" };
+  if (s === "bounced" || s === "complained" || s === "failed")
+    return { label: s, cls: "bg-red-100 text-red-700" };
+  return { label: "sent", cls: "bg-gray-100 text-ink-slate" };
+}
+
+/**
+ * Pulls a sent request email back from Resend (via /email-log/[logId]) and
+ * shows the exact HTML the client received + its live delivery status —
+ * the "sync from Resend" so the bookkeeper can confirm what went out.
+ */
+function EmailPreviewModal({
+  clientLinkId,
+  logId,
+  onClose,
+}: {
+  clientLinkId: string;
+  logId: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientLinkId}/email-log/${logId}`);
+        const j = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+        setData(j);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || "Load failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientLinkId, logId]);
+
+  const stored = data?.stored;
+  const resend = data?.resend;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-bold text-navy text-sm truncate">{stored?.subject || "Request email"}</div>
+            <div className="text-[11px] text-ink-light truncate">
+              {stored?.to_address}
+              {resend?.last_event ? ` · Resend: ${resend.last_event}` : stored ? ` · ${emailStatusMeta(stored).label}` : ""}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-ink-light hover:text-navy shrink-0"><X size={16} /></button>
+        </div>
+        <div className="overflow-auto flex-1">
+          {loading ? (
+            <div className="p-8 text-center text-sm text-ink-slate flex items-center justify-center gap-2">
+              <Loader2 size={14} className="animate-spin" /> Pulling the email from Resend…
+            </div>
+          ) : error ? (
+            <div className="p-5 text-xs text-red-800">{error}</div>
+          ) : resend?.html ? (
+            <iframe title="Sent email" className="w-full h-[60vh] bg-white" srcDoc={resend.html} />
+          ) : (
+            <div className="p-5 space-y-2">
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {data?.resend_error || "Couldn't pull the rendered email from Resend."} Showing what we recorded instead.
+              </div>
+              <div className="text-xs text-ink-slate">
+                Sent {stored?.created_at ? new Date(stored.created_at).toLocaleString() : "—"} · status{" "}
+                <strong>{stored ? emailStatusMeta(stored).label : "—"}</strong>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

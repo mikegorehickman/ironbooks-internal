@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { sendResendEmail } from "@/lib/client-comms";
+import { sendResendEmailTracked } from "@/lib/client-comms";
 
 export const dynamic = "force-dynamic";
 
@@ -101,18 +101,34 @@ export async function POST(
     return NextResponse.json({ error: "Subject and body are required" }, { status: 400 });
   }
 
-  const sent = await sendResendEmail({
+  const sent = await sendResendEmailTracked({
     to,
     subject,
     text,
     html: html || undefined,
     replyTo: process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com",
   });
-  if (!sent) {
+  if (!sent.ok) {
     return NextResponse.json(
-      { error: "Resend rejected the send — check RESEND_API_KEY / domain setup and try again." },
+      { error: sent.error || "Resend rejected the send — check RESEND_API_KEY / domain setup and try again." },
       { status: 502 }
     );
+  }
+
+  // Log the send so it shows in the "Request emails sent" line + syncs from
+  // Resend (same email_type as the portal-message send path).
+  try {
+    await (service as any).from("client_email_log").insert({
+      client_link_id: id,
+      to_address: to.join(", "),
+      email_type: "bs_statements",
+      subject,
+      status: "sent",
+      provider_message_id: sent.messageId ?? null,
+      created_by: user.id,
+    });
+  } catch (e: any) {
+    console.warn(`[request-docs-email] client_email_log insert failed: ${e?.message}`);
   }
 
   // Trail: the request lives in the client's message thread too, marked

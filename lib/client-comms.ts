@@ -180,7 +180,7 @@ export async function sendResendEmail(params: {
  * to multiple addresses call this per address so each gets its own log row.
  */
 export async function sendResendEmailTracked(params: {
-  to: string;
+  to: string | string[];
   subject: string;
   text: string;
   html?: string;
@@ -201,7 +201,7 @@ export async function sendResendEmailTracked(params: {
       },
       body: JSON.stringify({
         from: fromEmail,
-        to: [params.to],
+        to: Array.isArray(params.to) ? params.to : [params.to],
         reply_to: params.replyTo,
         subject: params.subject,
         text: params.text,
@@ -307,7 +307,7 @@ export async function sendPortalInviteEmail(params: {
 }
 
 export type MessageEmailDelivery =
-  | { sent: true; recipients: number }
+  | { sent: true; recipients: number; messageId?: string | null; logId?: string | null }
   | { sent: false; reason: "no_portal_user" | "no_active_email" | "send_failed" | "error" };
 
 /**
@@ -334,6 +334,14 @@ export async function emailPortalUsersAboutMessage(
     portalPath?: string;
     /** CTA button label (default "Log in to reply"). */
     ctaLabel?: string;
+    /**
+     * When set, the send is TRACKED: it goes through the Resend id-returning
+     * path and a client_email_log row is written (so the Resend webhook can
+     * flip it to delivered/opened, and the UI can show sent status + pull the
+     * actual email back from Resend). Off by default — every other caller is
+     * unchanged.
+     */
+    track?: { emailType: string; createdBy?: string | null };
   }
 ): Promise<MessageEmailDelivery> {
   try {
@@ -399,12 +407,44 @@ export async function emailPortalUsersAboutMessage(
   </div>
 </div>`;
 
+    const emailSubject = `Ironbooks sent you a ${noun} in SNAP${params.subject ? ` — ${params.subject}` : ""}`;
+    const replyTo = process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com";
+
+    // Tracked path: capture the Resend message id + write client_email_log so
+    // the send is visible + syncable from Resend later.
+    if (params.track) {
+      const sent = await sendResendEmailTracked({ to: emails, replyTo, subject: emailSubject, text, html });
+      let logId: string | null = null;
+      try {
+        const { data: logRow } = await service
+          .from("client_email_log")
+          .insert({
+            client_link_id: params.clientLinkId,
+            to_address: emails.join(", "),
+            email_type: params.track.emailType,
+            subject: emailSubject,
+            status: sent.ok ? "sent" : "failed",
+            provider_message_id: sent.messageId ?? null,
+            error: sent.ok ? null : sent.error ?? null,
+            created_by: params.track.createdBy ?? null,
+          })
+          .select("id")
+          .single();
+        logId = (logRow as any)?.id ?? null;
+      } catch (e: any) {
+        console.warn(`[client-comms] client_email_log insert failed: ${e?.message}`);
+      }
+      return sent.ok
+        ? { sent: true, recipients: emails.length, messageId: sent.messageId ?? null, logId }
+        : { sent: false, reason: "send_failed" };
+    }
+
     const ok = await sendResendEmail({
       to: emails,
       // Safety net: the email says "do not reply", but if someone does
       // anyway it lands in the monitored support inbox instead of bouncing.
-      replyTo: process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com",
-      subject: `Ironbooks sent you a ${noun} in SNAP${params.subject ? ` — ${params.subject}` : ""}`,
+      replyTo,
+      subject: emailSubject,
       text,
       html,
     });

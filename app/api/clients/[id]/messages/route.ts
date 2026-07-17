@@ -94,7 +94,7 @@ export async function POST(
     return NextResponse.json({ error: "Client not found" }, { status: 404 });
   }
 
-  let payload: { kind?: string; subject?: string; body?: string };
+  let payload: { kind?: string; subject?: string; body?: string; email_log_type?: string };
   try {
     payload = await request.json();
   } catch {
@@ -102,6 +102,9 @@ export async function POST(
   }
 
   const kind = payload.kind === "notification" ? "notification" : "message";
+  // Optional: track this send in client_email_log (visible sent-status +
+  // Resend sync). Used by the BS cleanup "Need from client" panel.
+  const emailLogType = (payload.email_log_type || "").trim().slice(0, 40) || null;
   const subject = (payload.subject || "").trim().slice(0, 200) || null;
   const body = (payload.body || "").trim().slice(0, 8000);
   if (!body) {
@@ -154,6 +157,7 @@ export async function POST(
     subject,
     body,
     portalOrigin: new URL(request.url).origin,
+    ...(emailLogType ? { track: { emailType: emailLogType, createdBy: user.id } } : {}),
   });
 
   return NextResponse.json({ ok: true, message: inserted, email_delivery: emailDelivery });
