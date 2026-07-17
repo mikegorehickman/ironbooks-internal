@@ -43,7 +43,7 @@ ok(r.suspects.length === 0, `clean has 0 suspects [got ${r.suspects.length}]`);
 // Below threshold: a single stray coincidence shouldn't flag.
 const stray: LaborScanRow[] = [
   { account: "Wages", txn_type: "Paycheque", name: "Sam Lee", amount: 3000 },
-  { account: "Office Supplies", txn_type: "Expense", name: "Sam Lee", amount: 42.00, memo: "reimburse pens" },
+  { account: "Office Supplies", txn_type: "Expense", name: "Sam Lee", amount: 42.00, memo: "office supplies purchase" },
 ];
 r = detectLaborDuplication(stray);
 ok(!r.flagged, `stray $42 below threshold, not flagged [overstated ${r.overstated}]`);
@@ -66,6 +66,21 @@ ok(classifyPayrollPaymentKind("Cheque") === "cash", "Cheque → cash");
 r = detectLaborDuplication(bmd);
 ok(r.cash_total !== 0 && r.invoice_total === 0, `WCB suspect is all cash-out [cash=${r.cash_total} invoice=${r.invoice_total}]`);
 ok(Math.abs(r.suspects[0].cash_total - r.suspects[0].total) < 0.01, "suspect cash_total == total (all cash)");
+
+// BMD's real second false positive: fuel EXPENSE REIMBURSEMENTS to the same
+// crew who have paycheques. Not wage duplication — must NOT be flagged.
+const bmdWithFuelReimbursements: LaborScanRow[] = [
+  ...bmd,
+  { account: "5730 Fuel – Admin & Sales Vehicles", txn_type: "Expense", name: "Wolfrando Perez Prieto", amount: 67, memo: "Reimbursement for vehicle fuel" },
+  { account: "5730 Fuel – Admin & Sales Vehicles", txn_type: "Expense", name: "Mollie Markin", amount: 307, memo: "reimbursement for vehicle fuel payments" },
+  { account: "5730 Fuel – Admin & Sales Vehicles", txn_type: "Expense", name: "Mollie Markin", amount: 148, memo: "Repayment for Fuel purchased through personal card" },
+];
+r = detectLaborDuplication(bmdWithFuelReimbursements);
+ok(
+  !r.suspects.some((s) => s.account === "5730 Fuel – Admin & Sales Vehicles"),
+  `fuel reimbursements NOT flagged as wage duplication [suspects: ${r.suspects.map((s) => s.account).join(", ")}]`,
+);
+ok(r.suspects.some((s) => s.account === "Workers Compensation – Field"), "WCB still flagged alongside the reimbursements");
 
 console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"}: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
