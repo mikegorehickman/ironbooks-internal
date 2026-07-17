@@ -902,14 +902,16 @@ export function CleanupWizardClient({
               <div className="text-6xl font-black my-2">{score}</div>
               <div className="text-sm font-bold">{GRADE_HEADLINE[grade]}</div>
             </div>
-            <button
-              onClick={() => setStep("modules")}
+            <a
+              href={`/balance-sheet/${clientLinkId}`}
               className="w-full mt-4 bg-teal text-white font-bold py-3 rounded-xl hover:bg-teal-dark transition-colors flex items-center justify-center gap-2"
             >
-              Start cleanup <ArrowRight size={14} />
-            </button>
+              Resolve on the Balance Sheet <ArrowRight size={14} />
+            </a>
             <div className="mt-3 text-[11px] text-ink-light text-center">
-              You'll work through each module one at a time. Nothing posts to QuickBooks until you approve and execute.
+              Undeposited Funds, A/R, Opening Balance Equity, and bank reconciliation
+              all resolve on the main Balance Sheet page now. Nothing posts to QuickBooks
+              until you approve and execute.
             </div>
           </div>
 
@@ -1022,6 +1024,20 @@ export function CleanupWizardClient({
             )}
           </div>
 
+          <div className="mt-3 rounded-xl border border-teal/30 bg-teal/5 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-xs text-navy leading-relaxed">
+              <strong>Undeposited Funds, A/R, and bank reconciliation now resolve on the main
+              Balance Sheet page</strong> — statement auto-fill, the CRM-duplicate A/R check, and
+              one-click Opening Balance Equity all live there. Those rows below link straight to them.
+            </div>
+            <a
+              href={`/balance-sheet/${clientLinkId}`}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-teal text-white px-3 py-1.5 text-xs font-bold hover:bg-teal-dark"
+            >
+              Open Balance Sheet <ArrowRight size={12} />
+            </a>
+          </div>
+
           <div className="space-y-2 mt-4">
             {(status?.modules || [])
               // Only show modules still in the workflow (drops retired ones
@@ -1119,6 +1135,17 @@ export function CleanupWizardClient({
                     </div>
 
                     <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
+                      {MODULE_TO_LANDING_HASH[m.module] ? (
+                        // UF / A/R / bank recon resolve on the main Balance
+                        // Sheet page now — this row just links there.
+                        <a
+                          href={`/balance-sheet/${clientLinkId}#${MODULE_TO_LANDING_HASH[m.module]}`}
+                          className="text-xs font-bold px-3 py-2 rounded-lg bg-teal text-white hover:bg-teal-dark inline-flex items-center gap-1.5"
+                        >
+                          Resolve on Balance Sheet <ArrowRight size={12} />
+                        </a>
+                      ) : (
+                      <>
                       {isReady && (
                         <button
                           onClick={() => discoverModule(m.module)}
@@ -1183,6 +1210,8 @@ export function CleanupWizardClient({
                       )}
                       {isComplete && (
                         <span className="text-xs font-bold text-emerald-700 px-2">Done</span>
+                      )}
+                      </>
                       )}
                     </div>
                   </div>
