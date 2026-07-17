@@ -135,11 +135,15 @@ export function ReclassReview({
   //                  with a "Moved to Auto-Approved" badge so the bookkeeper
   //                  doesn't get disoriented by rows vanishing on approve).
   // - Flagged:       same rule, for flagged origin.
-  // - Ask Client:    ONLY rows whose CURRENT decision is ask_client. Moving
-  //                  to/from ask_client is a deliberate workflow gesture —
-  //                  rows should leave the tab the moment the bookkeeper
-  //                  picks a category (which flips them to approved) or
-  //                  reclassifies them. This keeps the email template clean.
+  // - Ask Client:    ONLY rows whose CURRENT decision is ask_client. Picking a
+  //                  target account from the dropdown records a best-guess
+  //                  target but does NOT move the row out of this tab — it
+  //                  stays parked (and still goes in the client email) until
+  //                  the bookkeeper explicitly clicks "Approve" on that row,
+  //                  which is the one action that promotes it to approved.
+  //                  (An "Uncategorized" pick is the one exception: that's an
+  //                  explicit escalation to a senior, so it still moves the
+  //                  row straight to Flagged.)
   const partitioned = useMemo(() => {
     const source = accountFilter
       ? rows.filter((r) => (r.bank_account_name || "") === accountFilter)
@@ -197,7 +201,37 @@ export function ReclassReview({
   }
 
   /**
-   * Set the target account for a row + promote to "approved".
+   * Pull a single row out of its current bucket into another one — used to
+   * un-approve an Auto-Approve row that shouldn't have been (send it to Ask
+   * Client / Needs Review / Flagged instead). Decision-only: whatever target
+   * account is already set (AI's or a bookkeeper override) is left in place
+   * as a starting point for whoever picks this row up next, same as
+   * moveToAskClient does.
+   */
+  async function moveRowTo(rowId: string, decision: "ask_client" | "needs_review" | "flagged") {
+    setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, decision } : r)));
+    await fetch(`/api/reclass/decisions/${rowId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+  }
+
+  /**
+   * Set the target account for a row.
+   *
+   * A row currently sitting in Ask Client STAYS in Ask Client — picking a
+   * target here just records a best guess (bookkeeper_override_target_name),
+   * it does not promote the row. That row still shows up in the client email
+   * batch, and only leaves ask_client when the bookkeeper clicks the row's
+   * explicit "Approve" button (bulkApprove) — a separate, deliberate action.
+   * Every other origin state (needs_review, flagged) still promotes straight
+   * to "approved" on pick, same as before.
+   *
+   * "Uncategorized" is the one universal exception: it's an explicit
+   * ESCALATION ("I can't place this, a senior needs to look"), so it always
+   * moves the row to flagged — including out of ask_client — never a bank
+   * rule, regardless of where the row started.
    *
    * Propagation: when the bookkeeper picks an account for one row, the same
    * target is applied to all OTHER unresolved rows (needs_review / flagged /
@@ -245,7 +279,11 @@ export function ReclassReview({
       }
     }
 
-    const newDecision = isEscalation ? "flagged" : "approved";
+    // Per-row: escalation always -> flagged. A row currently parked in
+    // Ask Client stays there on a normal pick (see docstring above). Anything
+    // else promotes to approved, same as always.
+    const decisionFor = (r: Reclassification) =>
+      isEscalation ? "flagged" : r.decision === "ask_client" ? "ask_client" : "approved";
 
     // Optimistic local update for all affected rows
     setRows((prev) =>
@@ -256,24 +294,28 @@ export function ReclassReview({
               bookkeeper_override: true,
               bookkeeper_override_target_name: targetAccountName,
               to_account_name: targetAccountName,
-              decision: newDecision,
+              decision: decisionFor(r),
             }
           : r
       )
     );
 
-    // Persist each row update
+    // Persist each row update — decisionFor reads each row's OWN pre-update
+    // decision (from `rows`, not the optimistic copy above) so a row that
+    // started in ask_client is correctly kept there even when it's swept in
+    // via propagation rather than being the row the bookkeeper clicked.
     await Promise.all(
-      Array.from(propagateIds).map((id) =>
-        fetch(`/api/reclass/decisions/${id}`, {
+      Array.from(propagateIds).map((id) => {
+        const propagatedRow = id === rowId ? row : rows.find((r) => r.id === id) || row;
+        return fetch(`/api/reclass/decisions/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            decision: newDecision,
+            decision: decisionFor(propagatedRow),
             bookkeeper_override_target_name: targetAccountName,
           }),
-        })
-      )
+        });
+      })
     );
 
     // Save as bank rule once for this vendor — covers all current AND future
@@ -677,7 +719,8 @@ export function ReclassReview({
             {partitioned.auto.length > 0 && (
               <div className="p-3 bg-green-50 border-b border-green-100 text-sm text-green-800">
                 <CheckCircle2 size={14} className="inline mr-1" />
-                Auto-approved — these will execute as shown. Use the dropdown if you want to override any.
+                Auto-approved — these will execute as shown. Use the dropdown to change the target account,
+                or use "Move to" to pull a row out entirely — Ask Client, Needs Review, or Flag it for a senior.
               </div>
             )}
             <RowTable
@@ -687,6 +730,7 @@ export function ReclassReview({
               showApproveReject={false}
               masterAccounts={masterAccounts}
               onTargetChange={setTarget}
+              onMoveTo={moveRowTo}
             />
           </>
         )}
@@ -763,8 +807,10 @@ export function ReclassReview({
                   <HelpCircle size={14} className="inline mr-1" />
                   Rows here will be sent to the client for clarification when you execute — one portal
                   message + one email listing all {partitioned.ask.length} transaction
-                  {partitioned.ask.length === 1 ? "" : "s"}. If you know the category for any row, pick
-                  it from the dropdown to remove it from the email batch.
+                  {partitioned.ask.length === 1 ? "" : "s"}. Picking a target from the dropdown just
+                  records your best guess — the row stays here and still goes in the email. If you're
+                  sure and want to skip asking the client, click that row's <strong>Approve</strong>{" "}
+                  button to move it out.
                 </span>
                 <button
                   onClick={() => setEmailModalOpen(true)}
@@ -977,6 +1023,7 @@ function RowTable({
   onReject,
   onMoveToAskClient,
   onApproveChoice,
+  onMoveTo,
 }: {
   rows: Reclassification[];
   showConfidence: boolean;
@@ -997,6 +1044,11 @@ function RowTable({
    *  bookkeeper override). Used on the Ask Client tab so the bookkeeper can
    *  one-click confirm a row without the email-to-client step. */
   onApproveChoice?: (id: string) => void;
+  /** If provided, renders a row of small "Move to..." buttons (Ask Client /
+   *  Needs Review / Flagged) — the un-approve escape hatch for a row that
+   *  shouldn't have auto-approved. Decision-only; the target account (if
+   *  any) is left as-is for whoever picks the row up next. */
+  onMoveTo?: (id: string, decision: "ask_client" | "needs_review" | "flagged") => void;
 }) {
   if (rows.length === 0) {
     return <div className="p-8 text-center text-ink-slate text-sm">No transactions in this category.</div>;
@@ -1029,6 +1081,9 @@ function RowTable({
             )}
             {onMoveToAskClient && (
               <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Ask Client?</th>
+            )}
+            {onMoveTo && (
+              <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Move to</th>
             )}
             {onApproveChoice && (
               <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Approve</th>
@@ -1155,6 +1210,36 @@ function RowTable({
                     <HelpCircle size={11} />
                     Ask Client
                   </button>
+                </td>
+              )}
+              {onMoveTo && (
+                <td className="px-4 py-2.5 text-right">
+                  <div className="flex justify-end gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => onMoveTo(r.id, "ask_client")}
+                      className="text-[11px] px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 inline-flex items-center gap-1"
+                      title="Pull this out of Auto-Approve and send it to the client for clarification instead"
+                    >
+                      <HelpCircle size={10} />
+                      Ask Client
+                    </button>
+                    <button
+                      onClick={() => onMoveTo(r.id, "needs_review")}
+                      className="text-[11px] px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 inline-flex items-center gap-1"
+                      title="Pull this out of Auto-Approve for a bookkeeper to look at again"
+                    >
+                      <AlertTriangle size={10} />
+                      Needs Review
+                    </button>
+                    <button
+                      onClick={() => onMoveTo(r.id, "flagged")}
+                      className="text-[11px] px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 inline-flex items-center gap-1"
+                      title="Pull this out of Auto-Approve and flag it for a senior"
+                    >
+                      <Flag size={10} />
+                      Flag
+                    </button>
+                  </div>
                 </td>
               )}
               {onApproveChoice && (
