@@ -214,7 +214,7 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                       {top ? <span>{top.account} <span className="text-ink-light">({top.postings} txns · {top.employees} ppl)</span></span> : ""}
                     </td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      {r.status === "done" && (
+                      {["done", "clean"].includes(r.status) && (
                         <button className="text-xs font-semibold text-teal hover:text-teal-dark mr-3" onClick={() => setExpanded(expanded === c.id ? null : c.id)}>
                           {expanded === c.id ? "Hide" : "Detail"}
                         </button>
@@ -222,7 +222,30 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                       <button onClick={() => scanOne(c.id)} disabled={busy} className="text-xs font-semibold text-ink-slate hover:text-navy disabled:opacity-50">Scan</button>
                     </td>
                   </tr>
-                  {expanded === c.id && r.suspects.length > 0 && (
+                  {expanded === c.id && r.status === "clean" && (
+                    <tr key={`${c.id}-d`} className="border-b border-gray-100 bg-gray-50/60">
+                      <td colSpan={7} className="px-6 py-3 text-xs text-ink-slate space-y-1.5">
+                        <div className="inline-flex items-center gap-1.5 text-emerald-700 font-semibold">
+                          <CheckCircle2 size={13} /> No cross-account payroll double-count found in this scan.
+                        </div>
+                        {r.margins && (
+                          <div className="flex flex-wrap gap-3">
+                            <span>Income: {money(r.margins.income)}</span>
+                            <span className={r.margins.low_gross ? "text-red-700 font-semibold" : ""}>
+                              Gross profit: {money(r.margins.gross_profit)} ({r.margins.gross_margin_pct}%)
+                            </span>
+                            <span className={r.margins.low_net ? "text-red-700 font-semibold" : ""}>
+                              Net income: {money(r.margins.net_income)} ({r.margins.net_margin_pct}%)
+                            </span>
+                          </div>
+                        )}
+                        {(r.margins?.low_gross || r.margins?.low_net) && (
+                          <div className="text-ink-light">Thin margin without a detected double-count — check for other causes (job costing, pricing, one-off expenses) or re-scan after a prior resolve to confirm it cleared.</div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  {expanded === c.id && r.status === "done" && r.suspects.length > 0 && (
                     <tr key={`${c.id}-d`} className="border-b border-gray-100 bg-gray-50/60">
                       <td colSpan={7} className="px-6 py-3 text-xs text-ink-slate space-y-2">
                         <div>
@@ -258,7 +281,7 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                                     title={`Move ${money(cash)} of net-pay to Payroll Clearing`}
                                   >
                                     {resolveBusy === key ? <Loader2 size={11} className="animate-spin" /> : <Wrench size={11} />}
-                                    Move cash to clearing
+                                    Move cash to Payroll Clearing
                                   </button>
                                 )}
                               </div>
@@ -293,7 +316,7 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                             </div>
                           );
                         })}
-                        <div className="text-ink-light">Cash basis: the <span className="font-semibold">cash that left the bank</span> is the real expense. <span className="font-semibold">Move cash to clearing</span> keeps the paycheques as the wage record and moves the duplicate net-pay onto a balance-sheet Payroll Clearing account (nets to ~0 against the paycheques) — reviewed, one line at a time; closed-period locks are reported.</div>
+                        <div className="text-ink-light">Gross paycheques already include the withheld taxes (see Direct Labour Taxes) — the net-pay bank line is a SUBSET of that gross wage, not a separate cost. <span className="font-semibold">Move cash to Payroll Clearing</span> keeps the paycheques as the one wage record on the P&amp;L and relocates the duplicate net-pay onto a balance-sheet Payroll Clearing account (nets to ~0 against the paycheques) — reviewed, one line at a time; closed-period locks are reported. Nothing about the bank transaction itself changes, only which account absorbs it.</div>
                       </td>
                     </tr>
                   )}
