@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, QBOReauthRequiredError } from "@/lib/qbo";
-import { fetchPLDetailAll } from "@/lib/qbo-reports";
+import { fetchPLDetailAll, fetchProfitAndLoss } from "@/lib/qbo-reports";
 import { detectLaborDuplication } from "@/lib/payroll-double-entry";
+
+// Contractor health benchmarks (Mike 2026-07-17): flag thin margins on the
+// payroll scan — the labor double-count is a prime cause of both.
+const GROSS_MARGIN_FLOOR = 0.40; // gross profit < 40% of revenue
+const NET_MARGIN_FLOOR = 0.10;   // net profit < 10% of revenue
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -48,15 +53,35 @@ export async function POST(request: Request) {
 
   try {
     const token = await getValidToken(clientLinkId, service as any, "ironbooks/api/admin/payroll-double-scan");
-    const rows = await fetchPLDetailAll((client as any).qbo_realm_id, token, start, end, "Accrual");
+    const [rows, pl] = await Promise.all([
+      fetchPLDetailAll((client as any).qbo_realm_id, token, start, end, "Accrual"),
+      // Cash-basis P&L to match the statements clients actually see.
+      fetchProfitAndLoss((client as any).qbo_realm_id, token, start, end, "Cash").catch(() => null),
+    ]);
     const result = detectLaborDuplication(
       rows.map((r) => ({ account: r.account, txn_type: r.txn_type, name: r.name, amount: r.amount, memo: r.memo, date: r.date })),
     );
+
+    // Margins (cash basis). Null when there's no revenue to divide by.
+    const income = pl ? Math.abs(pl.totalIncome) : 0;
+    const grossMarginPct = pl && income > 0 ? Math.round((pl.grossProfit / income) * 1000) / 10 : null;
+    const netMarginPct = pl && income > 0 ? Math.round((pl.netIncome / income) * 1000) / 10 : null;
+    const margins = pl && income > 0 ? {
+      income: Math.round(income),
+      gross_profit: Math.round(pl.grossProfit),
+      net_income: Math.round(pl.netIncome),
+      gross_margin_pct: grossMarginPct,
+      net_margin_pct: netMarginPct,
+      low_gross: grossMarginPct !== null && grossMarginPct < GROSS_MARGIN_FLOOR * 100,
+      low_net: netMarginPct !== null && netMarginPct < NET_MARGIN_FLOOR * 100,
+    } : null;
+
     return NextResponse.json({
       ok: true,
       client_link_id: clientLinkId,
       client_name: (client as any).client_name,
       window: { start, end },
+      margins,
       ...result,
     });
   } catch (err: any) {

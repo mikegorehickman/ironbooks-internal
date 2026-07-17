@@ -18,6 +18,11 @@ interface Suspect {
   reason: string;
   txns: SuspectPosting[];
 }
+interface Margins {
+  income: number; gross_profit: number; net_income: number;
+  gross_margin_pct: number | null; net_margin_pct: number | null;
+  low_gross: boolean; low_net: boolean;
+}
 interface RowState {
   status: "idle" | "scanning" | "done" | "clean" | "reauth" | "error";
   overstated: number;
@@ -26,6 +31,7 @@ interface RowState {
   suspects: Suspect[];
   cash_total: number;
   invoice_total: number;
+  margins?: Margins | null;
   message?: string;
 }
 
@@ -33,7 +39,7 @@ const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
 export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
   const [rows, setRows] = useState<Record<string, RowState>>(
-    Object.fromEntries(clients.map((c) => [c.id, { status: "idle", overstated: 0, paycheque_accounts: [], employee_count: 0, suspects: [], cash_total: 0, invoice_total: 0 } as RowState])),
+    Object.fromEntries(clients.map((c) => [c.id, { status: "idle", overstated: 0, paycheque_accounts: [], employee_count: 0, suspects: [], cash_total: 0, invoice_total: 0, margins: null } as RowState])),
   );
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -96,6 +102,7 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
         suspects: d.suspects || [],
         cash_total: d.cash_total || 0,
         invoice_total: d.invoice_total || 0,
+        margins: d.margins || null,
       });
     } catch (e: any) {
       patch(id, { status: "error", message: e.message });
@@ -115,14 +122,18 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
   const scanned = Object.values(rows).filter((r) => !["idle", "scanning"].includes(r.status)).length;
   const flagged = Object.values(rows).filter((r) => r.status === "done");
   const totalOverstated = flagged.reduce((s, r) => s + r.overstated, 0);
+  const lowMarginCount = Object.values(rows).filter((r) => r.margins && (r.margins.low_gross || r.margins.low_net)).length;
 
-  // Flagged first (biggest $), then the rest in name order.
+  const isLowMargin = (r: RowState) => !!r.margins && (r.margins.low_gross || r.margins.low_net);
+  // Double-count flagged first (biggest $), then low-margin, then name order.
   const ordered = useMemo(() => {
     return [...clients].sort((a, b) => {
       const ra = rows[a.id], rb = rows[b.id];
       const fa = ra.status === "done" ? 1 : 0, fb = rb.status === "done" ? 1 : 0;
       if (fa !== fb) return fb - fa;
       if (fa && fb) return rb.overstated - ra.overstated;
+      const ma = isLowMargin(ra) ? 1 : 0, mb = isLowMargin(rb) ? 1 : 0;
+      if (ma !== mb) return mb - ma;
       return a.client_name.localeCompare(b.client_name);
     });
   }, [clients, rows]);
@@ -135,6 +146,11 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
         bank-feed net-pay deposits/e-Transfers expensed to a second labor account (the phantom
         line that overstates COGS). Nothing is changed here; the fix (reclass the net-pay lines to
         a payroll clearing account) is a separate reviewed step.
+        <div className="mt-2 text-amber-800/90">
+          Rows are also highlighted when the books look off for a painting contractor:
+          <strong> gross profit under 40%</strong> or <strong>net profit under 10%</strong> (cash-basis,
+          year-to-date) — often a symptom of the labor double-count.
+        </div>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -147,8 +163,9 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
           Scan all clients (read-only)
         </button>
         <div className="text-xs text-ink-slate">
-          {scanned}/{clients.length} scanned · <span className="font-semibold text-red-700">{flagged.length} flagged</span>
+          {scanned}/{clients.length} scanned · <span className="font-semibold text-red-700">{flagged.length} double-count</span>
           {totalOverstated > 0 && <> · {money(totalOverstated)} phantom labor</>}
+          {lowMarginCount > 0 && <> · <span className="font-semibold text-amber-700">{lowMarginCount} thin margin</span></>}
         </div>
       </div>
 
@@ -158,6 +175,8 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
             <tr>
               <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Client</th>
               <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">Status</th>
+              <th className="text-right px-4 py-2.5 font-semibold text-ink-slate" title="Gross profit % (cash-basis YTD) — flag under 40%">GP %</th>
+              <th className="text-right px-4 py-2.5 font-semibold text-ink-slate" title="Net profit % (cash-basis YTD) — flag under 10%">NP %</th>
               <th className="text-right px-4 py-2.5 font-semibold text-ink-slate">Phantom labor</th>
               <th className="text-left px-4 py-2.5 font-semibold text-ink-slate">2nd labor line</th>
               <th className="text-right px-4 py-2.5 font-semibold text-ink-slate"></th>
@@ -169,17 +188,24 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
               const top = r.suspects[0];
               return (
                 <>
-                  <tr key={c.id} className={`border-b border-gray-100 ${r.status === "done" ? "bg-red-50/40" : "hover:bg-gray-50"}`}>
+                  <tr key={c.id} className={`border-b border-gray-100 ${r.status === "done" ? "bg-red-50/40" : isLowMargin(r) ? "bg-amber-50/50" : "hover:bg-gray-50"}`}>
                     <td className="px-4 py-2.5 font-medium text-navy">
                       <a href={`/clients/${c.id}`} className="hover:text-teal hover:underline">{c.client_name}</a>
                     </td>
                     <td className="px-4 py-2.5">
                       {r.status === "idle" && <span className="text-ink-light">not scanned</span>}
                       {r.status === "scanning" && <span className="inline-flex items-center gap-1 text-teal"><Loader2 size={12} className="animate-spin" />scanning</span>}
-                      {r.status === "clean" && <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 size={12} />clean</span>}
+                      {r.status === "clean" && !isLowMargin(r) && <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 size={12} />clean</span>}
+                      {r.status === "clean" && isLowMargin(r) && <span className="inline-flex items-center gap-1 text-amber-700 font-semibold"><AlertTriangle size={12} />thin margin</span>}
                       {r.status === "done" && <span className="inline-flex items-center gap-1 text-red-700 font-semibold"><AlertTriangle size={12} />double-count</span>}
                       {r.status === "reauth" && <span className="text-amber-700">QBO reconnect</span>}
                       {r.status === "error" && <span className="text-red-600" title={r.message}>{(r.message || "error").slice(0, 50)}</span>}
+                    </td>
+                    <td className={`px-4 py-2.5 text-right tabular-nums ${r.margins?.low_gross ? "text-red-700 font-bold" : "text-ink-slate"}`}>
+                      {r.margins?.gross_margin_pct != null ? `${r.margins.gross_margin_pct}%` : r.status === "clean" || r.status === "done" ? "—" : ""}
+                    </td>
+                    <td className={`px-4 py-2.5 text-right tabular-nums ${r.margins?.low_net ? "text-red-700 font-bold" : "text-ink-slate"}`}>
+                      {r.margins?.net_margin_pct != null ? `${r.margins.net_margin_pct}%` : r.status === "clean" || r.status === "done" ? "—" : ""}
                     </td>
                     <td className="px-4 py-2.5 text-right font-semibold text-navy">
                       {r.status === "done" ? money(r.overstated) : r.status === "clean" ? "—" : ""}
@@ -198,7 +224,7 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                   </tr>
                   {expanded === c.id && r.suspects.length > 0 && (
                     <tr key={`${c.id}-d`} className="border-b border-gray-100 bg-gray-50/60">
-                      <td colSpan={5} className="px-6 py-3 text-xs text-ink-slate space-y-2">
+                      <td colSpan={7} className="px-6 py-3 text-xs text-ink-slate space-y-2">
                         <div>
                           <span className="font-semibold text-navy">Payroll invoices (paycheques):</span> {r.paycheque_accounts.join(" · ") || "—"} · {r.employee_count} employees
                         </div>
