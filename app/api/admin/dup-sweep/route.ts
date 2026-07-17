@@ -44,6 +44,16 @@ export async function POST(request: Request) {
 
   const url = new URL(request.url);
   const offset = Math.max(0, parseInt(url.searchParams.get("offset") || "0", 10));
+  // Scan window: ?start=YYYY-MM-DD, default Jan 1 (YTD) — the old fixed 90-day
+  // window silently missed older duplicates during historical cleanups.
+  const year = new Date().getFullYear();
+  const startParam = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get("start") || "")
+    ? (url.searchParams.get("start") as string)
+    : `${year}-01-01`;
+  const windowDays = Math.max(
+    7,
+    Math.ceil((Date.now() - new Date(startParam).getTime()) / 86400000)
+  );
 
   const { data: clients } = await service
     .from("client_links")
@@ -51,11 +61,11 @@ export async function POST(request: Request) {
     .eq("is_active", true)
     .not("qbo_realm_id", "is", null)
     .order("id");
+  // Scan EVERY active client with a QBO connection — duplicate expenses are
+  // most common DURING cleanup (Camellia's $2,226 Lowe's double was mid-cleanup),
+  // so gating on production status hid exactly the clients that need it.
   const targets = ((clients as any[]) || []).filter(
-    (c) =>
-      (c.cleanup_completed_at || c.daily_recon_enabled) &&
-      c.qbo_realm_id !== "DEMO" &&
-      !/\btest\b/i.test(c.client_name || "")
+    (c) => c.qbo_realm_id !== "DEMO" && !/\btest\b/i.test(c.client_name || "")
   );
   const chunk = targets.slice(offset, offset + CHUNK);
 
@@ -63,7 +73,7 @@ export async function POST(request: Request) {
   const errors: string[] = [];
   for (const c of chunk) {
     try {
-      const r = await scanClientForDuplicates(service, c);
+      const r = await scanClientForDuplicates(service, c, { windowDays });
       totals.scanned++;
       totals.found += r.found;
       totals.certain += r.certain;
@@ -84,8 +94,10 @@ export async function POST(request: Request) {
     });
   } catch {}
 
-  // Chain the next chunk — fire-and-forget with the cron bearer.
-  if (!done && process.env.CRON_SECRET) {
+  // Self-chain ONLY for cron-triggered runs — a browser-initiated sweep must
+  // drive every chunk itself via next_offset (the fire-and-forget after()
+  // chain dies unreliably on Vercel; this stalled the CRM sweep at 8 clients).
+  if (!done && cronOk) {
     const next = `${url.origin}${url.pathname}?offset=${nextOffset}`;
     after(async () => {
       try {
@@ -102,7 +114,10 @@ export async function POST(request: Request) {
   return NextResponse.json({
     started: true,
     targets: targets.length,
-    chunk: { offset, scanned: totals.scanned, errors: errors.length },
+    window_start: startParam,
+    chunk: { offset, scanned: totals.scanned, found: totals.found, errors: errors.length, error_samples: errors.slice(0, 6) },
+    next_offset: done ? null : nextOffset,
+    server_chained: !done && cronOk,
     done,
   });
 }
