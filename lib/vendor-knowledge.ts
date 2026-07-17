@@ -83,6 +83,15 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /\bwawa\b/i, account: "Fuel – Overhead", confidence: 0.9, reasoning: "Wawa → Fuel – Overhead", vendor: "Wawa" },
   { pattern: /dulux\s+paints|\bdulux\b/i, account: "Job Supplies & Materials", confidence: 0.9, reasoning: "Dulux Paints → Job Supplies & Materials", vendor: "Dulux Paints" },
   { pattern: /kwik\s+trip/i, account: "Fuel – Overhead", confidence: 0.9, reasoning: "Kwik Trip → Fuel – Overhead", vendor: "Kwik Trip" },
+  // A LARGE Intuit/QuickBooks charge (≥$400) is a payroll NET-PAY deposit, NOT
+  // software — the QBO subscription (~$50–200) and QB Payments processing fees
+  // are small. Confirmed on BMD (Mike 2026-07-17): "INTUIT NNNN PAYROLL Payroll
+  // Deposit" lines were dumped in Software Subscriptions. Flag it (low conf →
+  // needs review) and point at Payroll Clearing: if the client runs QBO Payroll
+  // paycheques, these net-pay deposits duplicate the gross wages and belong OFF
+  // the P&L. MUST sit before the payroll-fee + Software Intuit rules so it wins
+  // for big amounts; small Intuit charges fall through to those.
+  { pattern: /\b(intuit|quickbooks|qbooks)\b/i, account: "Payroll Clearing", confidence: 0.7, reasoning: "Large Intuit/QuickBooks charge (≥$400) is payroll net-pay, NOT software. If QBO Payroll paycheques exist this duplicates the gross wages — move to Payroll Clearing (payroll double-count tool), don't leave it as an expense. (Verify it isn't a rare large merchant-processing fee.)", vendor: "Intuit Payroll", amountRange: [400, 100000000] },
   { pattern: /(intuit|qb|quickbooks).{0,12}payroll|payroll.{0,8}intuit/i, account: "Payroll Expenses", confidence: 0.93, reasoning: "Intuit/QuickBooks Payroll service fee → Payroll Expenses", vendor: "Intuit Payroll" },
   { pattern: /uber\s+eats/i, account: "Meals (50% deductible)", confidence: 0.9, reasoning: "Uber Eats → Meals (50% deductible)", vendor: "Uber Eats" },
   { pattern: /stop\s+shop/i, account: "Meals (50% deductible)", confidence: 0.9, reasoning: "Stop & Shop → Meals (50% deductible)", vendor: "Stop & Shop" },

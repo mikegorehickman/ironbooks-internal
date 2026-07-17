@@ -410,6 +410,13 @@ SOFTWARE / TECH → Software Subscriptions
   Adobe, Dropbox, Slack, Zoom, Notion, Apple iCloud, Zapier, Calendly,
   GoDaddy, Squarespace, Wix, Shopify, Stripe (subscription only), Square POS,
   ChatGPT, OpenAI, Claude, Anthropic, antivirus software
+  ⚠ INTUIT/QUICKBOOKS AMOUNT RULE: only SMALL Intuit/QuickBooks charges are software —
+  the QBO subscription is ~$50–200 and processing fees are small. Any Intuit/QuickBooks
+  charge of $400 OR MORE (esp. memos like "INTUIT NNNN PAYROLL Payroll Deposit") is a
+  PAYROLL NET-PAY deposit, NOT software. Never categorize a ≥$400 Intuit charge as
+  Software Subscriptions — flag it as payroll (needs_review): if the client runs QBO
+  Payroll paycheques it duplicates the gross wages and belongs in Payroll Clearing, not
+  an expense account.
 
 TELECOM / UTILITIES → Software Subscriptions (cell/internet) or Utilities (office)
   Rogers, Bell, Telus, Fido, Koodo, Virgin, Freedom Mobile, Verizon, AT&T, T-Mobile, Comcast,
