@@ -89,6 +89,13 @@ export async function POST(request: Request) {
     if (retypeIds.length > 0) {
       const accounts = await fetchAllAccounts(clientLink.qbo_realm_id, accessToken);
       const byId = new Map(accounts.map((a) => [a.Id, a]));
+      // Accounts that are a PARENT of something — QBO forbids changing the
+      // type of an account that has subaccounts ("You cannot change the type
+      // of an account with subaccounts"). Skip with a clear reason rather than
+      // surfacing a raw 400.
+      const hasChildren = new Set(
+        accounts.filter((a) => a.Active !== false && (a as any).ParentRef?.value).map((a) => String((a as any).ParentRef.value))
+      );
       const validPlans = computeRetypePlans({
         masterRows: masterRows as RetypeMasterRow[],
         clientAccounts: accounts.filter((a) => a.Active !== false),
@@ -98,6 +105,10 @@ export async function POST(request: Request) {
         const current: any = byId.get(plan.qbo_account_id);
         if (!current) {
           summary.failed.push({ account: plan.current_name, message: "account no longer exists" });
+          continue;
+        }
+        if (hasChildren.has(String(plan.qbo_account_id))) {
+          summary.failed.push({ account: plan.current_name, message: "has sub-accounts — QBO won't retype a parent; re-parent or retype its children first (handle in the per-client COA cleanup)" });
           continue;
         }
         const parent: any = current.ParentRef?.value ? byId.get(current.ParentRef.value) : null;

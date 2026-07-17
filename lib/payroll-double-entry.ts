@@ -273,3 +273,121 @@ function toDays(dateStr: string): number {
   if (!Number.isFinite(parsed)) return 0;
   return Math.round(parsed / 86_400_000);
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Cross-account labor duplication (the BMD / Taro pattern)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Confirmed on BMD (2026-07-17): QBO Payroll posts each Paycheque (gross
+// wages) to the correct wage account, and SEPARATELY the bank feed imports
+// the actual money paying those employees (net-pay e-Transfers + the Intuit
+// direct-deposit debit) as plain Expense lines — which get categorized to a
+// DIFFERENT labor-ish account. Net result: the crew's pay is expensed twice,
+// on two different P&L lines. The equal-amount same-account detector above
+// misses it (gross ≠ net, different accounts).
+//
+// Signature: an account that is NOT a paycheque account but carries
+// user-recordable postings (Expense/Deposit/Transfer/Check/JE) whose payee is
+// one of the payroll employees. That second line is the phantom labor.
+
+/** One P&L posting line (shape of a ProfitAndLossDetail row). */
+export interface LaborScanRow {
+  account: string;
+  txn_type: string;
+  name: string | null;
+  amount: number;
+  memo?: string | null;
+}
+
+export interface LaborSuspectAccount {
+  account: string;
+  postings: number;
+  total: number;          // signed sum on the P&L
+  employees: number;      // distinct payroll employees appearing here
+  by_type: Record<string, number>;
+  sample_memos: string[];
+}
+
+export interface LaborDuplicationResult {
+  /** Accounts that carry the legit QBO Payroll paycheque postings. */
+  paycheque_accounts: string[];
+  /** Distinct employee names learned from paycheque postings. */
+  employee_count: number;
+  /** Non-paycheque accounts carrying those employees' pay = the phantom lines. */
+  suspects: LaborSuspectAccount[];
+  /** Total phantom labor $ (sum of |suspect totals|). */
+  overstated: number;
+  /** True when there's a material second labor line to remediate. */
+  flagged: boolean;
+}
+
+const PAYCHEQUE_TXN_TYPE = /paycheque|paycheck|pay check|payroll check|direct deposit|directdeposit/i;
+// The money-movement postings that should never re-expense wages.
+const RECORDABLE_TXN_TYPE = /expense|deposit|transfer|check|cheque|journal|bill|purchase/i;
+
+function normPerson(s: string | null | undefined): string {
+  return (s || "").toLowerCase().replace(/\s*\(\d+\)\s*$/, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Detect the cross-account labor double-count from a client's whole-P&L
+ * detail rows. Pure — caller fetches the rows (fetchPLDetailAll). Threshold
+ * guards against a single stray coincidence flagging a client.
+ */
+export function detectLaborDuplication(
+  rows: LaborScanRow[],
+  opts: { minSuspectTotal?: number } = {}
+): LaborDuplicationResult {
+  const minSuspectTotal = opts.minSuspectTotal ?? 500;
+
+  // 1) Learn the employee roster + the accounts paycheques legitimately hit.
+  const employees = new Set<string>();
+  const paychequeAccounts = new Set<string>();
+  for (const r of rows) {
+    if (PAYCHEQUE_TXN_TYPE.test(r.txn_type)) {
+      paychequeAccounts.add(r.account);
+      const p = normPerson(r.name);
+      if (p) employees.add(p);
+    }
+  }
+
+  // 2) Any OTHER account carrying those employees' pay via a recordable txn
+  //    is a phantom labor line.
+  const byAccount = new Map<string, LaborSuspectAccount>();
+  if (employees.size > 0) {
+    for (const r of rows) {
+      if (paychequeAccounts.has(r.account)) continue;      // legit paycheque line
+      if (!RECORDABLE_TXN_TYPE.test(r.txn_type)) continue;
+      const p = normPerson(r.name);
+      if (!p || !employees.has(p)) continue;
+      const e = byAccount.get(r.account) || { account: r.account, postings: 0, total: 0, employees: 0, by_type: {}, sample_memos: [] };
+      e.postings++;
+      e.total += r.amount;
+      e.by_type[r.txn_type] = (e.by_type[r.txn_type] || 0) + 1;
+      if (r.memo && e.sample_memos.length < 4 && !e.sample_memos.includes(r.memo)) e.sample_memos.push(r.memo);
+      byAccount.set(r.account, e);
+      // track distinct employees per account via a side set
+      (e as any)._people ? (e as any)._people.add(p) : ((e as any)._people = new Set([p]));
+    }
+  }
+
+  const suspects = [...byAccount.values()]
+    .map((e) => {
+      e.employees = ((e as any)._people as Set<string>)?.size || 0;
+      delete (e as any)._people;
+      e.total = Math.round(e.total * 100) / 100;
+      return e;
+    })
+    .filter((e) => Math.abs(e.total) >= minSuspectTotal)
+    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+
+  const overstated = Math.round(suspects.reduce((s, e) => s + Math.abs(e.total), 0) * 100) / 100;
+
+  return {
+    paycheque_accounts: [...paychequeAccounts],
+    employee_count: employees.size,
+    suspects,
+    overstated,
+    flagged: suspects.length > 0,
+  };
+}

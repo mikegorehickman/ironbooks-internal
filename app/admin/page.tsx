@@ -180,6 +180,12 @@ export default async function AdminOverviewPage() {
               title: "Re-apply skipped",
               desc: "Re-push 'already in target account' skips to QBO · fixes categorizations that never actually landed · idempotent, closed-period safe",
             },
+            {
+              href: "/admin/payroll-double-scan",
+              icon: AlertTriangle,
+              title: "Payroll double-count scan",
+              desc: "Fleet scan for the same crew's pay booked to two labor lines (gross paycheque + net-pay bank deposit) · read-only triage · $ overstated per client",
+            },
           ].map((t) => {
             const Icon = t.icon;
             return (

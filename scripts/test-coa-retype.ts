@@ -35,12 +35,15 @@ plans = computeRetypePlans({
 });
 ok(plans.length === 0, "correctly-typed account produces no plan");
 
-// 4. Right type, wrong subtype → subtype-only plan
+// 4. Right type, wrong subtype → NO plan. Subtype-only differences leave the
+//    account in the right statement section, read as a confusing "Expense →
+//    Expense" no-op, and QBO usually rejects them (tax/parent/subaccount
+//    locks). Detail-type tuning is out of scope for this deterministic tool.
 plans = computeRetypePlans({
   masterRows: master,
   clientAccounts: [{ Id: "2", Name: "Fuel – Overhead", AccountType: "Expense", AccountSubType: "OtherMiscellaneousExpense" }],
 });
-ok(plans.length === 1 && plans[0].new_type === "Expense" && plans[0].new_subtype === "Auto", "subtype-only mismatch detected");
+ok(plans.length === 0, "subtype-only mismatch is NOT flagged (type already correct)");
 
 // 5. Name not in master → ignored
 plans = computeRetypePlans({

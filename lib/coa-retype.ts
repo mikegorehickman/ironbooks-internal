@@ -53,11 +53,16 @@ export function computeRetypePlans(params: {
     const master = masterByName.get(normalizeAccountName(intendedName));
     if (!master) continue;
 
+    // Only flag a REAL top-level TYPE mismatch — that's what puts an account
+    // in the wrong statement section (the whole point of a retype). A
+    // subtype-only difference (e.g. CoGS/SuppliesMaterialsCogs vs
+    // CoGS/CostOfLabor) leaves the account in the right section, reads as a
+    // confusing "CoGS → CoGS" no-op in the UI, and QBO usually REJECTS it
+    // anyway — tax-tracking system accounts (GST/HST Payable), accounts with
+    // subaccounts, and subaccounts locked to their parent's type all 400. So
+    // detail-type tuning stays out of this one-click deterministic tool.
     const typeWrong = (acct.AccountType || "") !== master.qbo_account_type;
-    const subtypeWrong =
-      !!master.qbo_account_subtype &&
-      (acct.AccountSubType || "") !== master.qbo_account_subtype;
-    if (!typeWrong && !subtypeWrong) continue;
+    if (!typeWrong) continue;
 
     plans.push({
       qbo_account_id: acct.Id,
@@ -66,9 +71,7 @@ export function computeRetypePlans(params: {
       current_subtype: acct.AccountSubType || "",
       new_type: master.qbo_account_type,
       new_subtype: master.qbo_account_subtype || acct.AccountSubType || "",
-      reason: typeWrong
-        ? `"${acct.Name}" is typed ${acct.AccountType || "(none)"} but the standard chart says ${master.qbo_account_type}${master.qbo_account_subtype ? `/${master.qbo_account_subtype}` : ""} — wrong type puts it in the wrong statement section.`
-        : `"${acct.Name}" has detail type ${acct.AccountSubType || "(none)"} but the standard chart says ${master.qbo_account_subtype}.`,
+      reason: `"${acct.Name}" is typed ${acct.AccountType || "(none)"} but the standard chart says ${master.qbo_account_type}${master.qbo_account_subtype ? `/${master.qbo_account_subtype}` : ""} — wrong type puts it in the wrong statement section.`,
     });
   }
   return plans;
