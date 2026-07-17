@@ -59,7 +59,7 @@ export default async function StripeReconReviewPage({
           title={`Stripe Reconciliation — ${clientLink?.client_name}`}
           subtitle="Pulling Stripe deposits and matching them to invoices..."
         />
-        <WorkflowStepper currentStep="stripe" currentState="active" completedSteps={["coa", "reclass", "revenue", "rules"]} />
+        <WorkflowStepper currentStep="stripe" currentState="active" completedSteps={["coa", "reclass", "revenue", "rules"]} clientLinkId={job.client_link_id as unknown as string} />
         <div className="px-8 py-12 flex flex-col items-center">
           <Loader2 size={48} className="animate-spin text-teal mb-4" />
           <p className="text-sm text-ink-slate">
@@ -128,6 +128,7 @@ export default async function StripeReconReviewPage({
           currentStep="stripe"
           currentState="active"
           completedSteps={["coa", "reclass", "revenue", "rules"]}
+          clientLinkId={job.client_link_id as unknown as string}
         />
         <div className="px-8 py-6 max-w-2xl">
           <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
@@ -180,16 +181,24 @@ export default async function StripeReconReviewPage({
               </div>
             </div>
 
-            <div className="pt-3 border-t border-gray-100">
+            {/* Nothing to reconcile IS this step done — the primary action
+                is moving on to the next wizard step. */}
+            <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-3 flex-wrap">
               <Link
                 href={
                   job.reclass_job_id
                     ? `/reclass/${job.reclass_job_id}/execute`
-                    : `/clients`
+                    : `/clients/${job.client_link_id as unknown as string}`
                 }
                 className="text-sm text-ink-slate hover:text-navy underline"
               >
                 ← Skip and finish cleanup (nothing to reconcile)
+              </Link>
+              <Link
+                href={`/balance-sheet/${job.client_link_id as unknown as string}`}
+                className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-bold px-5 py-2.5 rounded-lg shadow-md"
+              >
+                Continue to Balance Sheet →
               </Link>
             </div>
           </div>
@@ -230,6 +239,7 @@ export default async function StripeReconReviewPage({
           currentStep="stripe"
           currentState="active"
           completedSteps={["coa", "reclass", "revenue", "rules"]}
+          clientLinkId={job.client_link_id as unknown as string}
         />
         <div className="px-8 py-6 space-y-6">
           {canUpgradeToStripeApi && (
@@ -271,7 +281,7 @@ export default async function StripeReconReviewPage({
         title={`Stripe Reconciliation — ${clientLink?.client_name}`}
         subtitle={`${matches?.length || 0} deposits matched`}
       />
-      <WorkflowStepper currentStep="stripe" currentState="active" completedSteps={["coa", "reclass", "revenue", "rules"]} />
+      <WorkflowStepper currentStep="stripe" currentState="active" completedSteps={["coa", "reclass", "revenue", "rules"]} clientLinkId={job.client_link_id as unknown as string} />
       <div className="px-8 py-6 space-y-6">
         {canUpgradeToStripeApi && (
           <UpgradeToStripeApiBanner
