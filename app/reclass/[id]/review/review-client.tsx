@@ -21,6 +21,7 @@ import {
   RefreshCw,
   SkipForward,
 } from "lucide-react";
+import { PayrollDoubleCard } from "@/components/PayrollDoubleCard";
 
 interface ReclassJob {
   id: string;
@@ -514,6 +515,11 @@ export function ReclassReview({
 
   return (
     <div className="space-y-6 max-w-7xl">
+      {/* Payroll double-count check + resolve, in the cleanup flow (Mike:
+          bookkeepers fix it here, per client). No-op until "Check now". */}
+      {clientLinkId && (
+        <PayrollDoubleCard clientLinkId={clientLinkId} clientName={(job as any).client_name || "Client"} />
+      )}
       {/* Summary header */}
       <div className="bg-white rounded-2xl border border-gray-100 p-6">
         <div className="flex items-start justify-between mb-4 gap-4">

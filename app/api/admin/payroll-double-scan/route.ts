@@ -27,8 +27,8 @@ export async function POST(request: Request) {
 
   const service = createServiceSupabase();
   const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
-  if (!["admin", "lead"].includes((actor as any)?.role || "")) {
-    return NextResponse.json({ error: "Admin/lead only" }, { status: 403 });
+  if (!["admin", "lead", "bookkeeper"].includes((actor as any)?.role || "")) {
+    return NextResponse.json({ error: "Staff only" }, { status: 403 });
   }
 
   const body = await request.json().catch(() => ({} as any));
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     const token = await getValidToken(clientLinkId, service as any, "ironbooks/api/admin/payroll-double-scan");
     const rows = await fetchPLDetailAll((client as any).qbo_realm_id, token, start, end, "Accrual");
     const result = detectLaborDuplication(
-      rows.map((r) => ({ account: r.account, txn_type: r.txn_type, name: r.name, amount: r.amount, memo: r.memo })),
+      rows.map((r) => ({ account: r.account, txn_type: r.txn_type, name: r.name, amount: r.amount, memo: r.memo, date: r.date })),
     );
     return NextResponse.json({
       ok: true,

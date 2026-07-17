@@ -297,6 +297,7 @@ export interface LaborScanRow {
   name: string | null;
   amount: number;
   memo?: string | null;
+  date?: string;
 }
 
 /**
@@ -331,6 +332,15 @@ export function classifyPayrollPaymentKind(txnType: string, memo?: string | null
   return "cash";
 }
 
+export interface LaborSuspectPosting {
+  date: string;
+  amount: number;
+  name: string | null;
+  memo: string;
+  txn_type: string;
+  kind: PayrollPaymentKind;
+}
+
 export interface LaborSuspectAccount {
   account: string;
   postings: number;
@@ -341,6 +351,10 @@ export interface LaborSuspectAccount {
   /** Of `total`, how much is cash-out vs accrual-invoice (cash-basis split). */
   cash_total: number;
   invoice_total: number;
+  /** Plain-English why-this-is-flagged, for the bookkeeper's review. */
+  reason: string;
+  /** The individual postings (dated) so the bookkeeper can verify before fixing. */
+  txns: LaborSuspectPosting[];
 }
 
 export interface LaborDuplicationResult {
@@ -413,13 +427,15 @@ export function detectLaborDuplication(
       if (!RECORDABLE_TXN_TYPE.test(r.txn_type)) continue;
       const p = normPerson(r.name);
       if (!p || !employees.has(p)) continue;
-      const e = byAccount.get(r.account) || { account: r.account, postings: 0, total: 0, employees: 0, by_type: {}, sample_memos: [], cash_total: 0, invoice_total: 0 };
+      const e = byAccount.get(r.account) || { account: r.account, postings: 0, total: 0, employees: 0, by_type: {}, sample_memos: [], cash_total: 0, invoice_total: 0, reason: "", txns: [] };
       e.postings++;
       e.total += r.amount;
-      if (classifyPayrollPaymentKind(r.txn_type, r.memo) === "cash") e.cash_total += r.amount;
+      const kind = classifyPayrollPaymentKind(r.txn_type, r.memo);
+      if (kind === "cash") e.cash_total += r.amount;
       else e.invoice_total += r.amount;
       e.by_type[r.txn_type] = (e.by_type[r.txn_type] || 0) + 1;
       if (r.memo && e.sample_memos.length < 4 && !e.sample_memos.includes(r.memo)) e.sample_memos.push(r.memo);
+      e.txns.push({ date: r.date || "", amount: r.amount, name: r.name, memo: (r.memo || "").slice(0, 60), txn_type: r.txn_type, kind });
       byAccount.set(r.account, e);
       // track distinct employees per account via a side set
       (e as any)._people ? (e as any)._people.add(p) : ((e as any)._people = new Set([p]));
@@ -428,11 +444,18 @@ export function detectLaborDuplication(
 
   const suspects = [...byAccount.values()]
     .map((e) => {
-      e.employees = ((e as any)._people as Set<string>)?.size || 0;
+      const people = (e as any)._people as Set<string> | undefined;
+      e.employees = people?.size || 0;
       delete (e as any)._people;
       e.total = Math.round(e.total * 100) / 100;
       e.cash_total = Math.round(e.cash_total * 100) / 100;
       e.invoice_total = Math.round(e.invoice_total * 100) / 100;
+      e.txns.sort((a, b) => a.date.localeCompare(b.date));
+      const names = people ? [...people].slice(0, 3).map((n) => n.replace(/\b\w/g, (c) => c.toUpperCase())) : [];
+      const cashN = e.txns.filter((t) => t.kind === "cash").length;
+      e.reason =
+        `${cashN} payment${cashN === 1 ? "" : "s"} to payroll ${e.employees === 1 ? "employee" : "employees"} ` +
+        `(${names.join(", ")}${e.employees > names.length ? ", …" : ""}) posted to "${e.account}" — these are the CASH that left the bank to pay staff who ALSO have QBO Payroll paycheques, so the wages are expensed twice. Move the cash to Payroll Clearing; the paycheques stay as the wage record.`;
       return e;
     })
     .filter((e) => Math.abs(e.total) >= minSuspectTotal)

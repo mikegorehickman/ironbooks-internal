@@ -34,8 +34,8 @@ export async function POST(request: Request) {
 
   const service = createServiceSupabase();
   const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
-  if (!["admin", "lead"].includes((actor as any)?.role || "")) {
-    return NextResponse.json({ error: "Admin/lead only" }, { status: 403 });
+  if (!["admin", "lead", "bookkeeper"].includes((actor as any)?.role || "")) {
+    return NextResponse.json({ error: "Staff only" }, { status: 403 });
   }
 
   const body = await request.json().catch(() => ({} as any));
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     if (roster.size === 0) {
       return NextResponse.json({ error: "No QBO Payroll paycheques found — nothing to reconcile against" }, { status: 400 });
     }
-    const det = detectLaborDuplication(rows.map((r) => ({ account: r.account, txn_type: r.txn_type, name: r.name, amount: r.amount, memo: r.memo })));
+    const det = detectLaborDuplication(rows.map((r) => ({ account: r.account, txn_type: r.txn_type, name: r.name, amount: r.amount, memo: r.memo, date: r.date })));
     if (!det.suspects.some((s) => normalizeAccountName(s.account) === normalizeAccountName(source.Name))) {
       return NextResponse.json({ error: `"${source.Name}" is no longer flagged as a duplicate labor line — re-scan.` }, { status: 400 });
     }
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
 
     // Fresh detection so the UI updates in place.
     const after = await fetchPLDetailAll((client as any).qbo_realm_id, token, ytdStart, ytdEnd, "Accrual");
-    const fresh = detectLaborDuplication(after.map((r) => ({ account: r.account, txn_type: r.txn_type, name: r.name, amount: r.amount, memo: r.memo })));
+    const fresh = detectLaborDuplication(after.map((r) => ({ account: r.account, txn_type: r.txn_type, name: r.name, amount: r.amount, memo: r.memo, date: r.date })));
 
     await service.from("audit_log").insert({
       event_type: "payroll_resolve",

@@ -5,6 +5,7 @@ import { Loader2, Play, Search, CheckCircle2, AlertTriangle, Wrench } from "luci
 
 interface ClientRow { id: string; client_name: string; jurisdiction: string }
 
+interface SuspectPosting { date: string; amount: number; name: string | null; memo: string; txn_type: string; kind: "cash" | "invoice" }
 interface Suspect {
   account: string;
   postings: number;
@@ -14,6 +15,8 @@ interface Suspect {
   sample_memos: string[];
   cash_total: number;
   invoice_total: number;
+  reason: string;
+  txns: SuspectPosting[];
 }
 interface RowState {
   status: "idle" | "scanning" | "done" | "clean" | "reauth" | "error";
@@ -233,9 +236,32 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                                   </button>
                                 )}
                               </div>
-                              <div className="text-ink-light mt-0.5">types: {Object.entries(s.by_type).map(([k, v]) => `${k}×${v}`).join(", ")}</div>
-                              {s.sample_memos.length > 0 && (
-                                <div className="text-ink-light italic">e.g. {s.sample_memos.map((m) => `"${m}"`).join(", ")}</div>
+                              {s.reason && <div className="text-ink-slate mt-0.5">{s.reason}</div>}
+                              {s.txns?.length > 0 && (
+                                <div className="mt-1 overflow-x-auto">
+                                  <table className="text-[11px] w-full">
+                                    <thead className="text-ink-light">
+                                      <tr>
+                                        <th className="text-left pr-3 font-medium">Date</th>
+                                        <th className="text-left pr-3 font-medium">Payee</th>
+                                        <th className="text-right pr-3 font-medium">Amount</th>
+                                        <th className="text-left pr-3 font-medium">Type</th>
+                                        <th className="text-left font-medium">Memo</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {s.txns.map((t, i) => (
+                                        <tr key={i} className="text-ink-slate">
+                                          <td className="pr-3 whitespace-nowrap">{t.date}</td>
+                                          <td className="pr-3">{t.name || "—"}</td>
+                                          <td className="pr-3 text-right whitespace-nowrap">{money(Math.abs(t.amount))}</td>
+                                          <td className="pr-3 whitespace-nowrap"><span className={t.kind === "cash" ? "text-emerald-700" : "text-slate-500"}>{t.txn_type}</span></td>
+                                          <td className="text-ink-light truncate max-w-[220px]">{t.memo}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
                               )}
                               {resolveMsg[key] && <div className="text-navy font-medium mt-0.5">{resolveMsg[key]}</div>}
                             </div>
