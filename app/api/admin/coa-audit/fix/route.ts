@@ -82,6 +82,7 @@ export async function POST(request: Request) {
     created: [] as string[],
     failed: [] as { account: string; message: string }[],
   };
+  const retypeDebug: Array<{ account: string; newType: string; createdType: string | null; moved: number | null; inactivated: boolean | null }> = [];
 
   try {
     const accessToken = await getValidToken(clientLink.id, service as any, "ironbooks/api/admin/coa-audit/fix");
@@ -119,6 +120,10 @@ export async function POST(request: Request) {
             startDate: ytdStart,
             endDate: ytdEnd,
             allAccounts: accounts,
+          });
+          retypeDebug.push({
+            account: plan.current_name, newType: plan.new_type, createdType: r.createdType,
+            moved: r.drain?.moved ?? null, inactivated: r.drain?.inactivated ?? null,
           });
           if (r.failures.length === 0) {
             summary.retyped.push(`${plan.current_name} → ${plan.new_type}`);
@@ -164,7 +169,7 @@ export async function POST(request: Request) {
       } as any,
     } as any);
 
-    return NextResponse.json({ ...summary, drift });
+    return NextResponse.json({ ...summary, retypeDebug, drift });
   } catch (err: any) {
     if (err instanceof QBOReauthRequiredError) {
       return NextResponse.json({ error: "QBO reconnect required", reauth: true }, { status: 200 });

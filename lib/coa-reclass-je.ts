@@ -20,8 +20,21 @@
  */
 import {
   createJournalEntry, createAccount, renameAccount, inactivateAccount, fetchAllAccounts,
-  qboRequest, type JournalEntryLine, type QBOAccount,
+  updateAccountType, qboRequest, type JournalEntryLine, type QBOAccount,
 } from "@/lib/qbo";
+
+// Known-good QBO AccountSubTypes per AccountType. Used to force a freshly-created
+// (empty) twin into the right section when the master COA's stored subtype is
+// invalid or mismatched — which makes QBO silently COERCE the AccountType (e.g.
+// master has "CostOfLabor" instead of "CostOfLaborCos", or an Other-Expense
+// subtype on an account typed "Expense").
+const DEFAULT_SUBTYPE: Record<string, string> = {
+  "cost of goods sold": "SuppliesMaterialsCogs",
+  "expense": "OfficeGeneralAdministrativeExpenses",
+  "other expense": "OtherMiscellaneousExpense",
+  "income": "ServiceFeeIncome",
+  "other income": "OtherMiscellaneousIncome",
+};
 import { fetchProfitAndLossByMonth } from "@/lib/qbo-pl-by-month";
 import { normalizeAccountName } from "@/lib/account-name";
 
@@ -298,6 +311,7 @@ export async function drainAndRetireAccount(params: {
 export interface RetypeResult {
   account: string;
   newAccountId: string | null;
+  createdType: string | null;
   drain: DrainRetireResult | null;
   failures: string[];
 }
@@ -323,7 +337,7 @@ export async function retypeAccountViaRebuild(params: {
   allAccounts: QBOAccount[];
 }): Promise<RetypeResult> {
   const { realmId, accessToken, account, newType, newSubType, startDate, endDate, allAccounts } = params;
-  const out: RetypeResult = { account: account.Name, newAccountId: null, drain: null, failures: [] };
+  const out: RetypeResult = { account: account.Name, newAccountId: null, createdType: null, drain: null, failures: [] };
 
   const norm = (s: string) => (s || "").trim().toLowerCase();
   const realName = account.Name.replace(/\s*\(pre-retype\)\s*$/i, "");
@@ -348,15 +362,43 @@ export async function retypeAccountViaRebuild(params: {
         return out;
       }
     }
-    // Create the correctly-typed twin with the real name (top-level).
+    // Create the correctly-typed twin with the real name (top-level). QBO can
+    // COERCE the AccountType to match a bad/mismatched AccountSubType, so this
+    // may come back in the wrong section — corrected below.
     try {
       target = await createAccount(realmId, accessToken, { name: realName, accountType: newType, accountSubType: newSubType });
-    } catch (e: any) {
-      out.failures.push(`create ${newType} "${realName}": ${String(e?.message || e).slice(0, 200)}`);
-      return out;
+    } catch {
+      // A bad subtype can also make creation throw — retry with a safe default.
+      const def = DEFAULT_SUBTYPE[newType.toLowerCase()] || newSubType;
+      try {
+        target = await createAccount(realmId, accessToken, { name: realName, accountType: newType, accountSubType: def });
+      } catch (e2: any) {
+        out.failures.push(`create ${newType} "${realName}": ${String(e2?.message || e2).slice(0, 200)}`);
+        return out;
+      }
+    }
+    out.createdType = target.AccountType;
+    // If QBO coerced the type (bad subtype), force it — the twin is brand-new
+    // and empty, so a type change is allowed.
+    if ((target.AccountType || "").toLowerCase() !== newType.toLowerCase()) {
+      const def = DEFAULT_SUBTYPE[newType.toLowerCase()] || newSubType;
+      try {
+        target = await updateAccountType(realmId, accessToken, target.Id, (target as any).SyncToken, {
+          newType, newSubType: def, currentAccount: target,
+        });
+        out.createdType = target.AccountType;
+      } catch (e: any) {
+        out.failures.push(`force type ${newType}: ${String(e?.message || e).slice(0, 200)}`);
+        return out;
+      }
+      if ((target.AccountType || "").toLowerCase() !== newType.toLowerCase()) {
+        out.failures.push(`twin created as ${target.AccountType}, not ${newType} (subtype "${newSubType}") even after correction`);
+        return out;
+      }
     }
   }
   out.newAccountId = target.Id;
+  if (!out.createdType) out.createdType = target.AccountType;
 
   const drain = await drainAndRetireAccount({
     realmId, accessToken, source, target, startDate, endDate,
