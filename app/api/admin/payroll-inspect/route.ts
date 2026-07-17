@@ -134,18 +134,26 @@ export async function POST(request: Request) {
     for (const r of accrualRows) {
       if (/paycheque|paycheck|payroll/i.test(r.txn_type) && r.name) employeeNames.add(norm(r.name));
     }
-    const laborByAccount = new Map<string, { account: string; section: string; n: number; sum: number; people: Set<string> }>();
+    const laborByAccount = new Map<string, { account: string; section: string; n: number; sum: number; people: Set<string>; byType: Record<string, { n: number; sum: number }>; txns: any[] }>();
     for (const r of accrualRows) {
       const person = norm(r.name);
       const isPayrollTxn = /paycheque|paycheck|payroll/i.test(r.txn_type);
       if (!person || (!employeeNames.has(person) && !isPayrollTxn)) continue;
       const key = normalizeAccountName(r.account);
-      const e = laborByAccount.get(key) || { account: r.account, section: r.section, n: 0, sum: 0, people: new Set<string>() };
+      const e = laborByAccount.get(key) || { account: r.account, section: r.section, n: 0, sum: 0, people: new Set<string>(), byType: {}, txns: [] };
       e.n++; e.sum += r.amount; e.people.add(person);
+      const tk = r.txn_type || "(none)";
+      (e.byType[tk] ||= { n: 0, sum: 0 }); e.byType[tk].n++; e.byType[tk].sum += r.amount;
+      e.txns.push({ date: r.date, type: r.txn_type, name: r.name, amount: r.amount, memo: (r.memo || "").slice(0, 40) });
       laborByAccount.set(key, e);
     }
     const laborLines = [...laborByAccount.values()]
-      .map((e) => ({ account: e.account, section: e.section, n: e.n, sum: Math.round(e.sum * 100) / 100, people: e.people.size }))
+      .map((e) => ({
+        account: e.account, section: e.section, n: e.n,
+        sum: Math.round(e.sum * 100) / 100, people: e.people.size,
+        by_type: Object.fromEntries(Object.entries(e.byType).map(([k, v]) => [k, { n: v.n, sum: Math.round(v.sum * 100) / 100 }])),
+        txns: e.txns.sort((a, b) => a.date.localeCompare(b.date)),
+      }))
       .sort((a, b) => Math.abs(b.sum) - Math.abs(a.sum));
 
     // Exact cross-account duplicates: same person + date + amount posted to 2+
