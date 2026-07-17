@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { getValidToken, voidInvoice, voidPayment } from "@/lib/qbo";
+import { getValidToken, voidInvoice, voidPayment, fetchAllAccounts } from "@/lib/qbo";
 import { getCompanyClosingDate } from "@/lib/qbo-reclass";
 import { buildRemediationPreview } from "../preview/route";
+import { applyDepositToInvoice, findArAccount } from "@/lib/crm-invoice-apply";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -78,6 +79,12 @@ export async function POST(request: Request) {
   const closingDate = await getCompanyClosingDate(realm, token).catch(() => null);
 
   const selected = ids.filter((id) => planById.has(id));
+  // Per-invoice remediation choice (Mike 2026-07-17): "void" removes the dupe
+  // invoice (deposit stays as revenue); "apply_deposit" KEEPS the invoice and
+  // applies its matched bank deposit to it via A/R — for clients who actively
+  // use invoicing. Default: void.
+  const actions: Record<string, string> =
+    body.actions && typeof body.actions === "object" ? body.actions : {};
   const summary = {
     dry_run: dryRun,
     requested: ids.length,
@@ -85,8 +92,11 @@ export async function POST(request: Request) {
     would_void_payments: 0,
     voided_invoices: 0,
     voided_payments: 0,
+    would_apply_deposits: 0,
+    applied_deposits: 0,
     skipped_closed: 0,
     skipped_review: 0,
+    skipped_no_pair: 0,
     skipped_not_candidate: ids.length - selected.length,
     failed: 0,
     remaining_ids: [] as string[],
@@ -95,6 +105,25 @@ export async function POST(request: Request) {
 
   const memo = `SNAP CRM revenue remediation by ${(actor as any)?.full_name || "senior"} — voided duplicate CRM invoice (recognize deposits only)`;
 
+  // A/R account — only needed when any invoice takes the keep-invoice path.
+  let arAccount: { id: string; name: string } | null = null;
+  if (Object.values(actions).includes("apply_deposit")) {
+    const all = await fetchAllAccounts(realm, token);
+    arAccount = findArAccount(all);
+    if (!arAccount) {
+      return NextResponse.json({ error: "No active Accounts Receivable account in this QBO file — can't apply deposits to invoices" }, { status: 400 });
+    }
+  }
+  const snapshot = (kind: string, id: string, entity: any) =>
+    service
+      .from("audit_log")
+      .insert({
+        event_type: "crm_invoice_remediation_snapshot",
+        user_id: user.id,
+        request_payload: { client_link_id: clientLinkId, kind, txn_id: id, entity } as any,
+      } as any)
+      .then(() => undefined);
+
   for (let i = 0; i < selected.length; i++) {
     if (Date.now() - startTime > BUDGET_MS || i >= MAX_PER_PASS) {
       summary.remaining_ids.push(...selected.slice(i));
@@ -102,6 +131,7 @@ export async function POST(request: Request) {
     }
     const id = selected[i];
     const plan = planById.get(id)!;
+    const action = actions[id] === "apply_deposit" ? "apply_deposit" : "void";
 
     if (!plan.safe && !allowReview) {
       summary.skipped_review++;
@@ -114,6 +144,41 @@ export async function POST(request: Request) {
       continue;
     }
 
+    // ── KEEP-INVOICE PATH: void phantom payment(s), apply the matched deposit ──
+    if (action === "apply_deposit") {
+      if (!plan.matchedDeposit || !plan.customerId) {
+        summary.skipped_no_pair++;
+        summary.details.push({ invoiceId: id, doc: plan.docNumber, outcome: "skipped: no confident deposit match (or no customer) — keep-invoice path needs a pair", amount: plan.total });
+        continue;
+      }
+      const out = await applyDepositToInvoice({
+        realm,
+        token,
+        invoiceId: id,
+        customerId: plan.customerId,
+        deposit: { txn_id: plan.matchedDeposit.txn_id, account: plan.matchedDeposit.account, amount: plan.matchedDeposit.amount },
+        phantomPaymentIds: plan.payments.map((p) => p.id),
+        arAccountId: arAccount!.id,
+        dryRun,
+        closingDate,
+        snapshot,
+      });
+      if (out.outcome === "would_apply") summary.would_apply_deposits++;
+      else if (out.outcome === "applied") { summary.applied_deposits++; summary.voided_payments += plan.payments.length; }
+      else if (out.outcome === "failed") summary.failed++;
+      else if (out.outcome === "skipped_closed") summary.skipped_closed++;
+      summary.details.push({
+        invoiceId: id,
+        doc: plan.docNumber,
+        outcome: out.outcome === "would_apply"
+          ? `would keep invoice + apply deposit ${plan.matchedDeposit.txn_id} (${plan.matchedDeposit.account} $${plan.matchedDeposit.amount})`
+          : `${out.outcome}${out.detail ? `: ${out.detail}` : ""}`,
+        amount: plan.total,
+      });
+      continue;
+    }
+
+    // ── VOID PATH (default) ──
     if (dryRun) {
       summary.would_void_invoices++;
       summary.would_void_payments += plan.payments.length;

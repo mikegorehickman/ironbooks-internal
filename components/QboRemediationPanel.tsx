@@ -28,6 +28,15 @@ type Inv = {
   reason: string;
   grossTotal?: number | null;
   lineSamples?: string[];
+  customerId?: string | null;
+  matchedDeposit?: {
+    txn_id: string;
+    date: string;
+    account: string;
+    amount: number;
+    tax_label: string;
+    confidence: string;
+  } | null;
 };
 type Preview = {
   summary: { total: number; safe: number; review: number; voidInvoiceOnly: number; safeInvoiceAmount: number; reviewInvoiceAmount: number };
@@ -116,17 +125,38 @@ export function QboRemediationPanel({
     }
   }
 
+  // Per-invoice remediation choice: "void" (default — remove the dupe invoice)
+  // or "apply_deposit" (KEEP the invoice, apply its matched deposit to it —
+  // for clients who actively use invoicing). Only pair-matched invoices can
+  // take the keep path.
+  const [invoiceActions, setInvoiceActions] = useState<Record<string, "void" | "apply_deposit">>({});
+  const pairedCount = (preview?.invoices || []).filter((i) => i.matchedDeposit && i.customerId).length;
+
+  function setAllPaired(action: "void" | "apply_deposit") {
+    if (!preview) return;
+    setInvoiceActions((prev) => {
+      const next = { ...prev };
+      for (const inv of preview.invoices) {
+        if (inv.matchedDeposit && inv.customerId) next[inv.invoiceId] = action;
+        else delete next[inv.invoiceId];
+      }
+      return next;
+    });
+  }
+
   async function run(dryRun: boolean) {
     if (!preview) return;
     const ids = [...selected];
     if (ids.length === 0) return;
+    const keepCount = ids.filter((id) => invoiceActions[id] === "apply_deposit").length;
+    const voidCount = ids.length - keepCount;
     if (!dryRun) {
       const anyReview = preview.invoices.some((i) => selected.has(i.invoiceId) && !i.safe);
       if (
         !confirm(
-          `Void ${ids.length} invoice(s) for ${clientName} in QuickBooks?\n\n` +
-            `This voids each invoice + its phantom Undeposited-Funds payment (deposits are NOT touched). ` +
-            `Documents stay in QBO at $0 with a Voided stamp.\n\n` +
+          `Remediate ${ids.length} invoice(s) for ${clientName} in QuickBooks?\n\n` +
+            `• ${voidCount} VOID — invoice + phantom payment zeroed (deposit stays as revenue)\n` +
+            `• ${keepCount} KEEP INVOICE — phantom payment voided, matched deposit applied to the invoice via A/R (invoice stays intact, revenue recognizes once off the invoice)\n\n` +
             (anyReview ? `⚠ Includes REVIEW invoices (a payment looked like real cash) — only do this if you've verified them.\n\n` : "") +
             `Closed periods are skipped automatically. Proceed?`
         )
@@ -136,25 +166,25 @@ export function QboRemediationPanel({
     setBusy(dryRun ? "dry" : "write");
     setError(null);
     if (!dryRun) setResult(null);
-    const totals: any = { would_void_invoices: 0, would_void_payments: 0, voided_invoices: 0, voided_payments: 0, skipped_closed: 0, skipped_review: 0, failed: 0, details: [] };
+    const totals: any = { would_void_invoices: 0, would_void_payments: 0, voided_invoices: 0, voided_payments: 0, would_apply_deposits: 0, applied_deposits: 0, skipped_closed: 0, skipped_review: 0, skipped_no_pair: 0, failed: 0, details: [] };
     let queue = ids;
     try {
       for (let pass = 0; pass < 25; pass++) {
         const res = await fetch("/api/admin/crm-invoice-remediation/apply", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ client_link_id: clientLinkId, start, end, invoice_ids: queue, dry_run: dryRun, allow_review: allowReview }),
+          body: JSON.stringify({ client_link_id: clientLinkId, start, end, invoice_ids: queue, dry_run: dryRun, allow_review: allowReview, actions: invoiceActions }),
         });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
-        for (const k of ["would_void_invoices", "would_void_payments", "voided_invoices", "voided_payments", "skipped_closed", "skipped_review", "failed"]) totals[k] += d[k] || 0;
+        for (const k of ["would_void_invoices", "would_void_payments", "voided_invoices", "voided_payments", "would_apply_deposits", "applied_deposits", "skipped_closed", "skipped_review", "skipped_no_pair", "failed"]) totals[k] += d[k] || 0;
         totals.details.push(...(d.details || []));
         if (!d.remaining_ids?.length) break;
         queue = d.remaining_ids;
       }
       setResult({ dryRun, ...totals });
       if (!dryRun) {
-        // Reload preview so voided invoices drop off.
+        // Reload preview so remediated invoices drop off.
         await loadPreview();
       }
     } catch (e: any) {
@@ -235,6 +265,17 @@ export function QboRemediationPanel({
             {!allowReview && s.review > 0 && (
               <span className="text-ink-light">· only {s.safe} safe invoice{s.safe === 1 ? "" : "s"} are selectable (tick the box above to include review)</span>
             )}
+            {pairedCount > 0 && (
+              <span className="ml-auto inline-flex items-center gap-1.5">
+                <span className="text-ink-light">{pairedCount} deposit-matched:</span>
+                <button onClick={() => setAllPaired("apply_deposit")} className="rounded border border-teal/40 px-2 py-0.5 font-semibold text-teal-dark hover:bg-teal-lighter/40">
+                  all → keep invoice
+                </button>
+                <button onClick={() => setAllPaired("void")} className="rounded border border-gray-300 px-2 py-0.5 font-semibold text-ink-slate hover:bg-gray-50">
+                  all → void
+                </button>
+              </span>
+            )}
           </div>
 
           <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white mb-3 max-h-80 overflow-y-auto">
@@ -269,6 +310,8 @@ export function QboRemediationPanel({
                       selectable={selectable}
                       isSelected={selected.has(inv.invoiceId)}
                       isExpanded={isExpanded}
+                      action={invoiceActions[inv.invoiceId] === "apply_deposit" ? "apply_deposit" : "void"}
+                      onSetAction={(a) => setInvoiceActions((m) => ({ ...m, [inv.invoiceId]: a }))}
                       onToggleSelect={() => toggle(inv.invoiceId)}
                       onToggleExpand={() =>
                         setExpanded((e) => ({ ...e, [inv.invoiceId]: !isExpanded }))
@@ -283,10 +326,10 @@ export function QboRemediationPanel({
           {result && (
             <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${result.dryRun ? "border-sky-200 bg-sky-50 text-sky-900" : result.failed ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>
               {result.dryRun ? (
-                <span><strong>Dry run:</strong> would void {result.would_void_invoices} invoice(s) + {result.would_void_payments} payment(s). {result.skipped_closed} closed-period, {result.skipped_review} review skipped. Nothing written.</span>
+                <span><strong>Dry run:</strong> would void {result.would_void_invoices} invoice(s) + {result.would_void_payments} payment(s){result.would_apply_deposits ? `, would keep ${result.would_apply_deposits} invoice(s) + apply their deposits` : ""}. {result.skipped_closed} closed-period, {result.skipped_review} review, {result.skipped_no_pair || 0} no-pair skipped. Nothing written.</span>
               ) : (
                 <span className="inline-flex items-center gap-1.5">
-                  <CheckCircle2 size={13} /> <strong>Done:</strong> voided {result.voided_invoices} invoice(s) + {result.voided_payments} payment(s). {result.skipped_closed} closed-period, {result.skipped_review} review skipped{result.failed ? `, ${result.failed} FAILED` : ""}. Deposits untouched.
+                  <CheckCircle2 size={13} /> <strong>Done:</strong> voided {result.voided_invoices} invoice(s) + {result.voided_payments} payment(s){result.applied_deposits ? `, kept ${result.applied_deposits} invoice(s) with their deposits applied via A/R` : ""}. {result.skipped_closed} closed-period, {result.skipped_review} review{result.skipped_no_pair ? `, ${result.skipped_no_pair} no-pair` : ""} skipped{result.failed ? `, ${result.failed} FAILED` : ""}.
                 </span>
               )}
             </div>
@@ -333,6 +376,8 @@ function InvoiceRow({
   isExpanded,
   onToggleSelect,
   onToggleExpand,
+  action,
+  onSetAction,
 }: {
   inv: Inv;
   selectable: boolean;
@@ -340,8 +385,11 @@ function InvoiceRow({
   isExpanded: boolean;
   onToggleSelect: () => void;
   onToggleExpand: () => void;
+  action: "void" | "apply_deposit";
+  onSetAction: (a: "void" | "apply_deposit") => void;
 }) {
   const paidAmount = (inv.grossTotal ?? 0) - (inv.balance ?? 0);
+  const canKeep = !!(inv.matchedDeposit && inv.customerId);
   return (
     <>
       <tr className={inv.safe ? "hover:bg-gray-50" : "bg-amber-50/40"}>
@@ -374,6 +422,21 @@ function InvoiceRow({
             <span className="text-amber-700 font-semibold inline-flex items-center gap-1">
               <AlertTriangle size={11} /> review
             </span>
+          ) : canKeep ? (
+            // Pair-matched: the bookkeeper chooses per invoice — void the dupe,
+            // or keep the invoice and apply its matched deposit via A/R.
+            <select
+              value={action}
+              onChange={(e) => onSetAction(e.target.value as "void" | "apply_deposit")}
+              className={`text-[11px] font-semibold rounded border px-1.5 py-1 ${
+                action === "apply_deposit"
+                  ? "border-teal/40 bg-teal-lighter/40 text-teal-dark"
+                  : "border-red-200 bg-red-50 text-red-700"
+              }`}
+            >
+              <option value="void">void invoice (dupe)</option>
+              <option value="apply_deposit">keep — apply deposit {fmtC(inv.matchedDeposit!.amount)}</option>
+            </select>
           ) : inv.action === "void_invoice_only" ? (
             <span className="text-ink-slate">void invoice (no payment)</span>
           ) : (
@@ -403,6 +466,14 @@ function InvoiceRow({
             {inv.lineSamples && inv.lineSamples.length > 0 && (
               <div className="text-[11px] text-ink-slate mb-2">
                 Job lines: <span className="text-navy">{inv.lineSamples.join(" · ")}</span>
+              </div>
+            )}
+            {inv.matchedDeposit && (
+              <div className="text-[11px] mb-2 rounded border border-teal/30 bg-teal-lighter/30 px-2 py-1.5 text-teal-dark">
+                <strong>Matched bank deposit:</strong> {fmtC(inv.matchedDeposit.amount)} on {inv.matchedDeposit.date} into{" "}
+                {inv.matchedDeposit.account} ({inv.matchedDeposit.tax_label}, {inv.matchedDeposit.confidence}).
+                Choosing <em>keep — apply deposit</em> voids the phantom payment and repoints this deposit line to
+                Accounts Receivable + {inv.customer || "the customer"}, so the invoice stays intact and shows paid.
               </div>
             )}
 

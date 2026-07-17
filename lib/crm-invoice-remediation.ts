@@ -61,6 +61,53 @@ export interface RemediationInvoice {
   grossTotal?: number | null;
   /** First few line descriptions — identifies the job at a glance. */
   lineSamples?: string[];
+  /** QBO CustomerRef id — needed for the keep-invoice path (deposit → A/R + customer). */
+  customerId?: string | null;
+  /** The bank deposit that PAID this invoice (from the pairing engine), when a
+   *  confident match exists. Enables the alternative remediation: KEEP the
+   *  invoice and apply this deposit to it instead of voiding (clients who
+   *  actively use invoicing — Mike 2026-07-17). */
+  matchedDeposit?: {
+    txn_id: string;
+    date: string;
+    account: string;
+    amount: number;
+    tax_label: string;
+    confidence: string;
+  } | null;
+}
+
+/**
+ * Pure join: attach each invoice's best deposit pair (from
+ * analyzeCrmInvoiceRevenue's greedy 1:1 pairing) onto the remediation rows.
+ * Only confident pairs attach — an invoice without a clean deposit match can
+ * only be voided or left alone, never "applied".
+ */
+export function attachDepositPairs(
+  invoices: RemediationInvoice[],
+  pairs: Array<{
+    invoice: { txn_id: string };
+    deposit: { txn_id: string; date: string; account: string; amount: number };
+    taxLabel: string;
+    confidence: string;
+  }>
+): RemediationInvoice[] {
+  const byInvoice = new Map(pairs.map((p) => [p.invoice.txn_id, p]));
+  return invoices.map((inv) => {
+    const p = byInvoice.get(inv.invoiceId);
+    if (!p) return { ...inv, matchedDeposit: null };
+    return {
+      ...inv,
+      matchedDeposit: {
+        txn_id: p.deposit.txn_id,
+        date: p.deposit.date,
+        account: p.deposit.account,
+        amount: p.deposit.amount,
+        tax_label: p.taxLabel,
+        confidence: p.confidence,
+      },
+    };
+  });
 }
 
 /** Undeposited-Funds account names across QBO locales/versions. */
@@ -90,6 +137,7 @@ export function planInvoice(
     incomeAccounts: string[];
     grossTotal?: number | null;
     lineSamples?: string[];
+    customerId?: string | null;
   },
   payments: RemediationPayment[]
 ): RemediationInvoice {
@@ -103,6 +151,7 @@ export function planInvoice(
     incomeAccounts: inv.incomeAccounts,
     grossTotal: inv.grossTotal ?? null,
     lineSamples: inv.lineSamples || [],
+    customerId: inv.customerId ?? null,
     payments,
   };
 

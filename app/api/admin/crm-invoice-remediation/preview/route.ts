@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, qboRequest } from "@/lib/qbo";
 import { fetchPLDetailAll } from "@/lib/qbo-reports";
-import { planInvoice, summarizeRemediation, type RemediationPayment } from "@/lib/crm-invoice-remediation";
+import { planInvoice, summarizeRemediation, attachDepositPairs, type RemediationPayment } from "@/lib/crm-invoice-remediation";
+import { analyzeCrmInvoiceRevenue } from "@/lib/crm-invoice-revenue";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -145,7 +146,7 @@ export async function buildRemediationPreview(
 
   // 5. Plan each invoice — with full review detail per payment (date, method,
   //    ref#, unapplied, swept-by) and per invoice (gross total, job lines).
-  return invoiceIds.map((id) => {
+  const planned = invoiceIds.map((id) => {
     const rec = recognized.get(id)!;
     const inv = invEntities.get(id);
     const payments: RemediationPayment[] = [...(inv?.LinkedTxn || [])]
@@ -180,8 +181,16 @@ export async function buildRemediationPreview(
         incomeAccounts: [...rec.accounts],
         grossTotal: inv?.TotalAmt != null ? Number(inv.TotalAmt) : null,
         lineSamples,
+        customerId: inv?.CustomerRef?.value != null ? String(inv.CustomerRef.value) : null,
       },
       payments
     );
   });
+
+  // 6. Attach each invoice's best deposit pair (the same greedy 1:1 pairing
+  //    the Revenue Check evidence table uses) — enables the KEEP-INVOICE
+  //    remediation: apply the matched deposit to the invoice instead of
+  //    voiding it (clients who actively use invoicing).
+  const pairing = analyzeCrmInvoiceRevenue(plDetail);
+  return attachDepositPairs(planned, pairing?.pairs || []);
 }
