@@ -12,6 +12,8 @@ interface Suspect {
   employees: number;
   by_type: Record<string, number>;
   sample_memos: string[];
+  cash_total: number;
+  invoice_total: number;
 }
 interface RowState {
   status: "idle" | "scanning" | "done" | "clean" | "reauth" | "error";
@@ -19,6 +21,8 @@ interface RowState {
   paycheque_accounts: string[];
   employee_count: number;
   suspects: Suspect[];
+  cash_total: number;
+  invoice_total: number;
   message?: string;
 }
 
@@ -26,7 +30,7 @@ const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
 export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
   const [rows, setRows] = useState<Record<string, RowState>>(
-    Object.fromEntries(clients.map((c) => [c.id, { status: "idle", overstated: 0, paycheque_accounts: [], employee_count: 0, suspects: [] } as RowState])),
+    Object.fromEntries(clients.map((c) => [c.id, { status: "idle", overstated: 0, paycheque_accounts: [], employee_count: 0, suspects: [], cash_total: 0, invoice_total: 0 } as RowState])),
   );
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -48,6 +52,8 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
         paycheque_accounts: d.paycheque_accounts || [],
         employee_count: d.employee_count || 0,
         suspects: d.suspects || [],
+        cash_total: d.cash_total || 0,
+        invoice_total: d.invoice_total || 0,
       });
     } catch (e: any) {
       patch(id, { status: "error", message: e.message });
@@ -152,18 +158,35 @@ export function PayrollDoubleScanClient({ clients }: { clients: ClientRow[] }) {
                     <tr key={`${c.id}-d`} className="border-b border-gray-100 bg-gray-50/60">
                       <td colSpan={5} className="px-6 py-3 text-xs text-ink-slate space-y-2">
                         <div>
-                          <span className="font-semibold text-navy">Legit paycheque accounts:</span> {r.paycheque_accounts.join(" · ") || "—"} · {r.employee_count} employees
+                          <span className="font-semibold text-navy">Payroll invoices (paycheques):</span> {r.paycheque_accounts.join(" · ") || "—"} · {r.employee_count} employees
                         </div>
-                        {r.suspects.map((s) => (
-                          <div key={s.account} className="border-l-2 border-red-300 pl-2">
-                            <span className="font-semibold text-red-700">{s.account}</span> — {money(Math.abs(s.total))} across {s.postings} postings ({s.employees} employees)
-                            {" · "}<span className="text-ink-light">types: {Object.entries(s.by_type).map(([k, v]) => `${k}×${v}`).join(", ")}</span>
-                            {s.sample_memos.length > 0 && (
-                              <div className="text-ink-light italic mt-0.5">e.g. {s.sample_memos.map((m) => `"${m}"`).join(", ")}</div>
-                            )}
-                          </div>
-                        ))}
-                        <div className="text-ink-light">Fix: reclass these net-pay lines to a Payroll Clearing account (separate reviewed step) — the gross paycheques stay put.</div>
+                        {/* Cash-basis split: cash leaving the bank is the source of truth. */}
+                        <div className="flex flex-wrap gap-3">
+                          <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded font-semibold">
+                            Cash paid out (truth): {money(Math.abs(r.cash_total))}
+                          </span>
+                          {Math.abs(r.invoice_total) > 0 && (
+                            <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
+                              Accrual/invoice on these lines: {money(Math.abs(r.invoice_total))}
+                            </span>
+                          )}
+                        </div>
+                        {r.suspects.map((s) => {
+                          const cash = Math.abs(s.cash_total), inv = Math.abs(s.invoice_total);
+                          const kind = cash > 0 && inv === 0 ? "CASH" : inv > 0 && cash === 0 ? "INVOICE" : "MIXED";
+                          return (
+                            <div key={s.account} className="border-l-2 border-red-300 pl-2">
+                              <span className={`text-[10px] font-bold px-1 py-0.5 rounded mr-1 ${kind === "CASH" ? "bg-emerald-100 text-emerald-800" : kind === "INVOICE" ? "bg-slate-200 text-slate-700" : "bg-amber-100 text-amber-800"}`}>{kind}</span>
+                              <span className="font-semibold text-red-700">{s.account}</span> — {money(Math.abs(s.total))} across {s.postings} postings ({s.employees} employees)
+                              {kind === "MIXED" && <span className="text-ink-light"> · cash {money(cash)} / invoice {money(inv)}</span>}
+                              {" · "}<span className="text-ink-light">types: {Object.entries(s.by_type).map(([k, v]) => `${k}×${v}`).join(", ")}</span>
+                              {s.sample_memos.length > 0 && (
+                                <div className="text-ink-light italic mt-0.5">e.g. {s.sample_memos.map((m) => `"${m}"`).join(", ")}</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <div className="text-ink-light">Cash basis: the <span className="font-semibold">cash that left the bank</span> is the real expense. Resolve (coming next) will keep the cash on the correct labor account and take the duplicate off the P&L — reviewed, one at a time.</div>
                       </td>
                     </tr>
                   )}

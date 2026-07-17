@@ -299,6 +299,38 @@ export interface LaborScanRow {
   memo?: string | null;
 }
 
+/**
+ * Payment kind for cash-basis remediation (Mike 2026-07-17: "differentiate
+ * CASH PAYMENTS from payroll invoices — cash basis, so cash leaving the
+ * account is the source of truth").
+ *   - "invoice" : a QBO Payroll paycheque / payroll journal — the ACCRUAL
+ *      posting that books gross wages when payroll runs. System-locked.
+ *   - "cash"    : money actually leaving the bank (e-Transfer, cheque, bill
+ *      payment, direct-deposit debit from the bank feed) — the cash-basis
+ *      source of truth.
+ */
+export type PayrollPaymentKind = "invoice" | "cash";
+
+const PAYCHEQUE_TXN_TYPE = /paycheque|paycheck|pay check|payroll check|payroll adjustment|payroll liability/i;
+// The money-movement postings that should never re-expense wages.
+const RECORDABLE_TXN_TYPE = /expense|deposit|transfer|check|cheque|journal|bill|purchase/i;
+
+/**
+ * Classify a posting as the payroll INVOICE (accrual paycheque/JE) or the CASH
+ * payment (money leaving the bank). "Direct Deposit" is ambiguous — QBO uses it
+ * both for the paycheque and for the bank debit — so a memo that reads like a
+ * bank withdrawal ("e-Transfer", "deposit", "withdrawal") tips it to cash.
+ */
+export function classifyPayrollPaymentKind(txnType: string, memo?: string | null): PayrollPaymentKind {
+  const t = (txnType || "").toLowerCase();
+  const m = (memo || "").toLowerCase();
+  if (/journal/.test(t)) return "invoice";
+  if (PAYCHEQUE_TXN_TYPE.test(t)) return "invoice";
+  // "Paycheque" proper is invoice; a bank-feed Expense/Deposit/Transfer is cash.
+  if (/e-?transfer|e-?tfr|withdrawal|bill\s*pay|debit|ach|eft/.test(m)) return "cash";
+  return "cash";
+}
+
 export interface LaborSuspectAccount {
   account: string;
   postings: number;
@@ -306,6 +338,9 @@ export interface LaborSuspectAccount {
   employees: number;      // distinct payroll employees appearing here
   by_type: Record<string, number>;
   sample_memos: string[];
+  /** Of `total`, how much is cash-out vs accrual-invoice (cash-basis split). */
+  cash_total: number;
+  invoice_total: number;
 }
 
 export interface LaborDuplicationResult {
@@ -319,11 +354,10 @@ export interface LaborDuplicationResult {
   overstated: number;
   /** True when there's a material second labor line to remediate. */
   flagged: boolean;
+  /** Cash-basis split of ALL the flagged (suspect) labor: cash-out is truth. */
+  cash_total: number;
+  invoice_total: number;
 }
-
-const PAYCHEQUE_TXN_TYPE = /paycheque|paycheck|pay check|payroll check|direct deposit|directdeposit/i;
-// The money-movement postings that should never re-expense wages.
-const RECORDABLE_TXN_TYPE = /expense|deposit|transfer|check|cheque|journal|bill|purchase/i;
 
 function normPerson(s: string | null | undefined): string {
   return (s || "").toLowerCase().replace(/\s*\(\d+\)\s*$/, "").replace(/\s+/g, " ").trim();
@@ -360,9 +394,11 @@ export function detectLaborDuplication(
       if (!RECORDABLE_TXN_TYPE.test(r.txn_type)) continue;
       const p = normPerson(r.name);
       if (!p || !employees.has(p)) continue;
-      const e = byAccount.get(r.account) || { account: r.account, postings: 0, total: 0, employees: 0, by_type: {}, sample_memos: [] };
+      const e = byAccount.get(r.account) || { account: r.account, postings: 0, total: 0, employees: 0, by_type: {}, sample_memos: [], cash_total: 0, invoice_total: 0 };
       e.postings++;
       e.total += r.amount;
+      if (classifyPayrollPaymentKind(r.txn_type, r.memo) === "cash") e.cash_total += r.amount;
+      else e.invoice_total += r.amount;
       e.by_type[r.txn_type] = (e.by_type[r.txn_type] || 0) + 1;
       if (r.memo && e.sample_memos.length < 4 && !e.sample_memos.includes(r.memo)) e.sample_memos.push(r.memo);
       byAccount.set(r.account, e);
@@ -376,12 +412,16 @@ export function detectLaborDuplication(
       e.employees = ((e as any)._people as Set<string>)?.size || 0;
       delete (e as any)._people;
       e.total = Math.round(e.total * 100) / 100;
+      e.cash_total = Math.round(e.cash_total * 100) / 100;
+      e.invoice_total = Math.round(e.invoice_total * 100) / 100;
       return e;
     })
     .filter((e) => Math.abs(e.total) >= minSuspectTotal)
     .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
 
   const overstated = Math.round(suspects.reduce((s, e) => s + Math.abs(e.total), 0) * 100) / 100;
+  const cashTotal = Math.round(suspects.reduce((s, e) => s + e.cash_total, 0) * 100) / 100;
+  const invoiceTotal = Math.round(suspects.reduce((s, e) => s + e.invoice_total, 0) * 100) / 100;
 
   return {
     paycheque_accounts: [...paychequeAccounts],
@@ -389,5 +429,7 @@ export function detectLaborDuplication(
     suspects,
     overstated,
     flagged: suspects.length > 0,
+    cash_total: cashTotal,
+    invoice_total: invoiceTotal,
   };
 }

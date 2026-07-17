@@ -1,6 +1,6 @@
 // Tests for cross-account labor duplication detector.
 // Run: npx tsx scripts/test-labor-duplication.ts
-import { detectLaborDuplication, type LaborScanRow } from "@/lib/payroll-double-entry";
+import { detectLaborDuplication, classifyPayrollPaymentKind, type LaborScanRow } from "@/lib/payroll-double-entry";
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
@@ -53,6 +53,19 @@ ok(r.flagged, "stray flagged when threshold lowered");
 // No payroll at all → nothing to learn, nothing flagged.
 r = detectLaborDuplication([{ account: "Materials", txn_type: "Expense", name: "Rona", amount: 500 }]);
 ok(!r.flagged && r.employee_count === 0, "no payroll → not flagged");
+
+// ── cash vs invoice classification (cash-basis source of truth) ──
+ok(classifyPayrollPaymentKind("Paycheque") === "invoice", "Paycheque → invoice");
+ok(classifyPayrollPaymentKind("Payroll Adjustment") === "invoice", "Payroll Adjustment → invoice");
+ok(classifyPayrollPaymentKind("Journal Entry") === "invoice", "Payroll JE → invoice");
+ok(classifyPayrollPaymentKind("Expense", "e-Transfer sent") === "cash", "bank e-Transfer → cash");
+ok(classifyPayrollPaymentKind("Expense", "INTUIT PAYROLL Payroll Deposit") === "cash", "bank payroll deposit → cash");
+ok(classifyPayrollPaymentKind("Cheque") === "cash", "Cheque → cash");
+
+// BMD's suspect line (WCB) is all bank-fed Expense → 100% cash side.
+r = detectLaborDuplication(bmd);
+ok(r.cash_total !== 0 && r.invoice_total === 0, `WCB suspect is all cash-out [cash=${r.cash_total} invoice=${r.invoice_total}]`);
+ok(Math.abs(r.suspects[0].cash_total - r.suspects[0].total) < 0.01, "suspect cash_total == total (all cash)");
 
 console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"}: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
