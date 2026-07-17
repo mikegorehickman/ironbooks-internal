@@ -324,6 +324,32 @@ const RECORDABLE_TXN_TYPE = /expense|deposit|transfer|check|cheque|journal|bill|
 // have paycheques — real fuel reimbursements, not wage duplication.
 const REIMBURSEMENT_MEMO = /\b(reimburs\w*|repa(?:id|yment)|expense\s*report|mileage|per\s*diem)\b/i;
 
+// Payroll-provider NET-PAY deposit signature — the aggregate direct-deposit
+// debit a payroll provider (Intuit/QBO Payroll, ADP, Gusto, Wagepoint, …)
+// pulls to pay staff. These land on the bank feed with NO employee name
+// (Mike/BMD 2026-07-17: "INTUIT 11169983 PAYROLL Payroll Deposit" sitting in
+// 5625 Software Subscriptions), so the employee-roster match alone misses them
+// — but they're the same net-pay double-count as the named e-Transfers.
+// Requires "deposit" so it does NOT catch the payroll SUBSCRIPTION fee
+// ("INTUIT *QBooks Payroll TORONTO ON", a real expense that should stay put).
+const PAYROLL_DEPOSIT_MEMO = /payroll[\s\w-]{0,30}deposit|direct\s*dep(?:osit)?[\s\w-]{0,20}payroll|\bnet\s*pay\b/i;
+
+/**
+ * Is this bank posting a payroll net-pay outflow that duplicates a paycheque —
+ * whether by named employee OR by the payroll-provider deposit memo? Used by
+ * both the detector and the resolve so they agree on exactly which lines move.
+ * Reimbursements (fuel, mileage, tool repayment) are never payroll net-pay.
+ */
+export function isPayrollCashDuplicate(
+  name: string | null | undefined,
+  memo: string | null | undefined,
+  roster: Set<string>,
+): boolean {
+  const m = memo || "";
+  if (REIMBURSEMENT_MEMO.test(m)) return false;
+  return isPayrollEmployee(name, roster) || PAYROLL_DEPOSIT_MEMO.test(m);
+}
+
 /**
  * Classify a posting as the payroll INVOICE (accrual paycheque/JE) or the CASH
  * payment (money leaving the bank). "Direct Deposit" is ambiguous — QBO uses it
@@ -433,9 +459,11 @@ export function detectLaborDuplication(
     for (const r of rows) {
       if (paychequeAccounts.has(r.account)) continue;      // legit paycheque line
       if (!RECORDABLE_TXN_TYPE.test(r.txn_type)) continue;
-      if (REIMBURSEMENT_MEMO.test(r.memo || "")) continue; // expense reimbursement, not wage dup
+      // A net-pay duplicate is either a named employee's pay OR a payroll-
+      // provider deposit (blank name, "…PAYROLL Payroll Deposit" memo).
+      // Reimbursements excluded inside the helper.
+      if (!isPayrollCashDuplicate(r.name, r.memo, employees)) continue;
       const p = normPerson(r.name);
-      if (!p || !employees.has(p)) continue;
       const e = byAccount.get(r.account) || { account: r.account, postings: 0, total: 0, employees: 0, by_type: {}, sample_memos: [], cash_total: 0, invoice_total: 0, reason: "", txns: [] };
       e.postings++;
       e.total += r.amount;
@@ -446,8 +474,9 @@ export function detectLaborDuplication(
       if (r.memo && e.sample_memos.length < 4 && !e.sample_memos.includes(r.memo)) e.sample_memos.push(r.memo);
       e.txns.push({ date: r.date || "", amount: r.amount, name: r.name, memo: (r.memo || "").slice(0, 60), txn_type: r.txn_type, kind });
       byAccount.set(r.account, e);
-      // track distinct employees per account via a side set
-      (e as any)._people ? (e as any)._people.add(p) : ((e as any)._people = new Set([p]));
+      // track distinct employees per account via a side set (skip blank names
+      // from unnamed payroll-provider deposits)
+      if (p) (e as any)._people ? (e as any)._people.add(p) : ((e as any)._people = new Set([p]));
     }
   }
 
@@ -462,9 +491,11 @@ export function detectLaborDuplication(
       e.txns.sort((a, b) => a.date.localeCompare(b.date));
       const names = people ? [...people].slice(0, 3).map((n) => n.replace(/\b\w/g, (c) => c.toUpperCase())) : [];
       const cashN = e.txns.filter((t) => t.kind === "cash").length;
+      const who = names.length
+        ? `to payroll ${e.employees === 1 ? "employee" : "employees"} (${names.join(", ")}${e.employees > names.length ? ", …" : ""})`
+        : `from the payroll provider (net-pay deposits, no employee name on the bank line)`;
       e.reason =
-        `${cashN} payment${cashN === 1 ? "" : "s"} to payroll ${e.employees === 1 ? "employee" : "employees"} ` +
-        `(${names.join(", ")}${e.employees > names.length ? ", …" : ""}) posted to "${e.account}" — ` +
+        `${cashN} net-pay payment${cashN === 1 ? "" : "s"} ${who} posted to "${e.account}" — ` +
         `these are the NET-PAY bank withdrawals for staff whose GROSS wages are already booked via QBO Payroll paycheques ` +
         `(gross = net pay + withheld taxes, so net pay is a subset of the paycheque, not an additional cost). ` +
         `Move this net-pay to Payroll Clearing so it stops being counted as a second wage expense; the paycheques stay as the one wage record on the P&L.`;
