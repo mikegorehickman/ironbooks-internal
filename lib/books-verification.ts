@@ -28,6 +28,8 @@ import { fetchProfitAndLossByMonth, type PLByMonthBlock } from "./qbo-pl-by-mont
 import { findDuplicates } from "./qbo-dup-scan";
 import { analyzeDepositsToIncome } from "./revenue-integrity";
 import { computeRevenueAdjustment, normalizeRevenueMode } from "./revenue-recognition";
+import { analyzeCrmInvoiceRevenue } from "./crm-invoice-revenue";
+import { detectLaborDuplication, PAYROLL_ACCOUNT_NAME_REGEX } from "./payroll-double-entry";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -67,7 +69,7 @@ export interface VerificationCheck {
   detail: string;
   findings: VerificationFinding[];
   /** Which in-app tool fixes this — the UI maps it to a link. */
-  fix?: "reclass" | "uf_audit" | "ar" | "profile" | "connections" | "statements" | "daily_queue";
+  fix?: "reclass" | "uf_audit" | "ar" | "profile" | "connections" | "statements" | "daily_queue" | "revenue_check";
   /** Check-specific extras (e.g. the tie-out table rows). */
   meta?: Record<string, unknown>;
   skipReason?: string;
@@ -128,14 +130,14 @@ const PILLARS_FULL: { key: PillarKey; weight: number; alloc: Record<string, numb
   { key: "reconciliation", weight: 0.35, alloc: { bank_tieout: 50, cc_tieout: 30, undeposited_funds: 20 } },
   { key: "categorization", weight: 0.25, alloc: { uncategorized: 50, daily_queue_clear: 30, suspense_ama: 20 } },
   { key: "bs_integrity", weight: 0.2, alloc: { negative_banks: 30, negative_liabilities: 25, obe: 20, ar_ap_negative: 25 } },
-  { key: "anomalies", weight: 0.15, alloc: { duplicates: 30, deposits_in_revenue: 20, mom_variance: 20, large_round_jes: 15, overdue_ar: 15 } },
+  { key: "anomalies", weight: 0.15, alloc: { duplicates: 20, deposits_in_revenue: 15, crm_invoice_revenue: 15, payroll_duplication: 20, mom_variance: 15, large_round_jes: 10, overdue_ar: 5 } },
   { key: "documentation", weight: 0.05, alloc: { statement_coverage: 100 } },
 ];
 
 /** P&L-only clients: no BS/reconciliation/documentation pillars. */
 const PILLARS_PL_ONLY: { key: PillarKey; weight: number; alloc: Record<string, number> }[] = [
   { key: "categorization", weight: 0.6, alloc: { uncategorized: 50, daily_queue_clear: 30, suspense_ama: 20 } },
-  { key: "anomalies", weight: 0.4, alloc: { duplicates: 30, deposits_in_revenue: 20, mom_variance: 20, large_round_jes: 15, overdue_ar: 15 } },
+  { key: "anomalies", weight: 0.4, alloc: { duplicates: 20, deposits_in_revenue: 15, crm_invoice_revenue: 15, payroll_duplication: 20, mom_variance: 15, large_round_jes: 10, overdue_ar: 5 } },
 ];
 
 const fmt = (n: number) =>
@@ -806,6 +808,151 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
           }))
         ),
         meta: { summary: rev.reason, invoiceCount: rev.invoiceCount, invoiceTotal: rev.invoiceTotal, depositTotal: rev.depositTotal, depositNoNameTotal: rev.depositNoNameTotal },
+      });
+    }
+
+    // CRM invoice double-count — the Dominion pattern, the INVERSE of the
+    // check above: a field CRM (Jobber/DripJobs/…) pushes invoices that
+    // recognize as income on the cash P&L, AND the bank deposits paying them
+    // are separately categorized to income. Same revenue, counted twice.
+    // Must be resolved before books go out: void the dupes, keep-invoice +
+    // apply deposits, or set the client cash-deposits-only — all on the
+    // client's Revenue Check page.
+    if (plDetail === null) {
+      checks.push({
+        key: "crm_invoice_revenue",
+        label: "CRM invoice double-count",
+        pillar: "anomalies",
+        status: "skipped",
+        detail: "P&L detail unavailable",
+        skipReason: "QBO P&L detail report failed — re-run verification.",
+        findings: [],
+      });
+    } else if (revenueMode === "deposits_only") {
+      checks.push({
+        key: "crm_invoice_revenue",
+        label: "CRM invoice double-count",
+        pillar: "anomalies",
+        status: "pass",
+        detail:
+          "Client is cash-deposits-only — CRM invoice income is already excluded from statements. Ledger cleanup (voiding the duplicate invoices) runs from Revenue Check.",
+        findings: [],
+        fix: "revenue_check",
+      });
+    } else {
+      const incomeNames = new Set(
+        accounts
+          .filter((a: any) => active(a) && String(a.AccountType) === "Income")
+          .map((a: any) => String(a.Name || ""))
+      );
+      const crm = analyzeCrmInvoiceRevenue(plDetail, incomeNames);
+      const topInvoiceAccounts = Object.entries(crm.invoiceByAccount)
+        .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+        .slice(0, 3)
+        .map(([name, amt]) => `${name} ${fmt(amt)}`)
+        .join(", ");
+      checks.push({
+        key: "crm_invoice_revenue",
+        label: "CRM invoice double-count",
+        pillar: "anomalies",
+        status: "pass",
+        detail: crm.flagged
+          ? "Invoices AND deposits both recognize material income — the same revenue is likely counted twice"
+          : crm.invoiceTxnCount > 0
+            ? `${crm.invoiceTxnCount} invoice${crm.invoiceTxnCount === 1 ? "" : "s"} recognize ${fmt(crm.invoiceIncomeTotal)} of income; no material deposit leg alongside`
+            : "No invoice-recognized income this period",
+        findings: crm.flagged
+          ? [
+              {
+                fingerprint: fingerprintFor("crminv", period),
+                severity: "fail" as const,
+                message:
+                  `${crm.invoiceTxnCount} CRM invoices recognize ${fmt(crm.invoiceIncomeTotal)} of income (${topInvoiceAccounts}) while ` +
+                  `${crm.depositCount} deposits put ${fmt(crm.depositIncomeTotal)} into income accounts` +
+                  `${crm.pairs.length > 0 ? ` — ${crm.pairs.length} invoice↔deposit pair${crm.pairs.length === 1 ? "" : "s"} proven` : ""}. ` +
+                  `Likely the same revenue twice. Resolve on Revenue Check (void the duplicate invoices, keep-invoice + apply deposits, or set cash-deposits-only) before sending.`,
+                amount: Math.min(crm.invoiceIncomeTotal, crm.depositIncomeTotal),
+                dismissable: true, // a rare client legitimately mixes QBO-native invoices + true cash sales
+              },
+            ]
+          : [],
+        meta: {
+          invoiceTxnCount: crm.invoiceTxnCount,
+          invoiceIncomeTotal: crm.invoiceIncomeTotal,
+          invoiceByAccount: crm.invoiceByAccount,
+          depositCount: crm.depositCount,
+          depositIncomeTotal: crm.depositIncomeTotal,
+          pairCount: crm.pairs.length,
+          reason: crm.reason,
+        },
+        fix: "revenue_check",
+      });
+    }
+
+    // Duplicate payroll — the BMD pattern: QBO Payroll books the GROSS
+    // paycheque to a wage account, then the bank-feed net-pay e-Transfers /
+    // direct-deposit debits get expensed to a SECOND labor line. Roster is
+    // learned from this period's paycheque postings; any other account paying
+    // those same employees via recordable txns is suspect.
+    if (plDetail === null) {
+      checks.push({
+        key: "payroll_duplication",
+        label: "Duplicate payroll postings",
+        pillar: "anomalies",
+        status: "skipped",
+        detail: "P&L detail unavailable",
+        skipReason: "QBO P&L detail report failed — re-run verification.",
+        findings: [],
+      });
+    } else {
+      const labor = detectLaborDuplication(
+        plDetail.map((r: any) => ({
+          account: String(r.account || ""),
+          txn_type: String(r.txn_type || ""),
+          name: r.name ?? null,
+          amount: Number(r.amount) || 0,
+          memo: r.memo ?? null,
+        }))
+      );
+      checks.push({
+        key: "payroll_duplication",
+        label: "Duplicate payroll postings",
+        pillar: "anomalies",
+        status: "pass",
+        detail: labor.flagged
+          ? `Employees' pay hits ${labor.suspects.length} account${labor.suspects.length === 1 ? "" : "s"} beyond the paycheque line — up to ${fmt(labor.overstated)} may be expensed twice`
+          : labor.employee_count > 0
+            ? `Paycheques post to ${labor.paycheque_accounts.join(", ")}; no second labor line carries the same employees`
+            : "No QBO Payroll paycheques this period",
+        findings: cap(
+          labor.suspects.map((sa) => {
+            const laborNamed = PAYROLL_ACCOUNT_NAME_REGEX.test(sa.account);
+            const types = Object.entries(sa.by_type)
+              .map(([t, n]) => `${n}× ${t}`)
+              .join(", ");
+            return {
+              fingerprint: fingerprintFor("labordup", `${period}:${sa.account}`),
+              // Labor-named second lines and big totals are near-certain
+              // double-counts; a small non-labor account could be legitimate
+              // employee reimbursements, so it only warns.
+              severity: (laborNamed || Math.abs(sa.total) >= 2500 ? "fail" : "warn") as "warn" | "fail",
+              message:
+                `${sa.account}: ${fmt(sa.total)} across ${sa.postings} posting${sa.postings === 1 ? "" : "s"} (${types}) ` +
+                `pays ${sa.employees} payroll employee${sa.employees === 1 ? "" : "s"} whose gross paycheques already post to ` +
+                `${labor.paycheque_accounts.join(", ") || "the wage account"}. Likely net pay expensed a second time — ` +
+                `recategorize to Payroll Clearing, or dismiss if these are true reimbursements.`,
+              amount: Math.abs(sa.total),
+              account_name: sa.account,
+              dismissable: true,
+            };
+          })
+        ),
+        meta: {
+          paychequeAccounts: labor.paycheque_accounts,
+          employeeCount: labor.employee_count,
+          overstated: labor.overstated,
+        },
+        fix: "revenue_check",
       });
     }
 

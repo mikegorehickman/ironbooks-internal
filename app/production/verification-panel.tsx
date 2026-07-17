@@ -62,6 +62,7 @@ export function vFixLink(fix: string | undefined, clientId: string): { href: str
     case "connections": return { href: "/fleet/qbo-health", label: "QBO Connections" };
     case "statements": return { href: `/clients/${clientId}`, label: "Statements on profile" };
     case "daily_queue": return { href: `/today/${clientId}`, label: "Open review queue" };
+    case "revenue_check": return { href: `/revenue-check/${clientId}`, label: "Open Revenue Check" };
     default: return null;
   }
 }

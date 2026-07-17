@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, fetchAllAccounts, qboErrorResponse } from "@/lib/qbo";
 import { fetchPLDetailAll, type PLDetailRow } from "@/lib/qbo-reports";
-import { PAYROLL_ACCOUNT_NAME_REGEX } from "@/lib/payroll-double-entry";
+import { PAYROLL_ACCOUNT_NAME_REGEX, detectLaborDuplication } from "@/lib/payroll-double-entry";
 import { normalizeAccountName } from "@/lib/account-name";
 
 export const runtime = "nodejs";
@@ -33,8 +33,9 @@ export async function POST(request: Request) {
 
   const service = createServiceSupabase();
   const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
-  if (!["admin", "lead"].includes((actor as any)?.role || "")) {
-    return NextResponse.json({ error: "Admin/lead only" }, { status: 403 });
+  // Bookkeepers run this from the Revenue Check step (read-only diagnostic).
+  if (!["admin", "lead", "bookkeeper"].includes((actor as any)?.role || "")) {
+    return NextResponse.json({ error: "Staff only" }, { status: 403 });
   }
 
   const body = await request.json().catch(() => ({} as any));
@@ -172,6 +173,18 @@ export async function POST(request: Request) {
       .map(([key, m]) => ({ key, accounts: [...m.keys()] }))
       .slice(0, 50);
 
+    // Canonical verdict (same detector the close verification runs) — the
+    // Revenue Check payroll card renders straight from this.
+    const laborDuplication = detectLaborDuplication(
+      accrualRows.map((r) => ({
+        account: String(r.account || ""),
+        txn_type: String(r.txn_type || ""),
+        name: r.name ?? null,
+        amount: Number(r.amount) || 0,
+        memo: r.memo ?? null,
+      }))
+    );
+
     const result = {
       client_name: (client as any).client_name,
       realm_id: (client as any).qbo_realm_id,
@@ -182,6 +195,7 @@ export async function POST(request: Request) {
       labor_lines: laborLines,
       employee_count: employeeNames.size,
       exact_cross_account_dupes: exactCrossAccountDupes,
+      labor_duplication: laborDuplication,
     };
 
     // Persist so it can be read back via the service key (local scripts can't
