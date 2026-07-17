@@ -364,6 +364,25 @@ function normPerson(s: string | null | undefined): string {
 }
 
 /**
+ * The distinct employees this client pays via QBO Payroll — learned from every
+ * paycheque posting. The resolve route uses this to move ONLY these people's
+ * duplicate cash lines off the wrong labor account (never unrelated postings).
+ */
+export function payrollEmployeeRoster(rows: { txn_type: string; name: string | null }[]): Set<string> {
+  const s = new Set<string>();
+  for (const r of rows) {
+    if (PAYCHEQUE_TXN_TYPE.test(r.txn_type) && r.name) s.add(normPerson(r.name));
+  }
+  return s;
+}
+
+/** True if `name` is one of the payroll employees in `roster`. */
+export function isPayrollEmployee(name: string | null | undefined, roster: Set<string>): boolean {
+  const p = normPerson(name);
+  return !!p && roster.has(p);
+}
+
+/**
  * Detect the cross-account labor double-count from a client's whole-P&L
  * detail rows. Pure — caller fetches the rows (fetchPLDetailAll). Threshold
  * guards against a single stray coincidence flagging a client.
