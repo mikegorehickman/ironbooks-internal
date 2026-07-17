@@ -82,5 +82,23 @@ ok(
 );
 ok(r.suspects.some((s) => s.account === "Workers Compensation – Field"), "WCB still flagged alongside the reimbursements");
 
+// BMD's SECOND account (Mike 2026-07-17): Intuit payroll NET-PAY deposits with
+// NO employee name, dumped in "Software Subscriptions". Employee-roster match
+// alone missed them; the payroll-deposit memo must catch them — but NOT the
+// payroll subscription fee ("QBooks Payroll", no "deposit").
+const bmdSoftware: LaborScanRow[] = [
+  ...bmd,
+  { account: "Software Subscriptions", txn_type: "Expense", name: null, amount: 1316.39, memo: "INTUIT 11169983 PAYROLL Payroll Deposit" },
+  { account: "Software Subscriptions", txn_type: "Expense", name: null, amount: 1619.67, memo: "INTUIT 11169983 PAYROLL Payroll Deposit" },
+  { account: "Software Subscriptions", txn_type: "Expense", name: null, amount: 1950.05, memo: "INTUIT 11445248 PAYROLL Payroll Deposit" },
+  { account: "Software Subscriptions", txn_type: "Expense", name: "QuickBooks Payments", amount: 50, memo: "INTUIT *QBooks Payroll TORONTO ON" }, // subscription fee — stays
+  { account: "Software Subscriptions", txn_type: "Expense", name: "Google", amount: 9.20, memo: "GOOGLE *Workspace" }, // real software — stays
+];
+r = detectLaborDuplication(bmdSoftware);
+const sw = r.suspects.find((s) => s.account === "Software Subscriptions");
+ok(!!sw, `Software Subscriptions flagged for unnamed payroll deposits [suspects: ${r.suspects.map((s) => s.account).join(", ")}]`);
+ok(sw ? Math.abs(sw.total - 4886.11) < 0.01 : false, `only the 3 net-pay deposits move, not the $50 fee or $9.20 Google [got ${sw?.total}]`);
+ok(sw ? sw.postings === 3 : false, `3 net-pay postings (fee + Google excluded) [got ${sw?.postings}]`);
+
 console.log(`\n${fail === 0 ? "ALL PASS" : "FAILURES"}: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

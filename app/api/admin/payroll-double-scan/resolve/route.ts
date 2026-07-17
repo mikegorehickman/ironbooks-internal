@@ -3,7 +3,7 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, fetchAllAccounts, createAccount, QBOReauthRequiredError, type QBOAccount } from "@/lib/qbo";
 import { fetchTransactionsForAccount, reclassifyTransactionLines, type SupportedTxType } from "@/lib/qbo-reclass";
 import { fetchPLDetailAll } from "@/lib/qbo-reports";
-import { detectLaborDuplication, payrollEmployeeRoster, isPayrollEmployee, classifyPayrollPaymentKind } from "@/lib/payroll-double-entry";
+import { detectLaborDuplication, payrollEmployeeRoster, isPayrollCashDuplicate, classifyPayrollPaymentKind } from "@/lib/payroll-double-entry";
 import { normalizeAccountName } from "@/lib/account-name";
 
 export const runtime = "nodejs";
@@ -99,16 +99,19 @@ export async function POST(request: Request) {
       createdClearing = true;
     }
 
-    // Pull the source account's YTD lines; keep only the payroll employees'
-    // CASH postings (bank-fed money out). Paycheques never appear here (they're
-    // on the wage account), but guard by kind anyway.
+    // Pull the source account's YTD lines; keep only the payroll net-pay CASH
+    // postings (bank-fed money out) — either a named employee OR an unnamed
+    // payroll-provider deposit ("…PAYROLL Payroll Deposit"). Match on both the
+    // line description and the transaction memo. Paycheques never appear here
+    // (they're on the wage account), but guard by kind anyway.
     const { lines, transactionsPulled } = await fetchTransactionsForAccount(
       (client as any).qbo_realm_id, token, sourceId, ytdStart, ytdEnd,
     );
-    const movable = lines.filter(
-      (l) => isPayrollEmployee(l.vendor_name, roster) &&
-        classifyPayrollPaymentKind(l.transaction_type, l.private_note) === "cash",
-    );
+    const movable = lines.filter((l) => {
+      const memo = `${l.private_note || ""} ${l.description || ""}`;
+      return isPayrollCashDuplicate(l.vendor_name, memo, roster) &&
+        classifyPayrollPaymentKind(l.transaction_type, memo) === "cash";
+    });
 
     if (movable.length === 0) {
       return NextResponse.json({ error: "No matching employee cash lines found on this account to move" }, { status: 400 });
