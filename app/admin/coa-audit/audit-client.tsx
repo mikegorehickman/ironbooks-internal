@@ -322,8 +322,8 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
                       {d && (fixable + mergeable > 0) && (
                         <button
                           onClick={() => applyAll(c.id, c.client_name)}
-                          disabled={busy || r.applying}
-                          title="Approve & apply every re-type, new account, and merge for this client in one click"
+                          disabled={r.applying}
+                          title="Approve & apply every re-type, new account, and merge for this client in one click — works even while the fleet is still scanning"
                           className="inline-flex items-center gap-1 text-xs font-bold text-white bg-teal hover:bg-teal-dark px-2.5 py-1 rounded-lg mr-3 disabled:opacity-50"
                         >
                           {r.applying ? <Loader2 size={11} className="animate-spin" /> : <Wrench size={11} />}
