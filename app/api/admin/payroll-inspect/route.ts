@@ -122,12 +122,58 @@ export async function POST(request: Request) {
       });
     }
 
+    // ─── Whole-P&L labor duplication scan ───────────────────────────────
+    // The double-count isn't inside one account — it's the SAME people's pay
+    // landing in a SECOND account (QBO Payroll paycheque booked to labor AND
+    // the bank-feed net-pay deposit categorized to a different labor account).
+    // 1) Learn the employee roster from every Paycheque posting anywhere on
+    //    the P&L. 2) Report each account that carries those names, so the two
+    //    (or more) labor lines are obvious.
+    const norm = (s: string | null) => (s || "").toLowerCase().replace(/\s*\(\d+\)\s*$/, "").replace(/\s+/g, " ").trim();
+    const employeeNames = new Set<string>();
+    for (const r of accrualRows) {
+      if (/paycheque|paycheck|payroll/i.test(r.txn_type) && r.name) employeeNames.add(norm(r.name));
+    }
+    const laborByAccount = new Map<string, { account: string; section: string; n: number; sum: number; people: Set<string> }>();
+    for (const r of accrualRows) {
+      const person = norm(r.name);
+      const isPayrollTxn = /paycheque|paycheck|payroll/i.test(r.txn_type);
+      if (!person || (!employeeNames.has(person) && !isPayrollTxn)) continue;
+      const key = normalizeAccountName(r.account);
+      const e = laborByAccount.get(key) || { account: r.account, section: r.section, n: 0, sum: 0, people: new Set<string>() };
+      e.n++; e.sum += r.amount; e.people.add(person);
+      laborByAccount.set(key, e);
+    }
+    const laborLines = [...laborByAccount.values()]
+      .map((e) => ({ account: e.account, section: e.section, n: e.n, sum: Math.round(e.sum * 100) / 100, people: e.people.size }))
+      .sort((a, b) => Math.abs(b.sum) - Math.abs(a.sum));
+
+    // Exact cross-account duplicates: same person + date + amount posted to 2+
+    // distinct accounts (identical double-booking).
+    const dupKey = new Map<string, Map<string, number>>(); // key -> account -> count
+    for (const r of accrualRows) {
+      const person = norm(r.name);
+      if (!person || !employeeNames.has(person)) continue;
+      const key = `${person}|${r.date}|${Math.abs(r.amount).toFixed(2)}`;
+      const m = dupKey.get(key) || new Map<string, number>();
+      m.set(r.account, (m.get(r.account) || 0) + 1);
+      dupKey.set(key, m);
+    }
+    const exactCrossAccountDupes = [...dupKey.entries()]
+      .filter(([, m]) => m.size >= 2)
+      .map(([key, m]) => ({ key, accounts: [...m.keys()] }))
+      .slice(0, 50);
+
     const result = {
       client_name: (client as any).client_name,
       realm_id: (client as any).qbo_realm_id,
       window: { start, end },
       payroll_accounts_matched: payroll.length,
       accounts: perAccount,
+      // The headline: every account carrying employee pay + how much.
+      labor_lines: laborLines,
+      employee_count: employeeNames.size,
+      exact_cross_account_dupes: exactCrossAccountDupes,
     };
 
     // Persist so it can be read back via the service key (local scripts can't
