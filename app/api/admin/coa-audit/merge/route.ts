@@ -58,11 +58,11 @@ export async function POST(request: Request) {
     .from("coa_jobs")
     .select("id, status")
     .eq("client_link_id", clientLinkId)
-    .in("status", ["executing", "in_review"] as any)
+    .eq("status", "executing")
     .limit(1)
     .maybeSingle();
   if (activeJob) {
-    return NextResponse.json({ error: `A COA cleanup job (${(activeJob as any).status}) is active for this client — finish it before merging here.` }, { status: 409 });
+    return NextResponse.json({ error: `A COA cleanup job is actively executing for this client — wait for it to finish before merging here.` }, { status: 409 });
   }
 
   const now = new Date();

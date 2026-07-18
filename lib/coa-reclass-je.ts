@@ -334,9 +334,14 @@ export async function retypeAccountViaRebuild(params: {
   newSubType: string;
   startDate: string;
   endDate: string;
-  allAccounts: QBOAccount[];
+  allAccounts?: QBOAccount[]; // ignored — refetched fresh below
 }): Promise<RetypeResult> {
-  const { realmId, accessToken, account, newType, newSubType, startDate, endDate, allAccounts } = params;
+  const { realmId, accessToken, account: staleAccount, newType, newSubType, startDate, endDate } = params;
+  // Re-fetch live accounts so we operate on FRESH state: a prior retype in the
+  // same batch may have detached this account from a retyped parent (changing
+  // its SyncToken + parent), which would 400 a rename done with stale state.
+  const allAccounts = await fetchAllAccounts(realmId, accessToken);
+  const account = (allAccounts.find((a) => a.Id === staleAccount.Id) as QBOAccount) || staleAccount;
   const out: RetypeResult = { account: account.Name, newAccountId: null, createdType: null, drain: null, failures: [] };
 
   const norm = (s: string) => (s || "").trim().toLowerCase();
