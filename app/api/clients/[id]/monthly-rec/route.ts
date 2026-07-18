@@ -90,6 +90,8 @@ export async function POST(
     period?: string;
     concerns?: string;
     attested?: boolean;
+    /** What the senior attested: "pl" = P&L only, "pl_bs" = P&L + Balance Sheet. */
+    attest_scope?: "pl" | "pl_bs" | "";
     board_status?: string;
     waiting_reasons?: string[];
     status_note?: string;
@@ -113,6 +115,12 @@ export async function POST(
   if (!["run", "statements", "spot_check", "submit", "send", "send_draft", "reopen", "board", "mark_complete", "verify", "dismiss_finding", "undismiss_finding"].includes(action || "")) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
+
+  // What the senior attested — "pl_bs" (P&L + Balance Sheet) or "pl" (P&L
+  // only, e.g. BS not yet reconciled or a P&L-only-service client). Defaults
+  // to "pl_bs" for older clients that send attested:true without a scope.
+  const attestScope: "pl" | "pl_bs" =
+    body.attest_scope === "pl" ? "pl" : "pl_bs";
 
   // Resolve the period (default: previous calendar month)
   const def = previousMonthPeriod();
@@ -469,20 +477,32 @@ export async function POST(
     }
     const concerns = (body.concerns || "").trim().slice(0, 4000) || null;
     const now = new Date().toISOString();
-    const { data: run, error } = await (service as any)
+    const submitUpdate: any = {
+      status: "pending_review",
+      concerns,
+      has_concerns: !!concerns,
+      attested_by: user.id,
+      attested_at: now,
+      attest_scope: attestScope,
+      submitted_by: user.id,
+      submitted_at: now,
+    };
+    let { data: run, error } = await (service as any)
       .from("monthly_rec_runs")
-      .update({
-        status: "pending_review",
-        concerns,
-        has_concerns: !!concerns,
-        attested_by: user.id,
-        attested_at: now,
-        submitted_by: user.id,
-        submitted_at: now,
-      })
+      .update(submitUpdate)
       .eq("id", existing.id)
       .select("*")
       .single();
+    // attest_scope column not migrated yet → retry without it.
+    if (error && /attest_scope/.test(error.message)) {
+      delete submitUpdate.attest_scope;
+      ({ data: run, error } = await (service as any)
+        .from("monthly_rec_runs")
+        .update(submitUpdate)
+        .eq("id", existing.id)
+        .select("*")
+        .single());
+    }
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true, run });
   }
@@ -927,29 +947,41 @@ export async function POST(
     // 3. Close the period. Preserve the JR's attestation when this is a
     //    senior approving a submitted run; the senior's approval is the
     //    completed_by trail.
-    const { data: run, error } = await (service as any)
+    const completeUpdate: any = {
+      status: "complete",
+      concerns,
+      has_concerns: !!concerns,
+      attested_by: existing.attested_by || user.id,
+      attested_at: existing.attested_at || now,
+      attest_scope: (existing as any).attest_scope || attestScope,
+      completed_by: user.id,
+      completed_at: now,
+      sent_to_client_at: now,
+      email_delivery: emailDelivery,
+      month_end_package_id: packageId,
+      qbo_close_error: qboCloseError,
+      ...(overrideRecord ? { verification_override: overrideRecord } : {}),
+      ...(managerReviewStamp
+        ? { manager_reviewed_by: managerReviewStamp.by, manager_reviewed_at: managerReviewStamp.at }
+        : {}),
+      ...(managerOverrideRecord ? { manager_review_override: managerOverrideRecord } : {}),
+    };
+    let { data: run, error } = await (service as any)
       .from("monthly_rec_runs")
-      .update({
-        status: "complete",
-        concerns,
-        has_concerns: !!concerns,
-        attested_by: existing.attested_by || user.id,
-        attested_at: existing.attested_at || now,
-        completed_by: user.id,
-        completed_at: now,
-        sent_to_client_at: now,
-        email_delivery: emailDelivery,
-        month_end_package_id: packageId,
-        qbo_close_error: qboCloseError,
-        ...(overrideRecord ? { verification_override: overrideRecord } : {}),
-        ...(managerReviewStamp
-          ? { manager_reviewed_by: managerReviewStamp.by, manager_reviewed_at: managerReviewStamp.at }
-          : {}),
-        ...(managerOverrideRecord ? { manager_review_override: managerOverrideRecord } : {}),
-      })
+      .update(completeUpdate)
       .eq("id", existing.id)
       .select("*")
       .single();
+    // attest_scope column not migrated yet → retry without it.
+    if (error && /attest_scope/.test(error.message)) {
+      delete completeUpdate.attest_scope;
+      ({ data: run, error } = await (service as any)
+        .from("monthly_rec_runs")
+        .update(completeUpdate)
+        .eq("id", existing.id)
+        .select("*")
+        .single());
+    }
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     // A below-threshold send is a real event — audit it so the Approvals
