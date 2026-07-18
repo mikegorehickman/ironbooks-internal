@@ -1511,6 +1511,18 @@ function PLTab({
     )
     .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
 
+  // Gross profit + margins for the KPI band (same bands as the month-end
+  // red-flag gate: COGS 20–65% → gross margin 35–80%; net margin 10–35%).
+  const RATIO_REVENUE_FLOOR = 2500;
+  const cogsTotal = cogsRows.reduce((s, r) => s + r.amount, 0);
+  const grossProfit = pl.totalIncome - cogsTotal;
+  const grossMarginPct = pl.totalIncome > 0 ? (grossProfit / pl.totalIncome) * 100 : null;
+  const netMarginPct = pl.totalIncome > 0 ? (pl.netIncome / pl.totalIncome) * 100 : null;
+  const grossFlag =
+    grossMarginPct != null && pl.totalIncome >= RATIO_REVENUE_FLOOR && (grossMarginPct < 35 || grossMarginPct > 80);
+  const netFlag =
+    netMarginPct != null && pl.totalIncome >= RATIO_REVENUE_FLOOR && (netMarginPct < 10 || netMarginPct > 35);
+
   const totalAccounts = allRows.length;
   const populatedAccounts = allRows.filter((r) => Math.abs(r.amount) >= 0.005).length;
 
@@ -1601,31 +1613,78 @@ function PLTab({
             <KPICard label="Total expenses" value={pl.totalExpenses} delta={expensesDelta} invertDeltaColor />
             <KPICard label="Net income" value={pl.netIncome} delta={niDelta} />
           </div>
-          <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} onDrill={onDrill} />
+
+          {/* Margins vs KPI bands — flagged amber when out of range. */}
+          <div className="flex flex-wrap gap-2">
+            <MarginBadge label="Gross margin" pct={grossMarginPct} sub={`Gross profit ${formatCurrency(grossProfit)}`} band="35–80%" flag={grossFlag} />
+            <MarginBadge label="Net margin" pct={netMarginPct} band="10–35%" flag={netFlag} />
+          </div>
+
+          <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} income={pl.totalIncome} onDrill={onDrill} />
           {cogsRows.length > 0 && (
             <PLSection
               title="Cost of Goods Sold (COGS)"
               rows={cogsRows}
-              total={cogsRows.reduce((s, r) => s + r.amount, 0)}
+              total={cogsTotal}
+              income={pl.totalIncome}
               onDrill={onDrill}
             />
           )}
-          <PLSection title="Operating Expenses" rows={expenseRows} total={pl.totalExpenses} onDrill={onDrill} />
+          <PLSection title="Operating Expenses" rows={expenseRows} total={pl.totalExpenses} income={pl.totalIncome} onDrill={onDrill} />
         </>
       )}
     </div>
   );
 }
 
+/** Small margin chip vs its KPI band — amber when out of range. */
+function MarginBadge({
+  label,
+  pct,
+  band,
+  sub,
+  flag,
+}: {
+  label: string;
+  pct: number | null;
+  band: string;
+  sub?: string;
+  flag?: boolean;
+}) {
+  return (
+    <div className={`rounded-xl border px-3 py-2 ${flag ? "border-amber-300 bg-amber-50" : "border-gray-200 bg-white"}`}>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate">{label}</span>
+        {flag && <AlertTriangle size={11} className="text-amber-600" />}
+      </div>
+      <div className={`font-mono font-bold text-sm ${flag ? "text-amber-800" : "text-navy"}`}>
+        {pct == null ? "—" : `${Math.round(pct)}%`}
+      </div>
+      <div className={`text-[10px] ${flag ? "text-amber-700" : "text-ink-light"}`}>
+        {flag ? `outside ${band}` : sub || `healthy ${band}`}
+      </div>
+    </div>
+  );
+}
+
+/** amount as a whole-% of total income, or "—" when income ~0. */
+function pctOfIncomeLabel(amount: number, income: number): string {
+  if (!(Math.abs(income) > 0)) return "—";
+  return `${Math.round((amount / income) * 100)}%`;
+}
+
 function PLSection({
   title,
   rows,
   total,
+  income,
   onDrill,
 }: {
   title: string;
   rows: Array<{ accountId: string | null; name: string; accountType: string; amount: number }>;
   total: number;
+  /** Total P&L income — denominator for the % of income column. */
+  income: number;
   onDrill: (accountId: string, accountName: string) => void;
 }) {
   return (
@@ -1669,6 +1728,9 @@ function PLSection({
                 >
                   {formatCurrency(r.amount)}
                 </div>
+                <div className="font-mono text-[10px] text-ink-light w-11 text-right shrink-0" title="% of income">
+                  {pctOfIncomeLabel(r.amount, income)}
+                </div>
                 {clickable && (
                   <ChevronRight size={14} className="text-ink-slate ml-1 shrink-0" />
                 )}
@@ -1682,8 +1744,9 @@ function PLSection({
           <div className="text-xs font-bold uppercase text-navy tracking-wide">
             Total {title}
           </div>
-          <div className="font-mono text-sm font-bold text-navy">
-            {formatCurrency(total)}
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="font-mono text-sm font-bold text-navy">{formatCurrency(total)}</div>
+            <div className="font-mono text-[10px] text-ink-slate w-11 text-right">{pctOfIncomeLabel(total, income)}</div>
           </div>
         </div>
       )}
