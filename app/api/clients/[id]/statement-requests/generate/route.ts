@@ -110,6 +110,22 @@ export async function POST(
     if (cc && !/^n\/?a$|^none$/i.test(cc)) declared.push({ name: cc, kind: "credit_card" });
   }
 
+  // Does an onboarding FORM exist at all? (structured declared-accounts rows,
+  // or a submitted legacy OB form). Drives the client-request wording: with no
+  // form we can't compare to a declared baseline, so we drop the per-account
+  // "business or personal?" asks and instead ask one catch-all question.
+  let hasObForm = (declRows?.length || 0) > 0;
+  if (!hasObForm) {
+    const { data: obLead } = await (service as any)
+      .from("onboarding_leads")
+      .select("id")
+      .eq("client_link_id", clientLinkId)
+      .or("ob_form_submitted_at.not.is.null,ob_form_payload.not.is.null")
+      .limit(1)
+      .maybeSingle();
+    hasObForm = !!obLead;
+  }
+
   // ── Books start: last-filed year-end + 1 day; else 6 months back (Mike) ──
   const lastFiled = (client as any).last_filed_year_end || (client as any).last_filed_return_year || null;
   let booksStart: string;
@@ -157,6 +173,7 @@ export async function POST(
   if (dryRun) {
     return NextResponse.json({
       dry_run: true,
+      has_ob_form: hasObForm,
       accounts: accounts.map((a: any) => ({
         label: a.label,
         kind: a.kind,

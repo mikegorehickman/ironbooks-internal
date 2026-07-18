@@ -968,6 +968,76 @@ function PLStatementView({ pl, monthLabel }: { pl: Statements["pl"]; monthLabel:
   );
 }
 
+/**
+ * Client-format Balance Sheet: Assets / Liabilities / Equity as sections with
+ * their accounts indented beneath, bold subtotals, the section totals, and a
+ * balance check (Assets must equal Liabilities + Equity). Mirrors the P&L
+ * view so the bookkeeper reviews the same statement the client receives.
+ */
+function BSStatementView({
+  bs,
+  monthLabel,
+}: {
+  bs: NonNullable<Statements["bs"]>;
+  monthLabel: string;
+}) {
+  const liabPlusEquity = (Number(bs.totalLiabilities) || 0) + (Number(bs.totalEquity) || 0);
+  const diff = (Number(bs.totalAssets) || 0) - liabPlusEquity;
+  const balanced = Math.abs(diff) <= 1; // $1 rounding tolerance
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-2.5 bg-navy text-white text-sm font-bold">
+        Balance Sheet — as of end of {monthLabel}
+      </div>
+      {!balanced && (
+        <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-900 flex items-center gap-1.5">
+          <AlertTriangle size={13} className="text-amber-600" />
+          <span>
+            Out of balance by <strong>${money(diff)}</strong> — Assets don&apos;t equal Liabilities + Equity. Finish the BS cleanup before sending.
+          </span>
+        </div>
+      )}
+      <div className="max-h-96 overflow-y-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-ink-light border-b border-gray-100 bg-gray-50/50">
+              <th className="px-4 py-1.5 text-left font-semibold">Account</th>
+              <th className="px-4 py-1.5 text-right font-semibold">Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bs.lines.map((l, i) => {
+              const isTotal = /^total/i.test(l.label);
+              return (
+                <tr key={i} className={`border-t border-gray-50 ${isTotal ? "bg-gray-50/40" : ""}`}>
+                  <td
+                    className={`px-4 py-1 ${isTotal ? "font-semibold text-navy" : "text-ink-slate"}`}
+                    style={{ paddingLeft: `${16 + Math.min(l.depth, 4) * 14}px` }}
+                  >
+                    {l.label}
+                  </td>
+                  <td className={`px-4 py-1 text-right font-mono whitespace-nowrap ${isTotal ? "font-semibold text-navy" : "text-navy"}`}>
+                    ${money(l.amount)}
+                  </td>
+                </tr>
+              );
+            })}
+            {/* Totals footer — the client-statement bottom line. */}
+            <tr className="border-t-2 border-gray-200 bg-gray-50/60">
+              <td className="px-4 py-1.5 font-bold text-navy">Total Assets</td>
+              <td className="px-4 py-1.5 text-right font-mono font-bold text-navy whitespace-nowrap">${money(bs.totalAssets)}</td>
+            </tr>
+            <tr className={`border-t ${balanced ? "border-gray-100" : "border-amber-200 bg-amber-50/60"}`}>
+              <td className="px-4 py-1.5 font-bold text-navy">Total Liabilities &amp; Equity</td>
+              <td className="px-4 py-1.5 text-right font-mono font-bold text-navy whitespace-nowrap">${money(liabPlusEquity)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function StatementsReview({
   statements,
   monthLabel,
@@ -990,45 +1060,8 @@ export function StatementsReview({
         </div>
       )}
 
-      {/* Balance Sheet */}
-      {bs && (
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-2.5 bg-navy text-white text-sm font-bold">
-          Balance Sheet — as of end of {monthLabel}
-        </div>
-        <div className="grid grid-cols-3 divide-x divide-gray-100 text-center border-b border-gray-100">
-          <div className="py-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Assets</div>
-            <div className="font-mono font-bold text-navy">${money(bs.totalAssets)}</div>
-          </div>
-          <div className="py-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Liabilities</div>
-            <div className="font-mono font-bold text-navy">${money(bs.totalLiabilities)}</div>
-          </div>
-          <div className="py-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-ink-slate font-semibold">Equity</div>
-            <div className="font-mono font-bold text-navy">${money(bs.totalEquity)}</div>
-          </div>
-        </div>
-        <div className="max-h-56 overflow-y-auto">
-          <table className="w-full text-xs">
-            <tbody>
-              {bs.lines.map((l, i) => (
-                <tr key={i} className="border-t border-gray-50">
-                  <td
-                    className={`px-4 py-1 ${/^total/i.test(l.label) ? "font-semibold text-navy" : "text-ink-slate"}`}
-                    style={{ paddingLeft: `${16 + Math.min(l.depth, 4) * 12}px` }}
-                  >
-                    {l.label}
-                  </td>
-                  <td className="px-4 py-1 text-right font-mono text-navy whitespace-nowrap">${money(l.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      )}
+      {/* Balance Sheet — same client-statement format as the P&L. */}
+      {bs && <BSStatementView bs={bs} monthLabel={monthLabel} />}
 
       {/* Cash Flow Statement */}
       {cfs && (

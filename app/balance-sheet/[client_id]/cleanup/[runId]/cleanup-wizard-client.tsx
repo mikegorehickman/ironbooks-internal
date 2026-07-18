@@ -1810,6 +1810,7 @@ interface EnumerationData {
   accounts: Array<{ label: string; kind: string; qbo_account_id: string | null; sources?: string[] }>;
   undeclared_asks?: Array<{ label: string; qbo_account_id: string | null }>;
   missing_from_qbo?: Array<{ name: string; kind: string }>;
+  has_ob_form?: boolean;
 }
 
 function buildClientRequests(
@@ -1891,6 +1892,15 @@ function buildClientRequests(
     push(
       "owner",
       `A quick note on ${ownerAccounts.map((n) => `"${n}"`).join(" and ")}: was this activity owner draws, owner contributions, or business expenses?`
+    );
+  }
+  // No onboarding form on file → we have no declared-account baseline, so we
+  // can't tell which in-books accounts are "new." Instead of asking about each
+  // one, ask one catch-all so the client volunteers anything we're missing.
+  if (enumData && enumData.has_ob_form === false) {
+    push(
+      "catch_all_accounts",
+      "Are there any other accounts, loans, credit cards, or personal accounts that you use for business? If so, please share the type and last 4 digits of the account number here."
     );
   }
   return items;
