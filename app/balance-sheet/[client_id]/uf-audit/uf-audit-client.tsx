@@ -45,6 +45,11 @@ interface Item {
   matched_deposit_id: string | null;
   matched_deposit_date: string | null;
   matched_deposit_bank_account: string | null;
+  probable_deposit_date: string | null;
+  probable_deposit_amount: number | null;
+  probable_deposit_bank: string | null;
+  probable_match_kind: "exact" | "combination" | "tax_adjusted" | "tax_combination" | null;
+  probable_match_note: string | null;
   suspected_duplicate: boolean;
   duplicate_of_payment_id: string | null;
   duplicate_reason: string | null;
@@ -635,6 +640,11 @@ export function UfAuditClient({
                         <CheckCircle2 size={10} />
                         matched
                       </span>
+                    ) : i.probable_deposit_date ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded" title={i.probable_match_note || undefined}>
+                        <AlertTriangle size={10} />
+                        likely deposited
+                      </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
                         <AlertTriangle size={10} />
@@ -643,9 +653,17 @@ export function UfAuditClient({
                     )}
                   </td>
                   <td className="px-3 py-2 text-xs text-ink-slate">
-                    {i.matched_deposit_bank_account
-                      ? `${i.matched_deposit_bank_account} · ${i.matched_deposit_date}`
-                      : "—"}
+                    {i.matched_deposit_bank_account ? (
+                      `${i.matched_deposit_bank_account} · ${i.matched_deposit_date}`
+                    ) : i.probable_deposit_date ? (
+                      <span className="text-amber-800" title={i.probable_match_note || undefined}>
+                        ≈ {i.probable_deposit_bank || "bank"} · {i.probable_deposit_date}
+                        {i.probable_deposit_amount != null && ` · $${i.probable_deposit_amount.toLocaleString()}`}
+                        {i.probable_match_kind && i.probable_match_kind !== "exact" && ` (${i.probable_match_kind.replace("_", " ")})`}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 </tr>
               ))}

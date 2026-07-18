@@ -26,6 +26,7 @@
  */
 
 import { qboRateLimiter, type QBOAccount } from "./qbo";
+import { matchOrphansToDeposits, type DepositRow } from "./uf-deposit-match";
 
 const QBO_BASE = "https://quickbooks.api.intuit.com/v3/company";
 
@@ -71,6 +72,20 @@ export interface UFAuditPayment {
   suspected_duplicate: boolean;
   duplicate_of_payment_id: string | null;
   duplicate_reason: string | null;
+
+  // Smart deposit match (orphans only, set by matchOrphansToDeposits). When an
+  // orphan's amount ties out to a real bank deposit (exact / bundled / CA
+  // tax-adjusted), the money DID land — surface the deposit so it's resolved,
+  // not treated as missing. Suggestion only; no write.
+  probable_deposit_id: string | null;
+  probable_deposit_date: string | null;
+  probable_deposit_amount: number | null;
+  probable_deposit_bank: string | null;
+  probable_match_kind: "exact" | "combination" | "tax_adjusted" | "tax_combination" | null;
+  probable_match_confidence: number | null;
+  probable_match_note: string | null;
+  /** The other payment ids sharing this deposit (bundled deposit). */
+  probable_match_group: string[];
 }
 
 export interface UfAuditScanResult {
@@ -84,6 +99,9 @@ export interface UfAuditScanResult {
   orphan_count: number;
   total_uf_balance: number;
   total_orphan_amount: number;
+  /** Orphans whose amount ties out to a real bank deposit (probable, unlinked). */
+  probable_deposited_count: number;
+  probable_deposited_amount: number;
   payments: UFAuditPayment[];
 }
 
@@ -95,7 +113,7 @@ export async function scanUfAudit(
   realmId: string,
   accessToken: string,
   ufAccountId: string,
-  options?: { lookbackDays?: number }
+  options?: { lookbackDays?: number; region?: "CA" | "US" }
 ): Promise<UfAuditScanResult> {
   // Lookback window. Defaults to 1825 days (5 years) — UF orphans can be
   // VERY old (years of unrecorded deposits accumulate). 2 years was too
@@ -247,6 +265,14 @@ export async function scanUfAudit(
       suspected_duplicate: false,
       duplicate_of_payment_id: null,
       duplicate_reason: null,
+      probable_deposit_id: null,
+      probable_deposit_date: null,
+      probable_deposit_amount: null,
+      probable_deposit_bank: null,
+      probable_match_kind: null,
+      probable_match_confidence: null,
+      probable_match_note: null,
+      probable_match_group: [],
     };
   }
 
@@ -266,6 +292,39 @@ export async function scanUfAudit(
   // Flag suspected duplicates (mutates payments in place). Only orphans get
   // a void recommendation — see detectDuplicates.
   detectDuplicates(payments);
+
+  // ── Smart deposit matching (Mike 2026-07-18) ──
+  // An orphan (no Deposit LinkedTxn) may still have landed in the bank as an
+  // unlinked deposit. Pull every Deposit in the window and tie orphans out by
+  // amount — exact, bundled, or (CA) net-of-GST/HST. Suggestion only; no write.
+  let probableDepositedCount = 0;
+  let probableDepositedAmount = 0;
+  try {
+    const deposits = await fetchAllDeposits(realmId, accessToken, since);
+    const orphanRows = payments
+      .filter((p) => p.classification === "orphan" && !p.suspected_duplicate)
+      .map((p) => ({ id: p.qbo_payment_id, date: p.payment_date, amount: p.payment_amount, customer: p.customer_name }));
+    const matches = matchOrphansToDeposits(orphanRows, deposits, { region: options?.region === "CA" ? "CA" : "US" });
+    const byId = new Map(payments.map((p) => [p.qbo_payment_id, p]));
+    for (const m of matches) {
+      for (const pid of m.paymentIds) {
+        const p = byId.get(pid);
+        if (!p) continue;
+        p.probable_deposit_id = m.depositId;
+        p.probable_deposit_date = m.depositDate;
+        p.probable_deposit_amount = m.depositAmount;
+        p.probable_deposit_bank = m.bankAccount;
+        p.probable_match_kind = m.kind;
+        p.probable_match_confidence = m.confidence;
+        p.probable_match_note = m.note;
+        p.probable_match_group = m.paymentIds.filter((x) => x !== pid);
+        probableDepositedCount++;
+        probableDepositedAmount += p.payment_amount;
+      }
+    }
+  } catch (err: any) {
+    console.warn("[uf-audit] deposit matching failed:", err?.message);
+  }
 
   const matchedCount = payments.filter((p) => p.classification === "matched").length;
   const orphanCount = payments.length - matchedCount;
@@ -292,8 +351,50 @@ export async function scanUfAudit(
     orphan_count: orphanCount,
     total_uf_balance: Math.round(totalUfBalance * 100) / 100,
     total_orphan_amount: Math.round(totalOrphanAmount * 100) / 100,
+    probable_deposited_count: probableDepositedCount,
+    probable_deposited_amount: Math.round(probableDepositedAmount * 100) / 100,
     payments,
   };
+}
+
+/**
+ * Fetch every Deposit in the window (into any bank account) so orphan UF
+ * payments can be tied out by amount. Read-only. `since` = YYYY-MM-DD.
+ */
+async function fetchAllDeposits(
+  realmId: string,
+  accessToken: string,
+  since: string,
+): Promise<DepositRow[]> {
+  const out: DepositRow[] = [];
+  let page = 0;
+  const pageSize = 200;
+  while (true) {
+    const startPosition = page * pageSize + 1;
+    const query = encodeURIComponent(
+      `SELECT * FROM Deposit WHERE TxnDate >= '${since}' STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`
+    );
+    let data: any;
+    try {
+      data = await qboRequest<any>(realmId, accessToken, `/query?query=${query}`);
+    } catch (err: any) {
+      console.warn("[uf-audit] Deposit list query failed:", err?.message);
+      break;
+    }
+    const rows: any[] = data?.QueryResponse?.Deposit || [];
+    for (const d of rows) {
+      out.push({
+        id: String(d.Id),
+        date: String(d.TxnDate || ""),
+        amount: Number(d.TotalAmt || 0),
+        bankAccount: d.DepositToAccountRef?.name || d.DepositToAccountRef?.value || null,
+      });
+    }
+    if (rows.length < pageSize) break;
+    page++;
+    if (page > 50) break;
+  }
+  return out;
 }
 
 /**

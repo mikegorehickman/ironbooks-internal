@@ -27,7 +27,7 @@ export async function POST(
   const service = createServiceSupabase();
   const { data: client } = await service
     .from("client_links")
-    .select("id, qbo_realm_id, assigned_bookkeeper_id")
+    .select("id, qbo_realm_id, assigned_bookkeeper_id, jurisdiction")
     .eq("id", clientLinkId)
     .single();
   if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
@@ -88,7 +88,8 @@ export async function POST(
       throw new Error("No Undeposited Funds account found in QBO");
     }
 
-    const result = await scanUfAudit(c.qbo_realm_id, accessToken, ufAccountId);
+    const region = String(c.jurisdiction || "US").toUpperCase().startsWith("CA") ? "CA" : "US";
+    const result = await scanUfAudit(c.qbo_realm_id, accessToken, ufAccountId, { region });
 
     // Insert items
     if (result.payments.length > 0) {
@@ -113,6 +114,16 @@ export async function POST(
         suspected_duplicate: p.suspected_duplicate,
         duplicate_of_payment_id: p.duplicate_of_payment_id,
         duplicate_reason: p.duplicate_reason,
+        // Smart deposit match (migration 132). Guarded below so the insert still
+        // works before that migration is applied.
+        probable_deposit_id: p.probable_deposit_id,
+        probable_deposit_date: p.probable_deposit_date,
+        probable_deposit_amount: p.probable_deposit_amount,
+        probable_deposit_bank: p.probable_deposit_bank,
+        probable_match_kind: p.probable_match_kind,
+        probable_match_confidence: p.probable_match_confidence,
+        probable_match_note: p.probable_match_note,
+        probable_match_group: p.probable_match_group,
         // Auto-recommend void_duplicate for suspected duplicates; everything
         // else orphan → pending; matched → skipped (no action).
         resolution:
@@ -123,32 +134,51 @@ export async function POST(
             : "pending",
         resolution_notes: p.suspected_duplicate ? p.duplicate_reason : null,
       }));
+      // Strip the probable_* keys — the fallback shape for a pre-migration-132 DB.
+      const PROBABLE_KEYS = [
+        "probable_deposit_id", "probable_deposit_date", "probable_deposit_amount",
+        "probable_deposit_bank", "probable_match_kind", "probable_match_confidence",
+        "probable_match_note", "probable_match_group",
+      ];
+      const stripProbable = (r: any) => {
+        const c = { ...r };
+        for (const k of PROBABLE_KEYS) delete c[k];
+        return c;
+      };
       const BATCH = 200;
       for (let i = 0; i < itemRows.length; i += BATCH) {
-        const { error: itemErr } = await service
-          .from("uf_audit_items" as any)
-          .insert(itemRows.slice(i, i + BATCH) as any);
+        const slice = itemRows.slice(i, i + BATCH);
+        let { error: itemErr } = await service.from("uf_audit_items" as any).insert(slice as any);
+        // Migration 132 not applied yet → retry without the probable_* columns.
+        if (itemErr && /probable_/.test(itemErr.message)) {
+          ({ error: itemErr } = await service.from("uf_audit_items" as any).insert(slice.map(stripProbable) as any));
+        }
         if (itemErr) throw new Error(`Item insert failed: ${itemErr.message}`);
       }
     }
 
-    await service
-      .from("uf_audit_scans" as any)
-      .update({
-        status: "review",
-        uf_account_qbo_id: ufAccountId,
-        uf_account_name: result.uf_account_name,
-        uf_account_current_balance: result.uf_account_current_balance,
-        scan_from: result.scan_from,
-        scan_to: result.scan_to,
-        uf_payments_total: result.payments_total,
-        matched_count: result.matched_count,
-        orphan_count: result.orphan_count,
-        total_uf_balance: result.total_uf_balance,
-        total_orphan_amount: result.total_orphan_amount,
-        duration_ms: Date.now() - t0,
-      } as any)
-      .eq("id", scanId);
+    const scanUpdate: any = {
+      status: "review",
+      uf_account_qbo_id: ufAccountId,
+      uf_account_name: result.uf_account_name,
+      uf_account_current_balance: result.uf_account_current_balance,
+      scan_from: result.scan_from,
+      scan_to: result.scan_to,
+      uf_payments_total: result.payments_total,
+      matched_count: result.matched_count,
+      orphan_count: result.orphan_count,
+      total_uf_balance: result.total_uf_balance,
+      total_orphan_amount: result.total_orphan_amount,
+      probable_deposited_count: result.probable_deposited_count,
+      probable_deposited_amount: result.probable_deposited_amount,
+      duration_ms: Date.now() - t0,
+    };
+    let { error: scanUpdErr } = await service.from("uf_audit_scans" as any).update(scanUpdate).eq("id", scanId);
+    if (scanUpdErr && /probable_/.test(scanUpdErr.message)) {
+      delete scanUpdate.probable_deposited_count;
+      delete scanUpdate.probable_deposited_amount;
+      ({ error: scanUpdErr } = await service.from("uf_audit_scans" as any).update(scanUpdate).eq("id", scanId));
+    }
 
     return NextResponse.json({
       ok: true,
