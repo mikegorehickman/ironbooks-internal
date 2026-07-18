@@ -71,15 +71,25 @@ const LOAN_NAME_RE = /loan|note.?payable|line of credit|\bloc\b|financ|mortgage/
 const normName = (s: string | null | undefined) =>
   (s || "").toLowerCase().replace(/[–—−]/g, "-").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 
-/** Last 4 digits from AcctNum or from digits embedded in the name. */
-export function last4Of(a: { Name?: string; AcctNum?: string }): string | null {
+// A masked-account pattern: digits that clearly identify an account — after a
+// mask (****1234, x1234), a hash/no., or the words ending/acct/account. We
+// only trust digits that look like a mask so we never grab an arbitrary
+// number (phone, address) out of a Description and mislabel the account — a
+// WRONG last-4 is worse than none (Mike: "or else it's just noise").
+const MASK_RE = /(?:\*{2,}|x{2,}|#|\b(?:ending|acct|account|no)\b\.?)\s*[-*# ]*(\d{4})\b/i;
+
+/** Last 4 digits from AcctNum, trailing digits in the name, or a masked
+ * pattern in the name/description. Null when nothing reliable is found. */
+export function last4Of(a: { Name?: string; AcctNum?: string; Description?: string }): string | null {
   const num = (a.AcctNum || "").replace(/\D/g, "");
   if (num.length >= 3) return num.slice(-4);
   const inName = (a.Name || "").match(/(\d{3,})\D*$/);
-  return inName ? inName[1].slice(-4) : null;
+  if (inName) return inName[1].slice(-4);
+  const masked = (a.Name || "").match(MASK_RE) || (a.Description || "").match(MASK_RE);
+  return masked ? masked[1] : null;
 }
 
-export function maskedLabel(a: { Name: string; AcctNum?: string }): string {
+export function maskedLabel(a: { Name: string; AcctNum?: string; Description?: string }): string {
   const l4 = last4Of(a);
   if (!l4) return a.Name;
   // avoid double-masking names that already show the digits

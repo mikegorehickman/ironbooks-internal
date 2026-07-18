@@ -1807,7 +1807,7 @@ function dateRangeLabel(mode: DateRangeMode, now: Date = new Date()): string {
 
 /** What the three-way enumeration hands the panel (dry-run generate). */
 interface EnumerationData {
-  accounts: Array<{ label: string; kind: string; qbo_account_id: string | null; sources?: string[] }>;
+  accounts: Array<{ label: string; kind: string; qbo_account_id: string | null; sources?: string[]; last4?: string | null }>;
   undeclared_asks?: Array<{ label: string; qbo_account_id: string | null }>;
   missing_from_qbo?: Array<{ name: string; kind: string }>;
   has_ob_form?: boolean;
@@ -1837,8 +1837,18 @@ function buildClientRequests(
   if (hasEnum) {
     for (const a of enumData!.accounts) {
       if (a.qbo_account_id && coveredIds?.has(String(a.qbo_account_id))) continue; // statement already on file
+      // No last-4 we can trust → the QBO name alone ("Main Account") can't tell
+      // the client which real bank account we mean, so ask them to identify it
+      // instead of sending a noisy "send statements for Main Account" line.
+      const unidentified = (a.kind === "bank" || a.kind === "credit_card") && !a.last4;
       if (a.kind === "loan") {
         push(`loan-${a.label}`, `Most recent loan statement for "${a.label}" showing the current balance and payment breakdown`);
+      } else if (unidentified) {
+        const acctWord = a.kind === "credit_card" ? "credit card" : "bank account";
+        push(
+          `bank-${a.label}`,
+          `You have a ${acctWord} labelled "${a.label}" in QuickBooks, but we don't have the last 4 digits to match it — please tell us which bank/card this is and its last 4 digits, then send its statements ${rangeLabel} (PDF or CSV).`
+        );
       } else if (a.kind === "credit_card") {
         push(`cc-${a.label}`, `Credit card statements for "${a.label}" ${rangeLabel} — PDF or CSV`);
       } else {

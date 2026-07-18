@@ -1,6 +1,6 @@
 // Tests for the three-way statement enumeration.
 // Run: npx tsx scripts/test-statement-enumeration.ts
-import { enumerateAccounts, buildRequests, maskedLabel, declaredMatches, type FeedEvidence } from "@/lib/statement-enumeration";
+import { enumerateAccounts, buildRequests, maskedLabel, declaredMatches, last4Of, type FeedEvidence } from "@/lib/statement-enumeration";
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => { if (c) pass++; else { fail++; console.log("  FAIL:", m); } };
@@ -11,6 +11,12 @@ const acct = (o: any) => ({ Id: "0", FullyQualifiedName: o.Name, AccountSubType:
 ok(maskedLabel({ Name: "RBC Chequing", AcctNum: "00517053" }) === "RBC Chequing ****7053", "AcctNum → ****7053");
 ok(maskedLabel({ Name: "BUS COMPLETE CHK (3362)" }) === "BUS COMPLETE CHK ****3362", "digits in name → masked");
 ok(maskedLabel({ Name: "Petty Cash" }) === "Petty Cash", "no digits → unchanged");
+// last-4 hunt: masked pattern in name/description, but NOT arbitrary digits
+ok(last4Of({ Name: "Main Account" }) === null, "generic name → no last-4 (the noise case)");
+ok(last4Of({ Name: "Chequing ****7053" }) === "7053", "**** mask in name");
+ok(last4Of({ Name: "Operating", Description: "RBC business chequing ending 9983" }) === "9983", "'ending NNNN' in description");
+ok(last4Of({ Name: "PC Financial Mastercard", Description: "Call 1-800-555-1234 for support" }) === null, "phone number in description is NOT taken as last-4");
+ok(maskedLabel({ Name: "Operating", Description: "acct #4417" }) === "Operating ****4417", "masked pattern in description → masked label");
 ok(declaredMatches("RBC chequing", "RBC Chequing ****7053"), "declared fuzzy-matches QBO name");
 ok(declaredMatches("visa ending 7053", "TD Visa 7053"), "last-4 match wins");
 ok(!declaredMatches("Scotiabank LOC", "RBC Chequing"), "different institutions don't match");
