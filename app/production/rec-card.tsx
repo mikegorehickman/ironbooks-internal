@@ -167,7 +167,10 @@ export function ClientRecCard({
   // before "Send to client" unlocks.
   const [loadingStatements, setLoadingStatements] = useState(false);
   const [reviewing, setReviewing] = useState(false);
-  const [attested, setAttested] = useState(false);
+  // Attestation scope (Mike 2026-07-18): the bookkeeper attests EITHER the P&L
+  // alone or the P&L + Balance Sheet. "" = not yet attested (gate closed).
+  const [attestScope, setAttestScope] = useState<"" | "pl" | "pl_bs">("");
+  const attested = attestScope !== "";
   const [sendWarning, setSendWarning] = useState<string | null>(null);
   // Red-flag approval gate: the server 409s the send with the open flags
   // (duplicate expenses/revenue, COGS band, net-margin band); each must be
@@ -231,7 +234,7 @@ export function ClientRecCard({
       const r = await act({ action: "statements" });
       setLocalRun(r);
       setReviewing(true);
-      setAttested(false);
+      setAttestScope("");
       // Fire the AI spot check in the background — advisory second opinion
       // alongside the human review, never blocking it.
       setSpotChecking(true);
@@ -253,7 +256,7 @@ export function ClientRecCard({
       const res = await fetch(`/api/clients/${client.id}/monthly-rec`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "submit", period, attested: true, concerns }),
+        body: JSON.stringify({ action: "submit", period, attested: true, attest_scope: attestScope, concerns }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
@@ -277,6 +280,7 @@ export function ClientRecCard({
           action: "send",
           period,
           attested: true,
+          attest_scope: attestScope,
           concerns,
           ...(overrideReason ? { override_reason: overrideReason } : {}),
           ...(managerOverrideReason ? { manager_override_reason: managerOverrideReason } : {}),
@@ -667,22 +671,43 @@ export function ClientRecCard({
                 )}
               </div>
 
-              <label className="flex items-start gap-2.5 cursor-pointer bg-white border border-gray-200 rounded-xl px-3 py-3">
-                <input
-                  type="checkbox"
-                  checked={attested}
-                  onChange={(e) => setAttested(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded border-2 border-gray-300 text-teal focus:ring-teal"
-                />
-                <span className="text-xs text-navy leading-relaxed">
-                  I have reviewed {client.client_name}&apos;s {periodLabel(period)}{" "}
-                  {run?.statements?.bs
-                    ? "Profit & Loss, Balance Sheet, and Cash Flow Statement"
-                    : "Profit & Loss (P&L-only service)"}{" "}
-                  above (including the AI spot check), and they are accurate and
-                  ready to share with the client.
-                </span>
-              </label>
+              {/* Attest the scope that's actually accurate. When a Balance
+                  Sheet is present the senior can attest the full set OR just
+                  the P&L (e.g. BS not yet reconciled but the P&L is good to
+                  send). P&L-only-service clients only ever get the P&L option. */}
+              <div className="space-y-2">
+                {run?.statements?.bs && (
+                  <label className={`flex items-start gap-2.5 cursor-pointer bg-white border rounded-xl px-3 py-3 ${attestScope === "pl_bs" ? "border-teal ring-1 ring-teal/30" : "border-gray-200"}`}>
+                    <input
+                      type="radio"
+                      name="attest-scope"
+                      checked={attestScope === "pl_bs"}
+                      onChange={() => setAttestScope("pl_bs")}
+                      className="mt-0.5 w-4 h-4 border-2 border-gray-300 text-teal focus:ring-teal"
+                    />
+                    <span className="text-xs text-navy leading-relaxed">
+                      I have reviewed {client.client_name}&apos;s {periodLabel(period)}{" "}
+                      <strong>Profit &amp; Loss, Balance Sheet, and Cash Flow Statement</strong>{" "}
+                      above (including the AI spot check), and <strong>the P&amp;L and Balance Sheet are accurate</strong> and ready to share with the client.
+                    </span>
+                  </label>
+                )}
+                <label className={`flex items-start gap-2.5 cursor-pointer bg-white border rounded-xl px-3 py-3 ${attestScope === "pl" ? "border-teal ring-1 ring-teal/30" : "border-gray-200"}`}>
+                  <input
+                    type="radio"
+                    name="attest-scope"
+                    checked={attestScope === "pl"}
+                    onChange={() => setAttestScope("pl")}
+                    className="mt-0.5 w-4 h-4 border-2 border-gray-300 text-teal focus:ring-teal"
+                  />
+                  <span className="text-xs text-navy leading-relaxed">
+                    I have reviewed {client.client_name}&apos;s {periodLabel(period)}{" "}
+                    <strong>Profit &amp; Loss</strong> above (including the AI spot check), and{" "}
+                    <strong>the P&amp;L is accurate</strong> and ready to share with the client
+                    {run?.statements?.bs ? " — Balance Sheet is NOT attested this month." : " (P&L-only service)."}
+                  </span>
+                </label>
+              </div>
 
               {/* Red-flag approval gate — the server refuses the send while
                   any of these are open. Approve = dismiss with a reason. */}
