@@ -2937,7 +2937,7 @@ function PLOnlyPromoteCard({
 
           {stmts ? (
             <>
-              <StatementsReview statements={stmts} monthLabel={stmtsPeriod ? periodLabel(stmtsPeriod) : "Last month"} />
+              <StatementsReview statements={stmts} monthLabel={stmtsPeriod ? periodLabel(stmtsPeriod) : "Last month"} clientLinkId={clientLinkId} period={stmtsPeriod || undefined} />
               <label className="flex items-start gap-2 text-sm cursor-pointer p-3 rounded-lg border border-teal/30 bg-white">
                 <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5 accent-teal" />
                 <span className="text-navy">

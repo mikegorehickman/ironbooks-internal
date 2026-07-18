@@ -609,7 +609,7 @@ export function ClientRecCard({
 
           {!isComplete && reviewing && run?.statements && (
             <div className="space-y-4">
-              <StatementsReview statements={run.statements} monthLabel={periodLabel(period)} />
+              <StatementsReview statements={run.statements} monthLabel={periodLabel(period)} clientLinkId={client.id} period={period} />
 
               <SpotCheckPanel spot={run.ai_spot_check || null} loading={spotChecking} />
 
@@ -850,6 +850,118 @@ function pctOfIncome(n: number, income: number): string {
 }
 
 /**
+ * "Analyze the flag" — runs the anomaly engine (/analyze-flag) over the month
+ * and explains WHY a KPI looks off (duplicate revenue / expenses / payroll,
+ * deposits-as-revenue, missing COGS, missing revenue, or just a genuine
+ * month), each with a $ impact and a fix. Sits on the P&L header, so it's
+ * present wherever the bookkeeper reviews the P&L before sending it to the
+ * client or a manager.
+ */
+function AnalyzeFlagButton({ clientLinkId, period }: { clientLinkId: string; period?: string }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setOpen(true);
+    setLoading(true);
+    setError(null);
+    setData(null);
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/analyze-flag`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(period ? { period } : {}),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setData(j);
+    } catch (e: any) {
+      setError(e?.message || "Analysis failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const sevStyle = (s: string) =>
+    s === "high" ? "border-red-200 bg-red-50" : s === "medium" ? "border-amber-200 bg-amber-50" : "border-gray-200 bg-gray-50";
+
+  return (
+    <>
+      <button
+        onClick={run}
+        className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-white/15 hover:bg-white/25 text-white px-2.5 py-1 rounded-lg"
+      >
+        <Sparkles size={12} /> Analyze the flag
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setOpen(false)}>
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+              <div className="font-bold text-navy text-sm flex items-center gap-1.5">
+                <Sparkles size={14} className="text-teal" /> Flag analysis
+              </div>
+              <button onClick={() => setOpen(false)} className="text-ink-light hover:text-navy">
+                <XCircle size={16} />
+              </button>
+            </div>
+            <div className="overflow-auto flex-1 p-5 space-y-3">
+              {loading ? (
+                <div className="text-sm text-ink-slate flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin" /> Analyzing the month…
+                </div>
+              ) : error ? (
+                <div className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+              ) : data ? (
+                <>
+                  <div className={`rounded-xl border-2 p-3 ${data.metrics.grossFlag || data.metrics.netFlag ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+                    <div className="text-sm font-bold text-navy">{data.verdict}</div>
+                    <div className="text-[11px] text-ink-slate mt-1 flex flex-wrap gap-x-3">
+                      <span>Income ${money(data.metrics.income)}</span>
+                      <span>COGS {data.metrics.cogsPct}%</span>
+                      <span>Net {data.metrics.netPct}%</span>
+                    </div>
+                  </div>
+                  {data.causes.length === 0 ? (
+                    <div className="text-xs text-emerald-700 flex items-center gap-1.5">
+                      <CheckCircle2 size={13} /> No duplicate or structural cause detected.
+                    </div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {data.causes.map((c: any, i: number) => (
+                        <li key={i} className={`rounded-xl border p-3 ${sevStyle(c.severity)}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-bold text-navy text-xs">{c.title}</div>
+                            {c.amount > 0 && <div className="font-mono text-xs font-bold text-navy">${money(c.amount)}</div>}
+                          </div>
+                          <p className="text-[11px] text-ink-slate mt-1 leading-relaxed">{c.detail}</p>
+                          <div className="text-[11px] text-navy mt-1.5">
+                            <strong>Fix:</strong> {c.action}
+                          </div>
+                          {c.fix && (
+                            <a
+                              href={`/balance-sheet/${clientLinkId}#${c.fix}`}
+                              className="text-[11px] font-semibold text-teal hover:underline inline-flex items-center gap-0.5 mt-1"
+                            >
+                              Open resolver <ArrowUpRight size={10} />
+                            </a>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
  * Client-format Profit & Loss: Income → COGS → Gross Profit → Operating
  * Expenses → Net, with each account under its section, a % of income column,
  * subtotals, and KPI flags on Gross Profit / Net when margins fall outside the
@@ -857,7 +969,17 @@ function pctOfIncome(n: number, income: number): string {
  * revenue, net margin 10–35%). Drives both the month-end review and the
  * cleanup wizard so the bookkeeper sees exactly what the client will.
  */
-function PLStatementView({ pl, monthLabel }: { pl: Statements["pl"]; monthLabel: string }) {
+function PLStatementView({
+  pl,
+  monthLabel,
+  clientLinkId,
+  period,
+}: {
+  pl: Statements["pl"];
+  monthLabel: string;
+  clientLinkId?: string;
+  period?: string;
+}) {
   const income = Number(pl.totalIncome) || 0;
   const cogs = Number(pl.cogs) || 0;
   const grossProfit = pl.grossProfit != null ? Number(pl.grossProfit) : income - cogs;
@@ -922,7 +1044,10 @@ function PLStatementView({ pl, monthLabel }: { pl: Statements["pl"]; monthLabel:
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      <div className="px-4 py-2.5 bg-navy text-white text-sm font-bold">Profit &amp; Loss — {monthLabel}</div>
+      <div className="px-4 py-2.5 bg-navy text-white text-sm font-bold flex items-center justify-between gap-3">
+        <span>Profit &amp; Loss — {monthLabel}</span>
+        {clientLinkId && <AnalyzeFlagButton clientLinkId={clientLinkId} period={period} />}
+      </div>
 
       {(gpFlag || npFlag) && (
         <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-900 flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -1066,16 +1191,21 @@ function BSStatementView({
 export function StatementsReview({
   statements,
   monthLabel,
+  clientLinkId,
+  period,
 }: {
   statements: Statements;
   monthLabel: string;
+  /** When provided, the P&L header shows the "Analyze the flag" button. */
+  clientLinkId?: string;
+  period?: string;
 }) {
   const { pl, bs, cfs } = statements;
   return (
     <div className="space-y-3">
       {/* P&L — client-facing statement format: categories → accounts, % of
           income, waterfall totals, and GP/NP KPI flags. */}
-      <PLStatementView pl={pl} monthLabel={monthLabel} />
+      <PLStatementView pl={pl} monthLabel={monthLabel} clientLinkId={clientLinkId} period={period} />
 
       {!bs && (
         <div className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-ink-slate">
