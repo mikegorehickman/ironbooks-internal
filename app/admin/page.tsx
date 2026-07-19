@@ -2,8 +2,7 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import Link from "next/link";
-import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone, Repeat, Video, Landmark, ReceiptText, CheckCheck, ListChecks } from "lucide-react";
-import { DupSweepButton } from "./dup-sweep-button";
+import { Users, FileCheck, Shield, Activity, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Phone, Repeat, Video, Landmark, ReceiptText, CheckCheck, ListChecks, Copy, TrendingUp } from "lucide-react";
 
 export default async function AdminOverviewPage() {
   const supabase = await createServerSupabase();
@@ -186,6 +185,18 @@ export default async function AdminOverviewPage() {
               title: "Payroll double-count scan",
               desc: "Fleet scan for the same crew's pay booked to two labor lines (gross paycheque + net-pay bank deposit) · read-only triage · $ overstated per client",
             },
+            {
+              href: "/admin/duplicates",
+              icon: Copy,
+              title: "Duplicate transactions — fleet",
+              desc: "Fleet scan for duplicate expenses/transactions (same amount posted twice) · open findings + $ exposure per client · void the extra copies",
+            },
+            {
+              href: "/admin/upgrades",
+              icon: TrendingUp,
+              title: "Upgrade radar",
+              desc: "Clients who outgrew their tier — 3 straight months over cap with healthy margin · fleet report to tee up the upgrade conversation",
+            },
           ].map((t) => {
             const Icon = t.icon;
             return (
@@ -207,7 +218,6 @@ export default async function AdminOverviewPage() {
               </Link>
             );
           })}
-          <DupSweepButton />
         </div>
 
         <div className="grid grid-cols-2 gap-6">
