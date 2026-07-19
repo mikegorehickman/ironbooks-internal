@@ -74,6 +74,7 @@ type ClientLink = {
   legal_business_name?: string | null;
   trade_type?: string | null;
   corporate_type?: string | null;
+  entity_type?: string | null;
   fiscal_year_end?: string | null;
   country?: string | null;
   address_line1?: string | null;
@@ -278,7 +279,7 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
         <CleanupTab clientLinkId={clientLink.id} clientName={clientLink.client_name} />
       )}
       {activeTab === "profile" && (
-        <ProfileTab clientLink={clientLink} onboarding={onboarding} />
+        <ProfileTab clientLink={clientLink} onboarding={onboarding} actorRole={actorRole} />
       )}
       {activeTab === "billing" && <BillingTab clientLinkId={clientLink.id} />}
       {activeTab === "pl" && (
@@ -808,15 +809,18 @@ function ProductionStatusCard({
 function ProfileTab({
   clientLink,
   onboarding,
+  actorRole,
 }: {
   clientLink: ClientLink;
   onboarding?: OnboardingProfile | null;
+  actorRole: string;
 }) {
   return (
     <div className="space-y-6">
       <ClientDetailsCard
         clientLinkId={clientLink.id}
         jurisdiction={clientLink.jurisdiction ?? null}
+        canEditEntity={actorRole === "admin" || actorRole === "lead"}
         initial={{
           contact_first_name: clientLink.contact_first_name ?? null,
           contact_last_name: clientLink.contact_last_name ?? null,
@@ -825,6 +829,7 @@ function ProfileTab({
           legal_business_name: clientLink.legal_business_name ?? null,
           trade_type: clientLink.trade_type ?? null,
           corporate_type: clientLink.corporate_type ?? null,
+          entity_type: clientLink.entity_type ?? null,
           fiscal_year_end: clientLink.fiscal_year_end ?? null,
           country: clientLink.country ?? null,
           state_province: clientLink.state_province ?? null,

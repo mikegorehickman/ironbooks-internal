@@ -217,6 +217,19 @@ function normalizeCountry(v: string): string {
   return v;
 }
 
+/** Map the onboarding "Corporation Type" answer to a controlled entity_type
+ * (migration 135). Unknown / ambiguous (e.g. bare "LLC") → "" so the field
+ * stays null and a senior picks it explicitly on the profile. */
+function normalizeEntityType(v: string): string {
+  const s = v.trim().toLowerCase();
+  if (/s[-_ ]?corp/.test(s)) return "s_corp";
+  if (/c[-_ ]?corp/.test(s)) return "c_corp";
+  if (/partnership/.test(s)) return "partnership";
+  if (/sole|proprietor/.test(s)) return "sole_prop";
+  if (/corp|incorporat|\binc\b|\bltd\b|limited/.test(s)) return "c_corp";
+  return ""; // LLC / blank / unknown — leave for manual selection
+}
+
 const CA_PROVINCES = new Set([
   "alberta", "ab", "british columbia", "bc", "manitoba", "mb", "new brunswick", "nb",
   "newfoundland and labrador", "newfoundland", "labrador", "nl", "northwest territories", "nt",
@@ -256,6 +269,7 @@ const FORM_TO_PROFILE: { keys: string[]; col: string; transform?: (v: string) =>
   { keys: ["company_name", "companyName"], col: "legal_business_name" },
   { keys: ["Business Type", "businessType"], col: "trade_type" },
   { keys: ["Corporation Type", "corporationType"], col: "corporate_type" },
+  { keys: ["Corporation Type", "corporationType"], col: "entity_type", transform: normalizeEntityType },
   { keys: ["Year End", "yearEnd"], col: "fiscal_year_end" },
   { keys: ["country", "Country"], col: "country", transform: normalizeCountry },
   { keys: ["Province", "province", "State", "state"], col: "state_province" },
@@ -291,7 +305,9 @@ export function mapOnboardingFormToProfile(payload: any): Record<string, string>
   for (const { keys, col, transform } of FORM_TO_PROFILE) {
     const raw = readFormField(payload, keys);
     if (raw == null) continue;
-    out[col] = transform ? transform(raw) : raw;
+    const val = transform ? transform(raw) : raw;
+    if (val === "") continue; // transform couldn't resolve (e.g. ambiguous LLC) — leave the column unset
+    out[col] = val;
   }
   return out;
 }

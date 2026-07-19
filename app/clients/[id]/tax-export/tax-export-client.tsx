@@ -11,6 +11,38 @@ import { Download, FileText, Landmark, Loader2, Play } from "lucide-react";
 
 const money = (n: number) =>
   `$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** A titled group of tax-line rows with a subtotal (US summary). */
+function SectionRows({
+  title, rows, total, negate = false,
+}: {
+  title: string;
+  rows: Array<{ line: string; amount: number }>;
+  total: number;
+  negate?: boolean;
+}) {
+  if (!rows.length) return null;
+  return (
+    <>
+      <tr className="border-b border-gray-100">
+        <td colSpan={3} className="pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-ink-light">{title}</td>
+      </tr>
+      {rows.map((r) => (
+        <tr key={r.line} className="border-b border-gray-50">
+          <td className="py-1 text-navy">{r.line}</td>
+          <td />
+          <td className="py-1 text-right font-mono text-navy">{negate ? `(${money(r.amount)})` : money(r.amount)}</td>
+        </tr>
+      ))}
+      <tr className="border-b border-gray-100">
+        <td className="py-1 text-ink-slate font-semibold">Total {title.toLowerCase()}</td>
+        <td />
+        <td className="py-1 text-right font-mono text-ink-slate font-semibold">{negate ? `(${money(total)})` : money(total)}</td>
+      </tr>
+    </>
+  );
+}
 
 function downloadCsv(filename: string, rows: string[][]) {
   const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -109,20 +141,98 @@ export function TaxExportClient({
 
       {data && (
         <>
-          {data.entity_type && (
+          {data.tax_form && (
             <div className="rounded-lg bg-teal-lighter border border-teal/20 px-4 py-2.5 text-sm text-navy flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-bold uppercase tracking-wider bg-teal text-white rounded-full px-2.5 py-0.5">
-                {data.entity_type === "sole_prop" ? "Sole Prop / Partnership" : "Corporation"}
+                {data.tax_form}
               </span>
-              {data.entity_type === "sole_prop" ? (
-                <>The <strong>T2125 sheet</strong> below is the filing for this client; owner draws/contributions export as drawings (GIFI 3553/3554).</>
-              ) : (
-                <>The <strong>T2 GIFI export</strong> below is the filing for this client; owner draws/contributions export to the shareholder loan (GIFI 2781).</>
-              )}
-              <span className="text-[11px] text-ink-light">— change the entity type on the client profile if this is wrong.</span>
+              <span>
+                This client files <strong>{data.tax_form}</strong> — set by the entity type on the client profile.
+                {(data.entity_type === "sole_prop" || data.entity_type === "partnership")
+                  ? " Owner draws/contributions export as drawings, not the shareholder loan."
+                  : ""}
+              </span>
+              <span className="text-[11px] text-ink-light">— change the entity type on the profile if this is wrong.</span>
             </div>
           )}
-          {data.unmapped?.length > 0 && (
+          {/* ── US: IRS tax-line summary ── */}
+          {data.region === "US" && data.us && (
+            <>
+              {data.us.unmapped?.length > 0 && (
+                <div className="rounded-lg bg-amber-50 border border-amber-300 px-4 py-3 text-sm text-amber-900">
+                  <strong>{data.us.unmapped.length} account{data.us.unmapped.length === 1 ? "" : "s"} have no US tax line</strong> and are
+                  excluded below — map them in the master COA first:{" "}
+                  {data.us.unmapped.slice(0, 6).map((u: any) => `${u.account} (${money(u.amount)})`).join(" · ")}
+                  {data.us.unmapped.length > 6 ? "…" : ""}
+                </div>
+              )}
+              <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+                  <Landmark size={15} className="text-teal" />
+                  <h3 className="text-sm font-bold text-navy uppercase tracking-wider">{data.tax_form} · Tax-line summary</h3>
+                  <span className="text-[11px] text-ink-light">book totals grouped by IRS return line</span>
+                  <div className="flex-1" />
+                  <button
+                    onClick={() =>
+                      downloadCsv(`${slug}-${(data.tax_form || "us").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${end}.csv`, [
+                        ["Section", "Tax line", "Amount"],
+                        ...data.us.income.map((r: any) => ["Income", r.line, r.amount]),
+                        ...data.us.cogs.map((r: any) => ["COGS", r.line, r.amount]),
+                        ["", "Gross profit", round2(data.us.income_total - data.us.cogs_total)],
+                        ...data.us.expenses.map((r: any) => ["Expense", r.line, r.amount]),
+                        ["", "Net (before adjustments)", data.us.net_before_adjustments],
+                      ])
+                    }
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-teal border border-teal/30 rounded-lg px-2.5 py-1.5 hover:bg-teal/5"
+                  >
+                    <Download size={12} /> Tax-line CSV
+                  </button>
+                </div>
+                <div className="p-4">
+                  <table className="w-full text-xs">
+                    <tbody>
+                      <SectionRows title="Income" rows={data.us.income} total={data.us.income_total} />
+                      <SectionRows title="Cost of goods sold" rows={data.us.cogs} total={data.us.cogs_total} negate />
+                      <tr className="border-b-2 border-gray-200"><td className="py-1.5 font-bold text-navy">Gross profit</td><td /><td className="py-1.5 text-right font-mono font-bold text-navy">{money(data.us.income_total - data.us.cogs_total)}</td></tr>
+                      <SectionRows title="Deductions" rows={data.us.expenses} total={data.us.expense_total} negate />
+                      <tr><td className="py-2 font-bold text-navy">Net income (before adjustments)</td><td /><td className="py-2 text-right font-mono font-bold text-navy">{money(data.us.net_before_adjustments)}</td></tr>
+                    </tbody>
+                  </table>
+                  <p className="text-[11px] text-ink-light mt-3">
+                    Meals shown at booked value — apply the 50% limit on the return. Depreciable assets and owner draws/contributions are balance-sheet/M-1 items, not deductions here. Review material, not a filing.
+                  </p>
+                </div>
+              </div>
+              {data.us.contractor_1099?.length > 0 && (
+                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-navy uppercase tracking-wider">1099-NEC · contractor totals</h3>
+                    <span className="text-[11px] text-ink-light">one form per vendor ≥ $600 — from the subcontractor accounts</span>
+                    <div className="flex-1" />
+                    <button
+                      onClick={() => downloadCsv(`${slug}-1099nec-${end}.csv`, [["Vendor", "Total paid"], ...data.us.contractor_1099.map((v: any) => [v.vendor, v.total])])}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-teal border border-teal/30 rounded-lg px-2.5 py-1.5 hover:bg-teal/5"
+                    >
+                      <Download size={12} /> 1099-NEC CSV
+                    </button>
+                  </div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {data.us.contractor_1099.map((v: any) => (
+                        <tr key={v.vendor} className="border-b border-gray-50">
+                          <td className="px-5 py-1.5 text-navy">{v.vendor}{v.total < 600 ? <span className="text-[10px] text-ink-light"> (under $600)</span> : null}</td>
+                          <td className="px-5 py-1.5 text-right font-mono text-navy">{money(v.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Canada: GIFI / T2125 / T5018 ── */}
+          {data.region !== "US" && data.unmapped?.length > 0 && (
             <div className="rounded-lg bg-amber-50 border border-amber-300 px-4 py-3 text-sm text-amber-900">
               <strong>{data.unmapped.length} account{data.unmapped.length === 1 ? "" : "s"} have no GIFI code</strong> and are
               excluded from the files below — map them on the Tax Exports page first:{" "}
@@ -131,6 +241,7 @@ export function TaxExportClient({
             </div>
           )}
 
+          {data.region !== "US" && (<>
           {/* T2 — GIFI */}
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
@@ -266,6 +377,7 @@ export function TaxExportClient({
               </table>
             )}
           </div>
+          </>)}
 
           {/* Jurisdiction notes */}
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">

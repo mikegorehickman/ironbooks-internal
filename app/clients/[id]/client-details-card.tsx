@@ -3,8 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Building2, Pencil, Check, X, Loader2, Sparkles, Save,
+  Building2, Pencil, Check, X, Loader2, Sparkles, Save, Lock,
 } from "lucide-react";
+import {
+  type EntityType, entityOptionsFor, entityLabel, resolveEntityType, taxFormFor,
+} from "@/lib/entity-type";
 
 // ─── Field config ─────────────────────────────────────────────────────────────
 // Dropdown option lists mirror the GHL onboarding form exactly so values
@@ -56,6 +59,7 @@ export interface ClientProfileFields {
   uses_business_cards: string | null;
   keeps_receipts: string | null;
   bank_connected_to_software: string | null;
+  entity_type: string | null;
   profile_updated_at: string | null;
 }
 
@@ -83,12 +87,15 @@ export function ClientDetailsCard({
   initial,
   onboardingAnswers,
   jurisdiction,
+  canEditEntity = false,
 }: {
   clientLinkId: string;
   initial: ClientProfileFields;
   onboardingAnswers?: { label: string; value: string }[];
-  /** client_links.jurisdiction — the CA entity toggle only shows for "CA". */
+  /** client_links.jurisdiction — drives which entity options are offered. */
   jurisdiction?: string | null;
+  /** admin/lead only may change the entity type (manual override). */
+  canEditEntity?: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -248,9 +255,13 @@ export function ClientDetailsCard({
         <EditGrid form={form} set={set} />
       ) : (
         <>
-          {String(jurisdiction || "").toUpperCase() === "CA" && (
-            <EntityToggle clientLinkId={clientLinkId} current={initial.corporate_type} />
-          )}
+          <EntitySelector
+            clientLinkId={clientLinkId}
+            jurisdiction={jurisdiction}
+            entityType={initial.entity_type}
+            corporateType={initial.corporate_type}
+            canEdit={canEditEntity}
+          />
           <ReadGrid form={initial} />
         </>
       )}
@@ -258,26 +269,36 @@ export function ClientDetailsCard({
   );
 }
 
-// ─── CA entity toggle ───────────────────────────────────────────────────────
-// Corp vs Sole Prop, one click (Mike 2026-07-18). Drives the GIFI owner-equity
-// codes on the tax export (corp → 2781 shareholder loan; SP → 3553/3554
-// drawings/contributions) and tells the preparer which form applies (T2 vs
-// T2125). Writes the same corporate_type field as the Edit dropdown — the
-// dropdown still offers the long-tail values (Partnership, LLC, …).
+// ─── Entity type selector ────────────────────────────────────────────────────
+// The client's tax classification (Mike 2026-07-18). Drives which return form
+// the year-end export targets (US: 1120 / 1120-S / 1065 / Sch C — CA: T2 vs
+// T2125) and the owner-equity account mapping. Comes in from the onboarding
+// form; admin/lead can manually select or override here. Writes entity_type
+// (migration 135); bookkeepers see it read-only.
 
-function EntityToggle({ clientLinkId, current }: { clientLinkId: string; current: string | null }) {
+function EntitySelector({
+  clientLinkId, jurisdiction, entityType, corporateType, canEdit,
+}: {
+  clientLinkId: string;
+  jurisdiction?: string | null;
+  entityType: string | null;
+  corporateType: string | null;
+  canEdit: boolean;
+}) {
   const router = useRouter();
   const [saving, setSaving] = useState<string | null>(null);
-  const isSP = /sole|proprietor|partner/i.test(current || "");
-  const isCorp = !!current && !isSP;
+  const options = entityOptionsFor(jurisdiction);
+  const explicit = entityType && ["c_corp", "s_corp", "partnership", "sole_prop"].includes(entityType);
+  const current = resolveEntityType(entityType, corporateType);
+  const form = taxFormFor(current, jurisdiction);
 
-  async function setType(value: string) {
+  async function setType(value: EntityType) {
     setSaving(value);
     try {
       const res = await fetch(`/api/clients/${clientLinkId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ corporate_type: value }),
+        body: JSON.stringify({ entity_type: value }),
       });
       if (res.ok) router.refresh();
     } finally {
@@ -285,32 +306,35 @@ function EntityToggle({ clientLinkId, current }: { clientLinkId: string; current
     }
   }
 
-  const pill = (label: string, value: string, active: boolean) => (
-    <button
-      onClick={() => !active && setType(value)}
-      disabled={saving !== null}
-      className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-colors disabled:opacity-60 ${
-        active
-          ? "bg-teal text-white border-teal"
-          : "bg-white text-ink-slate border-gray-200 hover:border-teal/50 hover:text-teal"
-      }`}
-    >
-      {saving === value ? <Loader2 size={11} className="inline animate-spin" /> : label}
-    </button>
-  );
-
   return (
-    <div className="mb-3 flex items-center gap-2 bg-teal-lighter/60 border border-teal/15 rounded-xl px-3 py-2">
-      <span className="text-[10px] font-bold uppercase tracking-wider text-ink-slate">Entity type</span>
-      {pill("Corporation", "Corporation", isCorp)}
-      {pill("Sole Prop", "Sole Proprietor", isSP)}
-      <span className="text-[10px] text-ink-light">
-        {!current
-          ? "Not set — pick one (drives the T2 vs T2125 tax export)"
-          : isSP
-          ? "Files T2125 (T1) — owner draws map to drawings"
-          : "Files T2 (GIFI) — owner draws map to shareholder loan"}
-      </span>
+    <div className="mb-3 bg-teal-lighter/60 border border-teal/15 rounded-xl px-3 py-2.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-ink-slate">Entity type</span>
+        {options.map((opt) => {
+          const active = explicit ? entityType === opt : current === opt;
+          return (
+            <button
+              key={opt}
+              onClick={() => canEdit && !active && setType(opt)}
+              disabled={!canEdit || saving !== null}
+              className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                active
+                  ? "bg-teal text-white border-teal"
+                  : "bg-white text-ink-slate border-gray-200 " +
+                    (canEdit ? "hover:border-teal/50 hover:text-teal cursor-pointer" : "opacity-70 cursor-not-allowed")
+              }`}
+            >
+              {saving === opt ? <Loader2 size={11} className="inline animate-spin" /> : entityLabel(opt, jurisdiction)}
+            </button>
+          );
+        })}
+        {!canEdit && <Lock size={11} className="text-ink-light" />}
+      </div>
+      <p className="text-[10px] text-ink-light mt-1.5">
+        {!explicit && <span className="text-amber-700 font-semibold">Assumed from onboarding — confirm. </span>}
+        Files <strong className="text-navy">{form}</strong>.
+        {canEdit ? " Admin/lead can override." : " Only admin/lead can change this."}
+      </p>
     </div>
   );
 }

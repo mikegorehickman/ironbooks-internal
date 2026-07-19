@@ -26,7 +26,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   // (migration 73) and mark the whole select as an error otherwise.
   const { data: client } = await (service as any)
     .from("client_links")
-    .select("id, client_name, qbo_realm_id, jurisdiction, state_province, corporate_type")
+    .select("id, client_name, qbo_realm_id, jurisdiction, state_province, corporate_type, entity_type")
     .eq("id", id)
     .single();
   if (!client?.qbo_realm_id) return NextResponse.json({ error: "Client has no QBO connection" }, { status: 400 });

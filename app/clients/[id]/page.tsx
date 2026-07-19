@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { FileText } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
@@ -216,7 +218,7 @@ export default async function ClientProfilePage({
   // used elsewhere in this codebase pending a types regen.
   const { data: clientLinkRaw } = await service
     .from("client_links")
-    .select("id, client_name, qbo_realm_id, industry, jurisdiction, state_province, status, last_synced_at, double_client_id, double_client_name, daily_recon_enabled, daily_recon_paused, daily_recon_paused_reason, daily_recon_enabled_at, cleanup_completed_at, cleanup_review_state, bs_enabled, contact_first_name, contact_last_name, client_email, client_phone, legal_business_name, trade_type, corporate_type, fiscal_year_end, country, address_line1, address_line2, city, postal_code, annual_revenue_range, taxes_up_to_date, prior_bookkeeper, accounting_software, payroll_provider, employee_count_range, uses_business_cards, keeps_receipts, bank_connected_to_software, profile_updated_at" as any)
+    .select("id, client_name, qbo_realm_id, industry, jurisdiction, state_province, status, last_synced_at, double_client_id, double_client_name, daily_recon_enabled, daily_recon_paused, daily_recon_paused_reason, daily_recon_enabled_at, cleanup_completed_at, cleanup_review_state, bs_enabled, contact_first_name, contact_last_name, client_email, client_phone, legal_business_name, trade_type, corporate_type, entity_type, fiscal_year_end, country, address_line1, address_line2, city, postal_code, annual_revenue_range, taxes_up_to_date, prior_bookkeeper, accounting_software, payroll_provider, employee_count_range, uses_business_cards, keeps_receipts, bank_connected_to_software, profile_updated_at" as any)
     .eq("id", id)
     .single();
 
@@ -356,6 +358,29 @@ export default async function ClientProfilePage({
         }
         actions={
           <>
+            {(() => {
+              const isCA = String(clientLink.jurisdiction || "").toUpperCase().startsWith("CA");
+              return (
+                <span
+                  title={isCA ? "Canada" : "United States"}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-ink-slate bg-gray-50 border border-gray-200 rounded-full px-2 py-1"
+                >
+                  <span className="text-base leading-none">{isCA ? "🇨🇦" : "🇺🇸"}</span>
+                  {isCA ? "CA" : "US"}
+                </span>
+              );
+            })()}
+            {clientLink.qbo_realm_id && (
+              <Link
+                href={`/clients/${clientLink.id}/tax-export`}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-teal hover:bg-teal-dark rounded-lg px-3 py-2"
+                title={String(clientLink.jurisdiction || "").toUpperCase().startsWith("CA")
+                  ? "Export tax documents (T2 / T2125 / GIFI)"
+                  : "Export tax documents (1120 / 1120-S / 1065 / Sch C)"}
+              >
+                <FileText size={13} /> Export Tax Docs
+              </Link>
+            )}
             {lifecycle && <LifecyclePill status={lifecycle} size="md" />}
             <ClientSwitcher
               currentId={clientLink.id}
