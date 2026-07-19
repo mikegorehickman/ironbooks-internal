@@ -5,6 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import { ClientProfileShell } from "./client-profile-shell";
 import { deriveLifecycleForClient } from "@/lib/client-lifecycle";
 import { LifecyclePill } from "@/components/LifecyclePill";
+import { ClientSwitcher } from "@/components/ClientSwitcher";
 import {
   fetchOutstandingWork,
   fetchRecentActivity,
@@ -353,7 +354,15 @@ export default async function ClientProfilePage({
             .filter(Boolean)
             .join(" · ") || "Client profile"
         }
-        actions={lifecycle ? <LifecyclePill status={lifecycle} size="md" /> : undefined}
+        actions={
+          <>
+            {lifecycle && <LifecyclePill status={lifecycle} size="md" />}
+            <ClientSwitcher
+              currentId={clientLink.id}
+              currentName={clientLink.client_name || "Client"}
+            />
+          </>
+        }
       />
       <ClientProfileShell
         clientLink={clientLink as any}
