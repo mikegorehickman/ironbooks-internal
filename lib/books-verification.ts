@@ -905,22 +905,29 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
         label: "CRM invoice double-count",
         pillar: "anomalies",
         status: "pass",
-        detail: crm.flagged
+        detail: crm.doubleCount
           ? "Invoices AND deposits both recognize material income — the same revenue is likely counted twice"
-          : crm.invoiceTxnCount > 0
-            ? `${crm.invoiceTxnCount} invoice${crm.invoiceTxnCount === 1 ? "" : "s"} recognize ${fmt(crm.invoiceIncomeTotal)} of income; no material deposit leg alongside`
-            : "No invoice-recognized income this period",
+          : crm.flagged
+            ? `${crm.invoiceTxnCount} invoice${crm.invoiceTxnCount === 1 ? "" : "s"} recognize ${fmt(crm.invoiceIncomeTotal)} of income; no material deposit leg alongside — review whether these should count as revenue`
+            : crm.invoiceTxnCount > 0
+              ? `${crm.invoiceTxnCount} invoice${crm.invoiceTxnCount === 1 ? "" : "s"} recognize ${fmt(crm.invoiceIncomeTotal)} of income (below the materiality floor)`
+              : "No invoice-recognized income this period",
         findings: crm.flagged
           ? [
               {
                 fingerprint: fingerprintFor("crminv", period),
-                severity: "fail" as const,
-                message:
-                  `${crm.invoiceTxnCount} CRM invoices recognize ${fmt(crm.invoiceIncomeTotal)} of income (${topInvoiceAccounts}) while ` +
-                  `${crm.depositCount} deposits put ${fmt(crm.depositIncomeTotal)} into income accounts` +
-                  `${crm.pairs.length > 0 ? ` — ${crm.pairs.length} invoice↔deposit pair${crm.pairs.length === 1 ? "" : "s"} proven` : ""}. ` +
-                  `Likely the same revenue twice. Resolve on Revenue Check (void the duplicate invoices, keep-invoice + apply deposits, or set cash-deposits-only) before sending.`,
-                amount: Math.min(crm.invoiceIncomeTotal, crm.depositIncomeTotal),
+                // Confirmed double-count (both legs) blocks the send; invoice
+                // income with no deposit leg warns (surfaces for review — a
+                // client may legitimately invoice from QBO).
+                severity: (crm.doubleCount ? "fail" : "warn") as "warn" | "fail",
+                message: crm.doubleCount
+                  ? `${crm.invoiceTxnCount} CRM invoices recognize ${fmt(crm.invoiceIncomeTotal)} of income (${topInvoiceAccounts}) while ` +
+                    `${crm.depositCount} deposits put ${fmt(crm.depositIncomeTotal)} into income accounts` +
+                    `${crm.pairs.length > 0 ? ` — ${crm.pairs.length} invoice↔deposit pair${crm.pairs.length === 1 ? "" : "s"} proven` : ""}. ` +
+                    `Likely the same revenue twice. Resolve on Revenue Check (void the duplicate invoices, keep-invoice + apply deposits, or set cash-deposits-only) before sending.`
+                  : `${crm.invoiceTxnCount} invoices recognize ${fmt(crm.invoiceIncomeTotal)} of income (${topInvoiceAccounts}) with no separate deposit-into-income leg. ` +
+                    `On a cash-basis book these are likely CRM invoices inflating revenue — verify on Revenue Check (void, keep-invoice, or set deposits-only). Dismiss if the client genuinely invoices from QBO.`,
+                amount: crm.doubleCount ? Math.min(crm.invoiceIncomeTotal, crm.depositIncomeTotal) : crm.invoiceIncomeTotal,
                 dismissable: true, // a rare client legitimately mixes QBO-native invoices + true cash sales
               },
             ]

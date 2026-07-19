@@ -67,6 +67,10 @@ export interface CrmInvoiceRevenueReport {
   /** Customers appearing on BOTH legs (invoice + income deposit). */
   customersBothLegs: string[];
   flagged: boolean;
+  /** True only when BOTH legs are material — a CONFIRMED double-count (invoice
+   *  income AND deposits-into-income). When flagged is true but this is false,
+   *  it's invoice-recognized income to review (no separate deposit leg). */
+  doubleCount: boolean;
   reason: string;
 }
 
@@ -154,6 +158,7 @@ export function analyzeCrmInvoiceRevenue(
     pairedDepositTotal: 0,
     customersBothLegs: [],
     flagged: false,
+    doubleCount: false,
     reason: "No P&L detail",
   };
   if (!plDetail || plDetail.length === 0) return empty;
@@ -275,27 +280,38 @@ export function analyzeCrmInvoiceRevenue(
   const pairedInvoiceTotal = r2(pairs.reduce((s, p) => s + p.invoice.total, 0));
   const pairedDepositTotal = r2(pairs.reduce((s, p) => s + p.deposit.amount, 0));
 
-  // ── Flag heuristic ── STRUCTURAL: the double-count is a material invoice
-  // leg AND a material deposit-into-income leg both present. Pairing is
-  // supporting evidence, NOT a gate — real books use batch payouts and
-  // deposits with no customer name that don't pair 1:1, so requiring pairs
-  // would miss obvious double-counts (Dominion: $48.9K invoices + $45.5K
-  // deposits, few clean pairs).
+  // ── Flag heuristic ──
+  // A material INVOICE leg alone flags the client (Mike 2026-07-18, Exivisual:
+  // "the sweep didn't find them and they have invoices in their revenue").
+  // On a cash-basis book, invoice-recognized income (esp. "Billable Expense
+  // Income") shouldn't be revenue at all — the CRM is creating it. A material
+  // deposit-into-income leg ON TOP makes it a CONFIRMED double-count (the
+  // Dominion pattern). Pairing is evidence, never a gate (batch payouts /
+  // no-customer deposits rarely pair 1:1).
   const hasInvoiceLeg = invoices.length >= CRM_INVOICE_MIN_COUNT && invoiceIncomeTotal >= CRM_DEPOSIT_FLOOR;
   const hasDepositLeg = depositIncomeTotal >= CRM_DEPOSIT_FLOOR;
-  const flagged = hasInvoiceLeg && hasDepositLeg;
+  const doubleCount = hasInvoiceLeg && hasDepositLeg;
+  const flagged = hasInvoiceLeg;
 
   const fmt = (n: number) => `$${Math.abs(Math.round(n)).toLocaleString()}`;
+  const topInvoiceAccts = Object.entries(invoiceByAccount)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 2)
+    .map(([n]) => `"${n}"`)
+    .join(", ");
   let reason: string;
   if (invoices.length === 0) {
     reason = "No invoice-recognized income — deposits are this client's only revenue entry (correct for a no-invoice book).";
-  } else if (deposits.length === 0) {
-    reason = "Invoices present but no deposits posted into income — payments look properly matched.";
-  } else if (flagged) {
+  } else if (doubleCount) {
     const pairNote = pairs.length > 0 ? ` (${pairs.length} clean deposit↔invoice matches, ${fmt(pairedDepositTotal)})` : " (no clean 1:1 matches — likely batch payouts)";
     reason = `${invoices.length} invoices recognizing ${fmt(invoiceIncomeTotal)} AND ${deposits.length} deposits totaling ${fmt(depositIncomeTotal)} in income — the same revenue counted twice${pairNote}. Recognize deposits only.`;
+  } else if (flagged) {
+    // Invoice leg only — invoice-recognized income with no separate deposit leg.
+    reason = `${invoices.length} invoices recognizing ${fmt(invoiceIncomeTotal)} of income${topInvoiceAccts ? ` (${topInvoiceAccts})` : ""} with no separate deposit-into-income leg — on a cash-basis book these are likely CRM invoices inflating revenue. Verify, then void, keep-invoice, or set deposits-only.`;
+  } else if (invoices.length > 0) {
+    reason = `Invoice-recognized income present but below the materiality floor (${fmt(invoiceIncomeTotal)} over ${invoices.length} invoices) — review manually.`;
   } else {
-    reason = `Both legs present but below the materiality floor (invoices ${fmt(invoiceIncomeTotal)}, deposits ${fmt(depositIncomeTotal)}) — review manually.`;
+    reason = "No material invoice-recognized income.";
   }
 
   return {
@@ -309,6 +325,7 @@ export function analyzeCrmInvoiceRevenue(
     pairedDepositTotal,
     customersBothLegs,
     flagged,
+    doubleCount,
     reason,
   };
 }

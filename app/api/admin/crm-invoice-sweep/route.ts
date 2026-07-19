@@ -104,6 +104,7 @@ export async function POST(request: Request) {
             revenue_recognition_mode: c.revenue_recognition_mode || "standard",
             window: { start, end },
             flagged: report.flagged,
+            double_count: report.doubleCount,
             reason: report.reason,
             invoice_txn_count: report.invoiceTxnCount,
             invoice_income_total: report.invoiceIncomeTotal,
