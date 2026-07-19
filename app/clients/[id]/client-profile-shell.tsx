@@ -816,6 +816,7 @@ function ProfileTab({
     <div className="space-y-6">
       <ClientDetailsCard
         clientLinkId={clientLink.id}
+        jurisdiction={clientLink.jurisdiction ?? null}
         initial={{
           contact_first_name: clientLink.contact_first_name ?? null,
           contact_last_name: clientLink.contact_last_name ?? null,

@@ -82,10 +82,13 @@ export function ClientDetailsCard({
   clientLinkId,
   initial,
   onboardingAnswers,
+  jurisdiction,
 }: {
   clientLinkId: string;
   initial: ClientProfileFields;
   onboardingAnswers?: { label: string; value: string }[];
+  /** client_links.jurisdiction — the CA entity toggle only shows for "CA". */
+  jurisdiction?: string | null;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -244,8 +247,70 @@ export function ClientDetailsCard({
       {editing ? (
         <EditGrid form={form} set={set} />
       ) : (
-        <ReadGrid form={initial} />
+        <>
+          {String(jurisdiction || "").toUpperCase() === "CA" && (
+            <EntityToggle clientLinkId={clientLinkId} current={initial.corporate_type} />
+          )}
+          <ReadGrid form={initial} />
+        </>
       )}
+    </div>
+  );
+}
+
+// ─── CA entity toggle ───────────────────────────────────────────────────────
+// Corp vs Sole Prop, one click (Mike 2026-07-18). Drives the GIFI owner-equity
+// codes on the tax export (corp → 2781 shareholder loan; SP → 3553/3554
+// drawings/contributions) and tells the preparer which form applies (T2 vs
+// T2125). Writes the same corporate_type field as the Edit dropdown — the
+// dropdown still offers the long-tail values (Partnership, LLC, …).
+
+function EntityToggle({ clientLinkId, current }: { clientLinkId: string; current: string | null }) {
+  const router = useRouter();
+  const [saving, setSaving] = useState<string | null>(null);
+  const isSP = /sole|proprietor|partner/i.test(current || "");
+  const isCorp = !!current && !isSP;
+
+  async function setType(value: string) {
+    setSaving(value);
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ corporate_type: value }),
+      });
+      if (res.ok) router.refresh();
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const pill = (label: string, value: string, active: boolean) => (
+    <button
+      onClick={() => !active && setType(value)}
+      disabled={saving !== null}
+      className={`px-3 py-1 rounded-full text-[11px] font-bold border transition-colors disabled:opacity-60 ${
+        active
+          ? "bg-teal text-white border-teal"
+          : "bg-white text-ink-slate border-gray-200 hover:border-teal/50 hover:text-teal"
+      }`}
+    >
+      {saving === value ? <Loader2 size={11} className="inline animate-spin" /> : label}
+    </button>
+  );
+
+  return (
+    <div className="mb-3 flex items-center gap-2 bg-teal-lighter/60 border border-teal/15 rounded-xl px-3 py-2">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-ink-slate">Entity type</span>
+      {pill("Corporation", "Corporation", isCorp)}
+      {pill("Sole Prop", "Sole Proprietor", isSP)}
+      <span className="text-[10px] text-ink-light">
+        {!current
+          ? "Not set — pick one (drives the T2 vs T2125 tax export)"
+          : isSP
+          ? "Files T2125 (T1) — owner draws map to drawings"
+          : "Files T2 (GIFI) — owner draws map to shareholder loan"}
+      </span>
     </div>
   );
 }

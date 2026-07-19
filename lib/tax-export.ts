@@ -46,8 +46,28 @@ const T2125_LINES: Record<string, string> = {
 };
 const COGS_CODES = new Set(["8320", "8340", "8360", "8450", "8457"]);
 
+/**
+ * Entity type drives the owner-equity GIFI codes and which form the preparer
+ * actually files. Derived from client_links.corporate_type (the profile
+ * dropdown): Sole Proprietor / Partnership → "sole_prop" (T2125 is the
+ * filing; owner draw/contributions map to partners' drawings/contributions
+ * 3553/3554); everything else → "corp" (T2/GIFI; owner money runs through
+ * the shareholder loan 2781, per master_coa).
+ */
+export type EntityType = "corp" | "sole_prop";
+export function entityTypeOf(corporateType: string | null | undefined): EntityType {
+  return /sole|proprietor|partner/i.test(corporateType || "") ? "sole_prop" : "corp";
+}
+// Owner-equity accounts whose GIFI code is entity-dependent (master_coa
+// carries the corp default; sole-prop overrides at export time).
+const SOLE_PROP_EQUITY_OVERRIDES: Record<string, string> = {
+  "owner's draw": "3553",       // drawings
+  "owner contributions": "3554", // contributions during the year
+};
+
 export interface TaxExportResult {
   period: { start: string; end: string };
+  entity_type: EntityType;
   gifi_pl: Array<{ code: string; label: string; amount: number }>;
   gifi_bs: Array<{ code: string; label: string; amount: number }>;
   unmapped: Array<{ account: string; amount: number; where: "pl" | "bs" }>;
@@ -66,10 +86,11 @@ export interface TaxExportResult {
 
 export async function buildTaxExport(
   service: any,
-  clientLink: { id: string; qbo_realm_id: string; jurisdiction?: string | null },
+  clientLink: { id: string; qbo_realm_id: string; jurisdiction?: string | null; corporate_type?: string | null },
   period: { start: string; end: string }
 ): Promise<TaxExportResult> {
   const token = await getValidToken(clientLink.id, service);
+  const entityType = entityTypeOf(clientLink.corporate_type);
 
   const [pl, balances, accounts, detail, { data: master }] = await Promise.all([
     fetchProfitAndLoss(clientLink.qbo_realm_id, token, period.start, period.end, "Accrual"),
@@ -82,7 +103,15 @@ export async function buildTaxExport(
   const gifiByName = new Map<string, string | null>(
     ((master as any[]) || []).map((m) => [String(m.account_name).toLowerCase().trim(), m.gifi_code || null])
   );
-  const lookup = (name: string) => gifiByName.get(name.toLowerCase().trim()) ?? null;
+  const lookup = (name: string) => {
+    const key = name.toLowerCase().trim();
+    // Sole prop / partnership: owner equity is drawings/contributions, not
+    // the shareholder loan the master template (corp default) points at.
+    if (entityType === "sole_prop" && SOLE_PROP_EQUITY_OVERRIDES[key]) {
+      return SOLE_PROP_EQUITY_OVERRIDES[key];
+    }
+    return gifiByName.get(key) ?? null;
+  };
 
   // ── P&L → GIFI (roll up by code) ──
   const plByCode = new Map<string, number>();
@@ -150,6 +179,7 @@ export async function buildTaxExport(
 
   return {
     period,
+    entity_type: entityType,
     gifi_pl: gifiRows(plByCode),
     gifi_bs: gifiRows(bsByCode),
     unmapped,
