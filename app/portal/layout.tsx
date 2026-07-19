@@ -130,6 +130,32 @@ export default async function PortalLayout({ children }: { children: React.React
     openCategorize = 0;
   }
 
+  // When impersonating, offer a quick-switch dropdown of every client that
+  // has an active portal user — so a senior can hop between portals without
+  // stopping + restarting from the clients list.
+  let portalClients: Array<{ client_link_id: string; name: string }> = [];
+  if (ctx.impersonating) {
+    try {
+      const { data: mappings } = await (service as any)
+        .from("client_users")
+        .select("client_link_id")
+        .eq("active", true);
+      const ids = Array.from(new Set(((mappings as any[]) || []).map((m) => m.client_link_id).filter(Boolean)));
+      if (ids.length) {
+        const { data: cls } = await (service as any)
+          .from("client_links")
+          .select("id, client_name")
+          .in("id", ids)
+          .eq("is_active", true);
+        portalClients = ((cls as any[]) || [])
+          .map((c) => ({ client_link_id: c.id, name: c.client_name || "Unnamed client" }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+      }
+    } catch {
+      portalClients = [];
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[var(--app-canvas)]">
       {ctx.impersonating && (
@@ -137,6 +163,8 @@ export default async function PortalLayout({ children }: { children: React.React
           clientName={clientName}
           clientUserName={ctx.userFullName || ctx.userEmail || "this user"}
           realUserName={ctx.realUserName || "Admin"}
+          currentClientLinkId={ctx.clientLinkId}
+          portalClients={portalClients}
         />
       )}
       <div className="flex">
