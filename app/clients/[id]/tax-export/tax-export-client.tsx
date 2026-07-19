@@ -109,17 +109,18 @@ export function TaxExportClient({
 
       {data && (
         <>
-          {data.entity_type && (
+          {data.tax_form && (
             <div className="rounded-lg bg-teal-lighter border border-teal/20 px-4 py-2.5 text-sm text-navy flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-bold uppercase tracking-wider bg-teal text-white rounded-full px-2.5 py-0.5">
-                {data.entity_type === "sole_prop" ? "Sole Prop / Partnership" : "Corporation"}
+                {data.tax_form}
               </span>
-              {data.entity_type === "sole_prop" ? (
-                <>The <strong>T2125 sheet</strong> below is the filing for this client; owner draws/contributions export as drawings (GIFI 3553/3554).</>
-              ) : (
-                <>The <strong>T2 GIFI export</strong> below is the filing for this client; owner draws/contributions export to the shareholder loan (GIFI 2781).</>
-              )}
-              <span className="text-[11px] text-ink-light">— change the entity type on the client profile if this is wrong.</span>
+              <span>
+                This client files <strong>{data.tax_form}</strong> — set by the entity type on the client profile.
+                {(data.entity_type === "sole_prop" || data.entity_type === "partnership")
+                  ? " Owner draws/contributions export as drawings, not the shareholder loan."
+                  : ""}
+              </span>
+              <span className="text-[11px] text-ink-light">— change the entity type on the profile if this is wrong.</span>
             </div>
           )}
           {data.unmapped?.length > 0 && (

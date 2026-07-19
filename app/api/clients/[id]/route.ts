@@ -21,6 +21,7 @@ export async function PATCH(
 
   const body = await request.json();
   const updates: Record<string, any> = {};
+  const service = createServiceSupabase();
 
   // Whitelist editable fields
   const allowed = [
@@ -33,9 +34,27 @@ export async function PATCH(
     "annual_revenue_range", "taxes_up_to_date", "prior_bookkeeper",
     "accounting_software", "payroll_provider", "employee_count_range",
     "uses_business_cards", "keeps_receipts", "bank_connected_to_software",
+    "entity_type",
   ];
   for (const k of allowed) {
     if (k in body) updates[k] = body[k];
+  }
+
+  // Entity type: controlled vocabulary + admin/lead only (manual override —
+  // it drives the tax-export form and owner-equity mapping, so bookkeepers
+  // shouldn't flip it unreviewed).
+  if ("entity_type" in updates) {
+    if (updates.entity_type != null &&
+        !["c_corp", "s_corp", "partnership", "sole_prop"].includes(updates.entity_type)) {
+      return NextResponse.json({ error: "Invalid entity_type" }, { status: 400 });
+    }
+    const { data: prof } = await service.from("users").select("role").eq("id", user.id).single();
+    if (!prof || !["admin", "lead"].includes((prof as any).role)) {
+      return NextResponse.json(
+        { error: "Only admin or lead can change a client's entity type" },
+        { status: 403 }
+      );
+    }
   }
 
   // Stamp profile_updated_at whenever any profile-detail field is touched,
@@ -61,8 +80,6 @@ export async function PATCH(
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No updates provided" }, { status: 400 });
   }
-
-  const service = createServiceSupabase();
 
   // Gate `is_active` flips behind admin/lead role. A bookkeeper toggling
   // it (intentionally or via a stale UI state) silently hides the client
@@ -92,7 +109,7 @@ export async function PATCH(
     .eq("id", id)
     .single();
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("client_links")
     .update(updates)
     .eq("id", id)
