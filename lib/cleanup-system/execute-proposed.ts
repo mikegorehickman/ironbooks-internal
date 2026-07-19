@@ -3,14 +3,17 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getValidToken } from "@/lib/qbo";
+import { getValidToken, fetchAllAccounts, type QBOAccount } from "@/lib/qbo";
 import {
   reclassifyTransactionLines,
   SUPPORTED_TX_TYPES,
   type SupportedTxType,
 } from "@/lib/qbo-reclass";
+import { ensureAccountExists } from "@/lib/coa-reclass-je";
+import { resolveAccount } from "@/lib/qbo-journal-entry";
 import { applyUfPaymentToInvoice, applyApPaymentToBill, createJournalEntry, voidQboInvoice } from "./qbo-posting";
 import { parseEntryMeta } from "./entry-meta";
+import { CLEARING_ACCOUNT_NAME } from "./types";
 
 export async function executeProposedEntries(
   service: SupabaseClient,
@@ -47,6 +50,44 @@ export async function executeProposedEntries(
 
   const accessToken = await getValidToken(clientLinkId, service);
   const realmId = (client as any).qbo_realm_id;
+
+  // ── JE account resolution ──────────────────────────────────────────────
+  // The bank-recon adjusting JE and every "clearing" offset line carry an
+  // account NAME (account_hint), not an ID. QBO's AccountRef.value must be a
+  // real account ID, so a JE built from hints 400s at QBO — historically these
+  // entries could be approved but silently never posted (execution_error). We
+  // resolve names -> IDs here, and get-or-create the cleanup clearing account
+  // (which no module ever created), before posting. Accounts are fetched once
+  // per run and cached. A hint that can't be resolved THROWS, so the entry is
+  // recorded as failed rather than posted with a bad reference.
+  let jeAccounts: QBOAccount[] | null = null;
+  let clearingId: string | null = null;
+  async function resolveJeAccountId(line: any): Promise<string> {
+    if (line.qbo_account_id) return String(line.qbo_account_id);
+    const hint = String(line.account_hint || "").trim();
+    if (!hint) throw new Error("JE line has no account id or name hint");
+    if (!jeAccounts) jeAccounts = await fetchAllAccounts(realmId, accessToken);
+    if (hint.toLowerCase() === CLEARING_ACCOUNT_NAME.toLowerCase()) {
+      if (!clearingId) {
+        const acct = await ensureAccountExists({
+          realmId, accessToken,
+          name: CLEARING_ACCOUNT_NAME,
+          accountType: "Other Current Asset",
+          accountSubType: "OtherCurrentAssets",
+          allAccounts: jeAccounts,
+        });
+        clearingId = acct.Id;
+        if (!jeAccounts.some((a) => a.Id === acct.Id)) jeAccounts.push(acct);
+      }
+      return clearingId;
+    }
+    const r = resolveAccount(hint, jeAccounts as any);
+    if (r.ok && r.qbo_account_id) return r.qbo_account_id;
+    throw new Error(
+      `Couldn't resolve JE account "${hint}" to a QuickBooks account${r.reason ? ` — ${r.reason}` : ""}. ` +
+      `Set the target account on this entry and re-approve.`
+    );
+  }
 
   let executed = 0;
   let failed = 0;
@@ -149,12 +190,15 @@ export async function executeProposedEntries(
         entry.je_lines &&
         entry.txn_date
       ) {
-        const lines = (entry.je_lines as any[]).map((l) => ({
-          account_id: l.qbo_account_id || l.account_hint,
-          posting_type: (l.side === "debit" ? "Debit" : "Credit") as "Debit" | "Credit",
-          amount: Number(l.amount),
-          description: l.description || entry.memo,
-        }));
+        const lines: Array<{ account_id: string; posting_type: "Debit" | "Credit"; amount: number; description?: string }> = [];
+        for (const l of (entry.je_lines as any[])) {
+          lines.push({
+            account_id: await resolveJeAccountId(l),
+            posting_type: (l.side === "debit" ? "Debit" : "Credit") as "Debit" | "Credit",
+            amount: Number(l.amount),
+            description: l.description || entry.memo,
+          });
+        }
 
         const je = await createJournalEntry(realmId, accessToken, {
           txn_date: entry.txn_date,
