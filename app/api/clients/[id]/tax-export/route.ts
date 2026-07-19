@@ -22,9 +22,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!start || !end || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
     return NextResponse.json({ error: "start and end (YYYY-MM-DD) are required" }, { status: 400 });
   }
-  const { data: client } = await service
+  // (service as any): generated DB types predate the corporate_type column
+  // (migration 73) and mark the whole select as an error otherwise.
+  const { data: client } = await (service as any)
     .from("client_links")
-    .select("id, client_name, qbo_realm_id, jurisdiction, state_province")
+    .select("id, client_name, qbo_realm_id, jurisdiction, state_province, corporate_type")
     .eq("id", id)
     .single();
   if (!client?.qbo_realm_id) return NextResponse.json({ error: "Client has no QBO connection" }, { status: 400 });
