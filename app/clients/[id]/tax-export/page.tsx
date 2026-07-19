@@ -20,17 +20,20 @@ export default async function TaxExportPage({ params }: { params: Promise<{ id: 
     .eq("id", id)
     .single();
   if (!client) redirect("/clients");
+  const isCA = String(client.jurisdiction || "").toUpperCase().startsWith("CA");
   return (
     <AppShell>
       <TopBar
         title={`Year-end tax export — ${client.client_name}`}
-        subtitle="GIFI for T2 · T2125 sheet for T1 · T5018 subcontractor totals · review material, not a filing"
+        subtitle={isCA
+          ? "GIFI for T2 · T2125 sheet for T1 · T5018 subcontractor totals · review material, not a filing"
+          : "IRS tax-line summary (1120 / 1120-S / 1065 / Sch C) · 1099-NEC totals · review material, not a filing"}
       />
       <div className="px-8 py-6 max-w-5xl space-y-5">
         <TaxExportClient
           clientLinkId={client.id}
           clientName={client.client_name}
-          jurisdiction={client.jurisdiction || "CA"}
+          jurisdiction={client.jurisdiction || "US"}
         />
       </div>
     </AppShell>

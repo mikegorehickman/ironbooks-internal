@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { FileText } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
@@ -356,6 +358,29 @@ export default async function ClientProfilePage({
         }
         actions={
           <>
+            {(() => {
+              const isCA = String(clientLink.jurisdiction || "").toUpperCase().startsWith("CA");
+              return (
+                <span
+                  title={isCA ? "Canada" : "United States"}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-ink-slate bg-gray-50 border border-gray-200 rounded-full px-2 py-1"
+                >
+                  <span className="text-base leading-none">{isCA ? "🇨🇦" : "🇺🇸"}</span>
+                  {isCA ? "CA" : "US"}
+                </span>
+              );
+            })()}
+            {clientLink.qbo_realm_id && (
+              <Link
+                href={`/clients/${clientLink.id}/tax-export`}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-teal hover:bg-teal-dark rounded-lg px-3 py-2"
+                title={String(clientLink.jurisdiction || "").toUpperCase().startsWith("CA")
+                  ? "Export tax documents (T2 / T2125 / GIFI)"
+                  : "Export tax documents (1120 / 1120-S / 1065 / Sch C)"}
+              >
+                <FileText size={13} /> Export Tax Docs
+              </Link>
+            )}
             {lifecycle && <LifecyclePill status={lifecycle} size="md" />}
             <ClientSwitcher
               currentId={clientLink.id}

@@ -59,9 +59,22 @@ export interface TaxExportResult {
   period: { start: string; end: string };
   entity_type: EntityType;
   tax_form: string;
+  region: "US" | "CA";
   gifi_pl: Array<{ code: string; label: string; amount: number }>;
   gifi_bs: Array<{ code: string; label: string; amount: number }>;
   unmapped: Array<{ account: string; amount: number; where: "pl" | "bs" }>;
+  /** US income-statement grouping by IRS tax line (populated for US clients). */
+  us: {
+    income: Array<{ line: string; amount: number }>;
+    cogs: Array<{ line: string; amount: number }>;
+    expenses: Array<{ line: string; amount: number }>;
+    income_total: number;
+    cogs_total: number;
+    expense_total: number;
+    net_before_adjustments: number;
+    contractor_1099: Array<{ vendor: string; total: number }>;
+    unmapped: Array<{ account: string; amount: number }>;
+  } | null;
   t2125: {
     gross: number;
     cogs: number;
@@ -89,12 +102,17 @@ export async function buildTaxExport(
     fetchBalancesAsOf(clientLink.qbo_realm_id, token, period.end),
     fetchAllAccounts(clientLink.qbo_realm_id, token),
     fetchPLDetailAll(clientLink.qbo_realm_id, token, period.start, period.end, "Accrual"),
-    service.from("master_coa").select("account_name, gifi_code"),
+    service.from("master_coa").select("account_name, gifi_code, us_tax_line"),
   ]);
 
+  const region: "US" | "CA" = String(clientLink.jurisdiction || "US").toUpperCase().startsWith("CA") ? "CA" : "US";
   const gifiByName = new Map<string, string | null>(
     ((master as any[]) || []).map((m) => [String(m.account_name).toLowerCase().trim(), m.gifi_code || null])
   );
+  const usLineByName = new Map<string, string | null>(
+    ((master as any[]) || []).map((m) => [String(m.account_name).toLowerCase().trim(), m.us_tax_line || null])
+  );
+  const usLookup = (name: string) => usLineByName.get(name.toLowerCase().trim()) ?? null;
   const lookup = (name: string) => {
     const key = name.toLowerCase().trim();
     // Sole prop / partnership: owner equity is drawings/contributions, not
@@ -153,10 +171,12 @@ export async function buildTaxExport(
   );
   const gross = round(plByCode.get("8000") || pl.totalIncome || 0);
 
-  // ── T5018: subcontractor totals per vendor (code 8360 accounts) ──
+  // ── Subcontractor totals per vendor (CA T5018 / US 1099-NEC — same data).
+  // GIFI 8360 accounts, or any account named "subcontract*" (covers the US
+  // "Subcontractors" account whose seed code differs). ──
   const subAccounts = new Set(
     ((master as any[]) || [])
-      .filter((m) => m.gifi_code === "8360")
+      .filter((m) => m.gifi_code === "8360" || /subcontract/i.test(String(m.account_name || "")))
       .map((m) => String(m.account_name).toLowerCase().trim())
   );
   const byVendor = new Map<string, number>();
@@ -169,10 +189,40 @@ export async function buildTaxExport(
     .map(([vendor, total]) => ({ vendor, total: round(total) }))
     .sort((a, b) => b.total - a.total);
 
+  // ── US income-statement grouping by IRS tax line (parallel to GIFI). ──
+  let us: TaxExportResult["us"] = null;
+  if (region === "US") {
+    const income = new Map<string, number>();
+    const cogsMap = new Map<string, number>();
+    const expMap = new Map<string, number>();
+    const usUnmapped: Array<{ account: string; amount: number }> = [];
+    for (const item of pl.lineItems || []) {
+      if (!item.amount) continue;
+      const line = usLookup(item.label);
+      if (!line) { usUnmapped.push({ account: item.label, amount: item.amount }); continue; }
+      const bucket = /^gross receipts|^returns|^interest income/i.test(line) ? income
+        : /^cogs/i.test(line) ? cogsMap : expMap;
+      bucket.set(line, (bucket.get(line) || 0) + item.amount);
+    }
+    const rows = (m: Map<string, number>) =>
+      [...m.entries()].map(([line, amount]) => ({ line, amount: round(amount) })).sort((a, b) => b.amount - a.amount);
+    const sum = (m: Map<string, number>) => round([...m.values()].reduce((s, v) => s + v, 0));
+    const incomeTotal = sum(income), cogsTotal = sum(cogsMap), expTotal = sum(expMap);
+    us = {
+      income: rows(income), cogs: rows(cogsMap), expenses: rows(expMap),
+      income_total: incomeTotal, cogs_total: cogsTotal, expense_total: expTotal,
+      net_before_adjustments: round(incomeTotal - cogsTotal - expTotal),
+      contractor_1099: t5018,
+      unmapped: usUnmapped,
+    };
+  }
+
   return {
     period,
     entity_type: entityType,
     tax_form: taxForm,
+    region,
+    us,
     gifi_pl: gifiRows(plByCode),
     gifi_bs: gifiRows(bsByCode),
     unmapped,
