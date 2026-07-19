@@ -36,7 +36,39 @@ const DEFAULT_SUBTYPE: Record<string, string> = {
   "other income": "OtherMiscellaneousIncome",
 };
 import { fetchProfitAndLossByMonth } from "@/lib/qbo-pl-by-month";
+import { fetchProfitAndLoss } from "@/lib/qbo-reports";
 import { normalizeAccountName } from "@/lib/account-name";
+
+/**
+ * Strip a leading QBO account-number prefix from each ":"-segment. QBO's P&L
+ * REPORTS prefix the AcctNum ("5210 Paint & Materials", "6260 Insurance:6261
+ * General Liability Insurance") whenever a file has account numbering on — but
+ * Account.Name carries NO number. So matching a report row to an account by
+ * name silently fails for every numbered chart (Despres, 2026-07-18: the drain
+ * "moved $0" and the account was retired with $26k still on it). Strip it.
+ */
+export function stripAcctNumPrefix(name: string): string {
+  return String(name || "")
+    .split(":")
+    .map((seg) => seg.replace(/^\s*\d{3,}\s+/, "").trim())
+    .join(":");
+}
+
+/** Normalized, account-number-tolerant key for matching a report label to an
+ *  account name. */
+function matchKey(name: string): string {
+  return normalizeAccountName(stripAcctNumPrefix(name));
+}
+
+/** All name forms an account might match a report row under (full + leaf,
+ *  numbered + stripped). */
+function matchCandidates(name: string): Set<string> {
+  const out = new Set<string>();
+  for (const v of [normalizeAccountName(name), matchKey(name)]) {
+    if (v) { out.add(v); out.add(v.split(":").pop() || v); }
+  }
+  return out;
+}
 
 const MONTH_IDX: Record<string, number> = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
@@ -87,14 +119,15 @@ export async function reclassAccountViaJournalEntry(params: {
 
   // Locate the source account's monthly values (match on normalized full name,
   // or the leaf when the report flattened it to "Parent:Child").
-  const wantFull = normalizeAccountName(source.Name);
-  const wantLeaf = wantFull.split(":").pop() || wantFull;
+  // Account-number-tolerant match — the report prefixes AcctNum, the account
+  // Name doesn't (see stripAcctNumPrefix).
+  const cand = matchCandidates(source.Name);
   let row: { values: number[] } | null = null;
   for (const b of pl.blocks) {
     if (b.kind !== "section") continue;
     for (const a of b.accounts) {
-      const norm = normalizeAccountName(a.name);
-      if (norm === wantFull || (norm.split(":").pop() || norm) === wantLeaf) { row = a; break; }
+      const forms = matchCandidates(a.name);
+      if ([...forms].some((f) => cand.has(f))) { row = a; break; }
     }
     if (row) break;
   }
@@ -398,17 +431,59 @@ export async function drainAndRetireAccount(params: {
   out.failures.push(...rp.failures.map((f) => `re-point ${f}`));
 
   if (out.failures.length === 0) {
-    try {
-      const fresh = (await fetchAllAccounts(realmId, accessToken)).find((a) => a.Id === source.Id) as any;
-      if (fresh && fresh.Active !== false) {
-        await inactivateAccount(realmId, accessToken, source.Id, fresh.SyncToken, fresh);
+    // NEVER retire a source until it's CONFIRMED zeroed — the old code
+    // inactivated whenever no step errored, so a drain that moved $0 (e.g. the
+    // numbered-account name-match miss) still retired the account with its
+    // balance on it. If the JE found + moved the account, it's zero by
+    // construction; otherwise verify its P&L balance directly.
+    let zeroed = out.foundInReport;
+    if (!zeroed) {
+      try {
+        const bal = await accountPlBalanceInRange({ realmId, accessToken, account: source, startDate, endDate });
+        zeroed = Math.abs(bal) < 0.01;
+        if (!zeroed) {
+          out.failures.push(`source still carries $${Math.round(Math.abs(bal)).toLocaleString()} the drain couldn't move — left ACTIVE (not retired) so nothing is stranded`);
+        }
+      } catch (e: any) {
+        out.failures.push(`couldn't verify source is empty — left active: ${String(e?.message || e).slice(0, 120)}`);
       }
-      out.inactivated = true;
-    } catch (e: any) {
-      out.failures.push(`inactivate source: ${String(e?.message || e).slice(0, 200)}`);
+    }
+    if (zeroed) {
+      try {
+        const fresh = (await fetchAllAccounts(realmId, accessToken)).find((a) => a.Id === source.Id) as any;
+        if (fresh && fresh.Active !== false) {
+          await inactivateAccount(realmId, accessToken, source.Id, fresh.SyncToken, fresh);
+        }
+        out.inactivated = true;
+      } catch (e: any) {
+        out.failures.push(`inactivate source: ${String(e?.message || e).slice(0, 200)}`);
+      }
     }
   }
   return out;
+}
+
+/**
+ * The source account's net P&L balance in a date range (accrual — the QBO
+ * default view, and the true GL balance we need to be zero before retiring).
+ * Account-number-tolerant; prefers account_id, falls back to name.
+ */
+export async function accountPlBalanceInRange(params: {
+  realmId: string;
+  accessToken: string;
+  account: QBOAccount;
+  startDate: string;
+  endDate: string;
+}): Promise<number> {
+  const { realmId, accessToken, account, startDate, endDate } = params;
+  const pl = await fetchProfitAndLoss(realmId, accessToken, startDate, endDate, "Accrual");
+  const wantId = String(account.Id);
+  const idLines = pl.lineItems.filter((l) => l.account_id && String(l.account_id) === wantId);
+  if (idLines.length) return idLines.reduce((s, l) => s + l.amount, 0);
+  const cand = matchCandidates(account.Name);
+  return pl.lineItems
+    .filter((l) => [...matchCandidates(l.label)].some((f) => cand.has(f)))
+    .reduce((s, l) => s + l.amount, 0);
 }
 
 export interface RetypeResult {

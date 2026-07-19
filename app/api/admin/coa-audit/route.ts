@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, fetchAllAccountsIncludingInactive, QBOReauthRequiredError } from "@/lib/qbo";
 import { fetchProfitAndLoss } from "@/lib/qbo-reports";
+import { stripAcctNumPrefix } from "@/lib/coa-reclass-je";
 import { computeCoaDrift, type DriftMasterRow } from "@/lib/coa-drift";
 import { suggestMergeTarget, type MergeTarget } from "@/lib/coa-merge-suggest";
 import { suggestMergesWithAI, type AiMergeSource, type AiMergeTarget } from "@/lib/coa-merge-ai";
@@ -88,11 +89,12 @@ export async function POST(request: Request) {
       const byAcct = new Map<string, { id: string; name: string; type: string; amount: number }>();
       for (const l of pl.lineItems) {
         if (!/\(deleted\)/i.test(l.label) || Math.abs(l.amount) < 0.01) continue;
+        const labelKey = normalizeAccountName(stripAcctNumPrefix(stripDel(l.label)));
         const acct = l.account_id
           ? accountsAll.find((a) => String(a.Id) === String(l.account_id))
           : accountsAll.find(
               (a) => a.Active === false &&
-                normalizeAccountName(stripDel(a.Name)) === normalizeAccountName(stripDel(l.label))
+                normalizeAccountName(stripAcctNumPrefix(stripDel(a.Name))) === labelKey
             );
         if (!acct || acct.Active !== false) continue;
         const prev = byAcct.get(acct.Id);
