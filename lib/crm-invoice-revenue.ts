@@ -166,7 +166,12 @@ export function analyzeCrmInvoiceRevenue(
   // ── Legs ──
   const invoiceByTxn = new Map<string, CrmInvoiceTxn>();
   const invoiceByAccount: Record<string, number> = {};
-  const deposits: IncomeDepositRow[] = [];
+  // Collect ALL deposit rows first; the income-account filter is applied AFTER
+  // the pass so it can union in every account that received invoice income
+  // (see below) — a deposit into an account that also carries invoices is the
+  // strongest double-count signal, and the caller's summary-derived income set
+  // can miss accounts (name drift, en-dashes, sub-accounts).
+  const rawDeposits: IncomeDepositRow[] = [];
 
   const incomeAcctLc = incomeAccounts
     ? new Set([...incomeAccounts].map((a) => (a || "").toLowerCase()))
@@ -195,9 +200,7 @@ export function analyzeCrmInvoiceRevenue(
       invoiceByAccount[acct] = r2((invoiceByAccount[acct] || 0) + amount);
       invoiceByTxn.set(key, inv);
     } else if (isDeposit(row.txn_type)) {
-      // Restrict to income accounts only when the caller supplied the set.
-      if (incomeAcctLc && !incomeAcctLc.has((row.account || "").toLowerCase())) continue;
-      deposits.push({
+      rawDeposits.push({
         txn_id: row.txn_id,
         date: row.date,
         account: row.account || "(no account)",
@@ -206,6 +209,16 @@ export function analyzeCrmInvoiceRevenue(
       });
     }
   }
+
+  // Effective income accounts = the caller's set UNION every account that
+  // received invoice income (those are income accounts by definition). Only
+  // count deposits landing in that set as the "income deposit" leg. When the
+  // caller supplied no set, every deposit counts (legacy behavior).
+  const invoiceAccts = new Set(Object.keys(invoiceByAccount).map((a) => a.toLowerCase()));
+  const effectiveIncome = incomeAcctLc ? new Set([...incomeAcctLc, ...invoiceAccts]) : null;
+  const deposits: IncomeDepositRow[] = effectiveIncome
+    ? rawDeposits.filter((d) => effectiveIncome.has((d.account || "").toLowerCase()))
+    : rawDeposits;
 
   const invoices = [...invoiceByTxn.values()].filter((i) => i.total > 0);
   const invoiceIncomeTotal = r2(invoices.reduce((s, i) => s + i.total, 0));
