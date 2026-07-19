@@ -243,6 +243,41 @@ export async function repointItemsToAccount(params: {
 }
 
 /**
+ * Reactivate an inactive account so its balance can be drained. QBO appends
+ * "(deleted)" to inactive names — strip it on the way back (falling back to
+ * the suffixed name if the clean one collides with an active account).
+ */
+export async function reactivateAccount(params: {
+  realmId: string;
+  accessToken: string;
+  account: QBOAccount;
+}): Promise<QBOAccount> {
+  const { realmId, accessToken, account } = params;
+  const base: any = {
+    Id: account.Id,
+    SyncToken: (account as any).SyncToken,
+    sparse: true,
+    Active: true,
+    AccountType: account.AccountType,
+    ...(account.AccountSubType && { AccountSubType: account.AccountSubType }),
+  };
+  const cleanName = account.Name.replace(/\s*\(deleted\)\s*$/i, "").trim() || account.Name;
+  try {
+    const data = await qboRequest<{ Account: QBOAccount }>(realmId, accessToken, `/account?minorversion=70`, {
+      method: "POST", body: JSON.stringify({ ...base, Name: cleanName }),
+    });
+    return data.Account;
+  } catch {
+    // Clean name taken by an active account — reactivate under the suffixed
+    // name; the drain + retire doesn't care what it's called.
+    const data = await qboRequest<{ Account: QBOAccount }>(realmId, accessToken, `/account?minorversion=70`, {
+      method: "POST", body: JSON.stringify({ ...base, Name: account.Name }),
+    });
+    return data.Account;
+  }
+}
+
+/**
  * Move an account under a new parent (or to top level with parentId null).
  * Sparse update; echoes Name/type so QBO doesn't 2010. Caller guarantees the
  * parent's AccountType matches (QBO 6000s otherwise).

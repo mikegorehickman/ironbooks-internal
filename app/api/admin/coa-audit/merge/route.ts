@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { getValidToken, fetchAllAccounts, inactivateAccount, QBOReauthRequiredError } from "@/lib/qbo";
-import { reclassAccountViaJournalEntry, repointItemsToAccount, detachSubAccounts } from "@/lib/coa-reclass-je";
+import { getValidToken, fetchAllAccounts, fetchAllAccountsIncludingInactive, inactivateAccount, QBOReauthRequiredError } from "@/lib/qbo";
+import { reclassAccountViaJournalEntry, repointItemsToAccount, detachSubAccounts, reactivateAccount } from "@/lib/coa-reclass-je";
 import { computeCoaDrift, type DriftMasterRow } from "@/lib/coa-drift";
 
 export const dynamic = "force-dynamic";
@@ -71,12 +71,21 @@ export async function POST(request: Request) {
 
   try {
     const accessToken = await getValidToken(clientLink.id, service as any, "ironbooks/api/admin/coa-audit/merge");
-    const accounts = await fetchAllAccounts(clientLink.qbo_realm_id, accessToken);
+    // Include INACTIVE accounts: a "(deleted)" account still carrying a P&L
+    // balance (retired-without-drain by an old cleanup — Despres, 2026-07-18)
+    // is a legitimate merge source. We reactivate it, drain it properly, and
+    // re-retire it. Targets must be active.
+    const accounts = await fetchAllAccountsIncludingInactive(clientLink.qbo_realm_id, accessToken);
     const byId = new Map(accounts.map((a) => [a.Id, a]));
-    const source: any = byId.get(sourceId);
+    let source: any = byId.get(sourceId);
     const target: any = byId.get(targetId);
     if (!source) return NextResponse.json({ error: "Source account no longer exists" }, { status: 400 });
-    if (!target) return NextResponse.json({ error: "Target account no longer exists" }, { status: 400 });
+    if (!target || target.Active === false) return NextResponse.json({ error: "Target account no longer exists (or is inactive)" }, { status: 400 });
+    let reactivated = false;
+    if (source.Active === false) {
+      source = await reactivateAccount({ realmId: clientLink.qbo_realm_id, accessToken, account: source });
+      reactivated = true;
+    }
 
     // Type-safety guard (defense in depth — the UI only offers compatible
     // targets): never merge a balance-sheet account (bank/card/AR/AP/asset/
@@ -184,6 +193,7 @@ export async function POST(request: Request) {
         client_name: clientLink.client_name,
         source: source.Name, target: target.Name,
         method: "je_reclass",
+        reactivated_deleted_source: reactivated,
         ytd_start: ytdStart, ytd_end: ytdEnd,
         amount_moved: je.moved, jes_posted: je.jesPosted,
         months_with_activity: je.monthsWithActivity, found_in_report: je.foundInReport,
@@ -196,7 +206,7 @@ export async function POST(request: Request) {
       ok: je.failures.length === 0,
       method: "je_reclass",
       source: source.Name, target: target.Name,
-      amountMoved: je.moved, jesPosted: je.jesPosted, itemsRepointed: repoint.repointed, childrenDetached,
+      amountMoved: je.moved, jesPosted: je.jesPosted, itemsRepointed: repoint.repointed, childrenDetached, reactivated,
       monthsWithActivity: je.monthsWithActivity, foundInReport: je.foundInReport,
       inactivated, failures: je.failures,
       linesMoved: je.jesPosted, unsupported: 0, // back-compat for the existing UI

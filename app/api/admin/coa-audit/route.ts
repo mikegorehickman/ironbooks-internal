@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { getValidToken, fetchAllAccounts, QBOReauthRequiredError } from "@/lib/qbo";
+import { getValidToken, fetchAllAccountsIncludingInactive, QBOReauthRequiredError } from "@/lib/qbo";
+import { fetchProfitAndLoss } from "@/lib/qbo-reports";
 import { computeCoaDrift, type DriftMasterRow } from "@/lib/coa-drift";
 import { suggestMergeTarget, type MergeTarget } from "@/lib/coa-merge-suggest";
 import { suggestMergesWithAI, type AiMergeSource, type AiMergeTarget } from "@/lib/coa-merge-ai";
@@ -67,8 +68,43 @@ export async function POST(request: Request) {
 
   try {
     const accessToken = await getValidToken(clientLink.id, service as any, "ironbooks/api/admin/coa-audit");
-    const accounts = await fetchAllAccounts(clientLink.qbo_realm_id, accessToken);
+    const accountsAll = await fetchAllAccountsIncludingInactive(clientLink.qbo_realm_id, accessToken);
+    const accounts = accountsAll.filter((a) => a.Active !== false);
     const drift = computeCoaDrift(accounts as any, masterRows as DriftMasterRow[]);
+
+    // "(deleted)" accounts still carrying YTD P&L activity — retired WITHOUT
+    // being drained (old-cleanup damage; Despres 2026-07-18: $26k Paint &
+    // Materials on a deleted account). Invisible to the active-only drift but
+    // very visible on statements. Surfaced as merge candidates — the merge
+    // endpoint reactivates, drains via JEs, and re-retires them properly.
+    const stripDel = (s: string) => String(s || "").replace(/\s*\(deleted\)\s*$/i, "").trim();
+    let deletedWithBalance: { id: string; name: string; type: string; amount: number }[] = [];
+    try {
+      const nowD = new Date();
+      const pl = await fetchProfitAndLoss(
+        clientLink.qbo_realm_id, accessToken,
+        `${nowD.getFullYear()}-01-01`, nowD.toISOString().slice(0, 10)
+      );
+      const byAcct = new Map<string, { id: string; name: string; type: string; amount: number }>();
+      for (const l of pl.lineItems) {
+        if (!/\(deleted\)/i.test(l.label) || Math.abs(l.amount) < 0.01) continue;
+        const acct = l.account_id
+          ? accountsAll.find((a) => String(a.Id) === String(l.account_id))
+          : accountsAll.find(
+              (a) => a.Active === false &&
+                normalizeAccountName(stripDel(a.Name)) === normalizeAccountName(stripDel(l.label))
+            );
+        if (!acct || acct.Active !== false) continue;
+        const prev = byAcct.get(acct.Id);
+        byAcct.set(acct.Id, {
+          id: acct.Id, name: acct.Name, type: acct.AccountType || "",
+          amount: (prev?.amount || 0) + l.amount,
+        });
+      }
+      deletedWithBalance = [...byAcct.values()];
+    } catch {
+      // Report fetch failed — skip the deleted sweep, never the scan.
+    }
 
     // Merge proposals: the client's own accounts that already match a master
     // name are the valid merge TARGETS; an AI engine decides which non-master
@@ -87,7 +123,10 @@ export async function POST(request: Request) {
       name: t.name,
       type: (accounts.find((a) => a.Id === t.id) as any)?.AccountType || masterTypeByNorm.get(normalizeAccountName(t.name)) || "",
     }));
-    const aiSources: AiMergeSource[] = drift.nonMaster.map((nm) => ({ id: nm.id, name: nm.name, type: nm.type }));
+    const aiSources: AiMergeSource[] = [
+      ...drift.nonMaster.map((nm) => ({ id: nm.id, name: nm.name, type: nm.type })),
+      ...deletedWithBalance.map((d) => ({ id: d.id, name: stripDel(d.name), type: d.type })),
+    ];
 
     let aiFailed = false;
     let suggestionById = new Map<string, { action: string; targetId: string | null; targetName: string | null; confidence: number; reason: string }>();
@@ -97,6 +136,32 @@ export async function POST(request: Request) {
     } catch (e) {
       aiFailed = true; // fall back to the deterministic heuristic below
     }
+
+    // Deleted-with-balance accounts get merge proposals too — same AI/heuristic
+    // targeting; flagged so the UI can badge them and show the stranded amount.
+    const deletedProposals = deletedWithBalance.map((d) => {
+      const ai = suggestionById.get(d.id);
+      const base = { sourceId: d.id, sourceName: d.name, sourceType: d.type, deleted: true, amount: d.amount };
+      if (ai) {
+        return {
+          ...base,
+          action: ai.action, targetId: ai.targetId, targetName: ai.targetName,
+          confident: ai.action === "merge" && ai.confidence >= 0.85,
+          reason: ai.reason || "retired without being drained — still carrying a balance",
+        };
+      }
+      const isCogs = /cost of goods/i.test(d.type);
+      const s = suggestMergeTarget(stripDel(d.name), isCogs, mergeTargets);
+      const mergeable = /income|expense|cost of goods|equity/i.test(d.type);
+      return {
+        ...base,
+        action: mergeable && s.confident ? "merge" : "leave",
+        targetId: mergeable && s.confident ? s.target?.id || null : null,
+        targetName: mergeable && s.confident ? s.target?.name || null : null,
+        confident: mergeable && s.confident,
+        reason: "deleted account still carrying a balance",
+      };
+    });
 
     const mergeProposals = drift.nonMaster.map((nm) => {
       const ai = suggestionById.get(nm.id);
@@ -128,7 +193,8 @@ export async function POST(request: Request) {
       jurisdiction,
       ...drift,
       mergeTargets,
-      mergeProposals,
+      mergeProposals: [...mergeProposals, ...deletedProposals],
+      deletedWithBalance: deletedWithBalance.length,
       aiSuggestions: !aiFailed,
     });
   } catch (err: any) {

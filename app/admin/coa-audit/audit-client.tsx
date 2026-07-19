@@ -23,6 +23,10 @@ interface MergeProposal {
   targetName: string | null;
   confident: boolean;
   reason?: string;
+  /** Inactive account still carrying a P&L balance (retired without drain) —
+   *  the merge reactivates, drains, and re-retires it. */
+  deleted?: boolean;
+  amount?: number;
 }
 
 interface Drift {
@@ -471,6 +475,11 @@ export function CoaAuditClient({ clients }: { clients: ClientRow[] }) {
                                           <div className="flex items-center gap-2 flex-wrap">
                                             <span className="font-medium text-navy">{p.sourceName}</span>
                                             <span className="text-[10px] text-ink-light">[{p.sourceType}]</span>
+                                            {p.deleted && (
+                                              <span className="text-[10px] font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded" title="Inactive account still carrying a balance — merging reactivates, drains, and re-retires it">
+                                                deleted · ${Math.round(Math.abs(p.amount || 0)).toLocaleString()} stranded
+                                              </span>
+                                            )}
                                             <span className="text-ink-light">→</span>
                                             <select
                                               value={sel}
