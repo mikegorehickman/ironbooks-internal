@@ -4,9 +4,8 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { sweepStaleJobs } from "@/lib/stale-jobs";
 import { Plus } from "lucide-react";
 import { ClientsList } from "./clients-list";
-import { CompletedAccounts } from "./completed-accounts";
 import { InReviewAccounts } from "./in-review-accounts";
-import { ManagerDashboard, type ManagerRow } from "./manager-dashboard";
+import { type ManagerRow } from "./manager-dashboard";
 import { StripeInviteSuggestions, type StripeInviteSuggestion } from "./stripe-invite-suggestions";
 import { deriveLifecycleStatus, macroStageOfStatus } from "@/lib/client-lifecycle";
 import { previousMonthPeriod } from "@/lib/monthly-rec";
@@ -626,30 +625,30 @@ export default async function ClientsPage({
         {canEdit && stripeInviteSuggestions.length > 0 && (
           <StripeInviteSuggestions suggestions={stripeInviteSuggestions} />
         )}
-        <ManagerDashboard
-          rows={managerRows}
-          bookkeepers={(bookkeepersRes.data || []).map((b: any) => ({ id: b.id, full_name: b.full_name }))}
-          canEdit={!!canEdit}
-        />
-        <ClientsList
-          initialClients={activeClients.map((c: any) => {
-            const lc = lifecycleById.get(c.id) ?? null;
-            return { ...c, lifecycle: lc, macroStage: lc ? macroStageOfStatus(lc) : null };
-          }) as any}
-          initialStage={initialStage}
-          bookkeepers={bookkeepersRes.data || []}
-          currentUserId={user?.id || ""}
-          canEdit={!!canEdit}
-        />
+        {/* Re-IA: ONE clients table across all lifecycle stages (stage pills).
+            The old ManagerDashboard overview + CompletedAccounts list are folded
+            in here — reassign lives inline, stage transitions (promote /
+            complete / reopen) live on the client workspace. The senior "needs
+            approval" strip stays as a focused action queue (Oversight will own
+            it later). */}
         {inReviewClients.length > 0 && (
           <InReviewAccounts
             clients={inReviewClients}
             canApprove={!!canEdit}
           />
         )}
-        {completedClients.length > 0 && (
-          <CompletedAccounts clients={completedClients} canEdit={!!canEdit} />
-        )}
+        <ClientsList
+          initialClients={enrichedClients
+            .filter((c: any) => c.id)
+            .map((c: any) => {
+              const lc = lifecycleById.get(c.id) ?? null;
+              return { ...c, lifecycle: lc, macroStage: lc ? macroStageOfStatus(lc) : null };
+            }) as any}
+          initialStage={initialStage}
+          bookkeepers={bookkeepersRes.data || []}
+          currentUserId={user?.id || ""}
+          canEdit={!!canEdit}
+        />
       </div>
     </AppShell>
   );
