@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, fetchAllAccountsIncludingInactive, qboErrorResponse } from "@/lib/qbo";
 import { fetchBalancesAsOf } from "@/lib/qbo-balance-sheet";
+import { fetchProfitAndLoss } from "@/lib/qbo-reports";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -55,11 +56,27 @@ export async function POST(request: Request) {
   try {
     const realm = client.qbo_realm_id as string;
     const token = await getValidToken(clientLinkId, service as any);
-    const [accounts, balances] = await Promise.all([
+    // BS balances (by account id) for balance-sheet accounts; P&L balances (by
+    // account NAME) for income/COGS/expense accounts — the Balance Sheet report
+    // omits P&L accounts, so the wage/COGS twins would otherwise read $0. YTD
+    // covers the whole current year so a just-drained twin still shows its total.
+    const year = new Date().getFullYear();
+    const [accounts, balances, pl] = await Promise.all([
       fetchAllAccountsIncludingInactive(realm, token),
       fetchBalancesAsOf(realm, token, new Date().toISOString().slice(0, 10)).catch(() => new Map<string, number>()),
+      fetchProfitAndLoss(realm, token, `${year}-01-01`, new Date().toISOString().slice(0, 10)).catch(() => null),
     ]);
-    const bal = (id: string) => Math.round((balances.get(String(id)) ?? 0) * 100) / 100;
+    const plByName = new Map<string, number>();
+    for (const li of (pl?.lineItems as any[]) || []) {
+      const k = String(li.label || "").trim().toLowerCase();
+      plByName.set(k, Math.round(((plByName.get(k) || 0) + (Number(li.amount) || 0)) * 100) / 100);
+    }
+    // Prefer the P&L balance (by name) for P&L accounts, else the BS balance.
+    const balOf = (acct: any) => {
+      const byName = plByName.get(String(acct?.Name || "").trim().toLowerCase());
+      if (byName != null && Math.abs(byName) > 0.005) return byName;
+      return Math.round((balances.get(String(acct?.Id)) ?? 0) * 100) / 100;
+    };
 
     // ── 1. Re-type reversals — pair "(pre-retype)" originals with their twins ──
     const preRetype = accounts.filter((a: any) => PRE_RETYPE_RE.test(String(a.Name || "")));
@@ -78,10 +95,10 @@ export async function POST(request: Request) {
         created_twin: twin ? twin.Name : null,
         created_twin_id: twin ? String(twin.Id) : null,
         created_twin_type: twin ? twin.AccountType : null,
-        balance_on_twin_to_move_back: twin ? bal(twin.Id) : 0,
+        balance_on_twin_to_move_back: twin ? balOf(twin) : 0,
         steps: twin
           ? [
-              `Move ${twin.AccountType} balance ($${Math.abs(bal(twin.Id)).toLocaleString()}) from "${twin.Name}" back to "${base}"`,
+              `Move ${twin.AccountType} balance ($${Math.abs(balOf(twin)).toLocaleString()}) from "${twin.Name}" back to "${base}"`,
               `Reactivate "${base}" (drop the "(pre-retype)" suffix, restore type ${orig.AccountType})`,
               `Inactivate the created twin "${twin.Name}"`,
             ]
