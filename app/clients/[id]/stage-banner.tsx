@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, ListChecks, FileText, CheckCircle2, Building2 } from "lucide-react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowRight, ListChecks, FileText, CheckCircle2, Building2, XCircle, Loader2 } from "lucide-react";
 import {
   MACRO_STAGE_META,
   LIFECYCLE_META,
@@ -49,14 +51,50 @@ function statusHint(status: LifecycleStatus | null | undefined): string | null {
 export function StageBanner({
   stage,
   status,
+  clientLinkId,
+  canReject = false,
   onGoToTab,
 }: {
   stage: MacroStage;
   status?: LifecycleStatus | null;
+  clientLinkId: string;
+  /** Senior (admin/lead) — may Manager-Reject a cleanup that's in review. */
+  canReject?: boolean;
   onGoToTab: (tab: TabTarget) => void;
 }) {
+  const router = useRouter();
   const meta = MACRO_STAGE_META[stage];
   const hint = statusHint(status) || meta.description;
+  const [rejecting, setRejecting] = useState(false);
+
+  // Manager Reject (profile) — bounce a cleanup that's in review back to the
+  // bookkeeper (Failed Review) with a required note. Same path as the review
+  // modal; senior-only, shown only while ready_for_review.
+  const showReject = canReject && stage === "cleanup" && status === "ready_for_review";
+  async function reject() {
+    const note = window.prompt(
+      "Reject this cleanup — what does the bookkeeper need to fix?\n(They'll see this note on their Today.)"
+    );
+    if (note === null) return;
+    if (!note.trim()) {
+      alert("A note is required to reject.");
+      return;
+    }
+    setRejecting(true);
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/reject-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: note.trim() }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Couldn't reject");
+      router.refresh();
+    } catch (e: any) {
+      alert(e?.message || "Couldn't reject");
+      setRejecting(false);
+    }
+  }
 
   let title: string;
   let primary: Cta;
@@ -120,6 +158,18 @@ export function StageBanner({
           <p className="text-xs text-ink-slate mt-0.5 max-w-2xl">{hint}</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {showReject && (
+            <button
+              type="button"
+              onClick={reject}
+              disabled={rejecting}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-60"
+              title="Manager Reject — bounce back to the bookkeeper (Failed Review) with a note; no client email"
+            >
+              {rejecting ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
+              Reject
+            </button>
+          )}
           {secondary && renderCta(secondary, false)}
           {renderCta(primary, true)}
         </div>

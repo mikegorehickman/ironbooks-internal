@@ -241,6 +241,8 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
         <StageBanner
           stage={macroStage}
           status={lifecycleStatus}
+          clientLinkId={clientLink.id}
+          canReject={canImpersonate}
           onGoToTab={(tab) => setActiveTab(tab as TabId)}
         />
       )}
