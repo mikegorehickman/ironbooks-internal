@@ -5,6 +5,8 @@ import { CommsTracker } from "./comms-tracker";
 import { PyTaxesWidget } from "./py-taxes-widget";
 import { LIFECYCLE_META, type LifecycleStatus } from "@/lib/client-lifecycle";
 import { LifecyclePill } from "@/components/LifecyclePill";
+import { ClientBadges } from "@/components/ClientBadges";
+import type { AttentionState } from "@/lib/client-attention-state";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -148,6 +150,16 @@ export function ClientsList({
   const [jurisdictionFilter, setJurisdictionFilter] = useState<string>("all");
   const [view, setView] = useState<"grid" | "table">("table");
   const [deleteTarget, setDeleteTarget] = useState<ClientRow | null>(null);
+  // Attention feed (escalations / billing / BS owed / disconnected / stuck job)
+  // — the fleet-scan + risk signals surfaced as row badges, replacing the
+  // separate ManagerDashboard that used to carry them.
+  const [attention, setAttention] = useState<Record<string, AttentionState>>({});
+  useEffect(() => {
+    fetch("/api/attention")
+      .then((r) => (r.ok ? r.json() : { clients: {} }))
+      .then((j) => setAttention(j.clients || {}))
+      .catch(() => {});
+  }, []);
 
   // Filters
   const filtered = useMemo(() => {
@@ -448,6 +460,7 @@ export function ClientsList({
                 client={client}
                 bookkeepers={bookkeepers}
                 canEdit={canEdit}
+                attention={attention[client.id] ?? null}
                 onUpdate={(updates) => updateClient(client.id, updates)}
                 onDelete={canEdit ? () => setDeleteTarget(client) : undefined}
               />
@@ -465,6 +478,7 @@ export function ClientsList({
                 client={client}
                 bookkeepers={bookkeepers}
                 canEdit={canEdit}
+                attention={attention[client.id] ?? null}
                 onUpdate={(updates) => updateClient(client.id, updates)}
                 onDelete={canEdit ? () => setDeleteTarget(client) : undefined}
               />
@@ -551,12 +565,14 @@ function ClientRow({
   client,
   bookkeepers,
   canEdit,
+  attention,
   onUpdate,
   onDelete,
 }: {
   client: ClientRow;
   bookkeepers: Bookkeeper[];
   canEdit: boolean;
+  attention?: AttentionState | null;
   onUpdate: (updates: Partial<ClientRow>) => void;
   onDelete?: () => void;
 }) {
@@ -685,6 +701,11 @@ function ClientRow({
               </span>
             )}
           </div>
+          {attention && (
+            <div className="mt-1">
+              <ClientBadges attention={attention} stage={client.macroStage || "dashboard"} max={3} />
+            </div>
+          )}
         </div>
       </Link>
 
@@ -1065,12 +1086,14 @@ function ClientCard({
   canEdit,
   onUpdate,
   onDelete,
+  attention,
 }: {
   client: ClientRow;
   bookkeepers: Bookkeeper[];
   canEdit: boolean;
   onUpdate: (updates: Partial<ClientRow>) => void;
   onDelete?: () => void;
+  attention?: AttentionState | null;
 }) {
   const statusCfg = STATUS_CONFIG[client.status];
   const StatusIcon = statusCfg.icon;
@@ -1095,6 +1118,11 @@ function ClientCard({
               <MapPin size={10} />
               {client.jurisdiction}{client.state_province ? ` · ${client.state_province}` : ""}
             </div>
+            {attention && (
+              <div className="mt-1">
+                <ClientBadges attention={attention} stage={client.macroStage || "dashboard"} max={3} />
+              </div>
+            )}
           </div>
         </Link>
         <div className="flex items-center gap-1.5 flex-shrink-0">
