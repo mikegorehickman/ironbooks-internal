@@ -19,38 +19,29 @@ import { StripeConnectModal } from "./StripeConnectModal";
  *  UF Audit, BS Wizard, GST/HST Audit) deliberately have NO nav entries:
  *  you start them from the client — cleanup-board card steps, the /clients
  *  row quick-actions, or the profile Cleanup tab — already scoped. */
+// Re-IA nav shrink — four spines: Home / Clients / Oversight / Admin. Home
+// absorbs Today + Inbox + Tasks; Oversight absorbs Approvals + Advisor + Fleet
+// Health. Those six routes still work (the hubs render them), they're just off
+// the nav now. Pipelines + Support stay in the daily set; the rest move to the
+// collapsible Tools drawer.
 const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newTab?: boolean }[] = [
-  // Home unifies Today + Inbox + Tasks into one hub (re-IA). The individual
-  // routes still work and stay listed until the nav shrink lands.
   { href: "/home", label: "Home", icon: HomeIcon },
-  { href: "/today", label: "Today", icon: Sun },
-  { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/support", label: "Support", icon: LifeBuoy, newTab: true },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
-  // Onboarding + Cleanup + Production kanbans live on ONE screen now — /board
-  // with a pipeline toggle. The old routes still work for deep links.
-  { href: "/board", label: "Pipelines", icon: ClipboardCheck },
   { href: "/clients", label: "Clients", icon: Users },
+  { href: "/board", label: "Pipelines", icon: ClipboardCheck },
+  { href: "/support", label: "Support", icon: LifeBuoy, newTab: true },
+];
+
+/** Oversight — the single senior hub (Approvals + Advisor + Fleet Health). */
+const productionNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
+  { href: "/oversight", label: "Oversight", icon: Eye, senior: true },
+];
+
+/** Secondary fleet-wide views — collapsed under Tools. Anything client-scoped
+ *  starts from the client workspace. */
+const toolsNav = [
   { href: "/coa-audit", label: "COA Audit", icon: ListChecks },
   { href: "/history", label: "History", icon: Clock },
-];
-
-/** Production — the board and the senior approval queue (statements,
- *  files, escalations, flagged transactions — one queue). The daily-recon
- *  engine controls live on the /admin hub. */
-const productionNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
-  // Oversight unifies Approvals + Advisor + Fleet Health into one senior hub
-  // (re-IA). Individual routes stay listed until the nav shrink lands.
-  { href: "/oversight", label: "Oversight", icon: Eye, senior: true },
-  // Production board folded into /board (Pipelines toggle) with the other kanbans.
-  { href: "/approvals", label: "Approvals", icon: BadgeCheck, senior: true },
-];
-
-/** Fleet-wide views only — anything client-scoped starts from the client. */
-const toolsNav = [
-  { href: "/fleet", label: "Fleet Health", icon: Gauge },
   { href: "/tax-exports", label: "Tax Exports", icon: Landmark },
-  { href: "/advisor", label: "Advisor", icon: HeartPulse },
   { href: "/templates", label: "Master COA", icon: BookOpen },
 ];
 
@@ -223,22 +214,26 @@ export function Sidebar() {
               key={item.href}
               item={item}
               pathname={pathname}
-              badgeCount={item.href === "/today" ? unreadComms : undefined}
+              badgeCount={item.href === "/home" ? unreadComms : undefined}
               badgeTone="red"
             />
           ))}
 
-        <NavSection label="Production" className="mt-3" />
-        {productionNav
-          .filter((item) => !item.senior || isSenior)
-          .map((item) => (
-            <NavItem
-              key={item.href}
-              item={item}
-              pathname={pathname}
-              badgeCount={item.href === "/approvals" ? flaggedCount : undefined}
-            />
-          ))}
+        {isSenior && (
+          <>
+            <NavSection label="Oversight" className="mt-3" />
+            {productionNav
+              .filter((item) => !item.senior || isSenior)
+              .map((item) => (
+                <NavItem
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  badgeCount={item.href === "/oversight" ? flaggedCount : undefined}
+                />
+              ))}
+          </>
+        )}
 
         {isSenior && (
           <>
