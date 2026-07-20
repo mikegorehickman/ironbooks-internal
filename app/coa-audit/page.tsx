@@ -107,7 +107,7 @@ export default async function CoaAuditPage() {
         title="COA Audit"
         subtitle="Where each client's QuickBooks chart stands against the master COA — and where they sit in cleanup"
       />
-      <div className="px-8 py-6 max-w-6xl">
+      <div className="px-8 py-6">
         <CoaAuditClient
           clients={clientList.map((c) => ({ id: c.id, client_name: c.client_name, jurisdiction: c.jurisdiction ?? null }))}
           initialScans={initialScans}
