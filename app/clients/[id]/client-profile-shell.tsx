@@ -325,6 +325,7 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
       {drill && (
         <DrillDrawer
           clientLinkId={clientLink.id}
+          clientName={clientLink.client_name || "Client"}
           accountId={drill.accountId}
           accountName={drill.accountName}
           kind={drill.kind}
@@ -2067,6 +2068,7 @@ interface DrillTransaction {
 
 function DrillDrawer({
   clientLinkId,
+  clientName,
   accountId,
   accountName,
   kind,
@@ -2075,6 +2077,7 @@ function DrillDrawer({
   onClose,
 }: {
   clientLinkId: string;
+  clientName: string;
   accountId: string;
   accountName: string;
   kind: "pl" | "bs";
@@ -2082,6 +2085,9 @@ function DrillDrawer({
   end: string;
   onClose: () => void;
 }) {
+  // Ask-client email modal (draft → preview/edit → send via Resend) for the
+  // selected transactions.
+  const [askOpen, setAskOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<{
@@ -2267,18 +2273,46 @@ function DrillDrawer({
         </div>
 
         {data && selected.size > 0 && (
-          <BulkReclassBar
+          <>
+            <div className="border-t border-gray-200 px-5 pt-3 flex items-center justify-between gap-2">
+              <span className="text-xs text-ink-slate">
+                {selected.size} selected — move them, or ask the client what they were for.
+              </span>
+              <button
+                onClick={() => setAskOpen(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-teal border border-teal/40 rounded-lg px-3 py-1.5 hover:bg-teal/5"
+              >
+                <Mail size={13} /> Ask client
+              </button>
+            </div>
+            <BulkReclassBar
+              clientLinkId={clientLinkId}
+              sourceAccountId={accountId}
+              sourceAccountName={accountName}
+              selectedTxns={data.transactions
+                .filter((t) => selected.has(txnKey(t)))
+                .map((t) => ({ id: t.id, type: t.type }))}
+              selectedCount={selected.size}
+              onApplied={() => {
+                setSelected(new Set());
+                setReloadKey((k) => k + 1);
+              }}
+            />
+          </>
+        )}
+
+        {askOpen && data && (
+          <AskClientTxnModal
             clientLinkId={clientLinkId}
-            sourceAccountId={accountId}
-            sourceAccountName={accountName}
-            selectedTxns={data.transactions
+            clientName={clientName}
+            accountName={accountName}
+            periodLabel={`${start} → ${end}`}
+            transactions={data.transactions
               .filter((t) => selected.has(txnKey(t)))
-              .map((t) => ({ id: t.id, type: t.type }))}
-            selectedCount={selected.size}
-            onApplied={() => {
-              setSelected(new Set());
-              setReloadKey((k) => k + 1);
-            }}
+              // de-dup split lines to one row per transaction
+              .filter((t, i, arr) => arr.findIndex((x) => txnKey(x) === txnKey(t)) === i)
+              .map((t) => ({ date: t.date, name: t.name, memo: t.memo, amount: t.amount }))}
+            onClose={() => setAskOpen(false)}
           />
         )}
 
@@ -2299,6 +2333,169 @@ function DrillDrawer({
         )}
       </div>
     </>
+  );
+}
+
+// ─── ASK CLIENT (email about selected transactions) ─────────────────────
+// Draft → preview/edit → send via Resend. Composed from the transactions the
+// bookkeeper selected in the drill drawer; server ships it tracked (message id
+// + client_email_log row) so the "sent" banner is real, not hopeful.
+function AskClientTxnModal({
+  clientLinkId,
+  clientName,
+  accountName,
+  periodLabel,
+  transactions,
+  onClose,
+}: {
+  clientLinkId: string;
+  clientName: string;
+  accountName: string;
+  periodLabel: string;
+  transactions: Array<{ date: string; name: string | null; memo: string; amount: number }>;
+  onClose: () => void;
+}) {
+  const firstName = (clientName || "there").split(/[ ,]/)[0] || "there";
+  const money = (n: number) =>
+    `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const esc = (s: string) =>
+    (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  const [subject, setSubject] = useState(
+    `Quick question on ${transactions.length} transaction${transactions.length === 1 ? "" : "s"} — ${clientName}`
+  );
+  const [intro, setIntro] = useState(
+    `Hi ${firstName},\n\nWhile cleaning up your books (${periodLabel}) we came across ${transactions.length} transaction${transactions.length === 1 ? "" : "s"} under "${accountName}" that we'd like to confirm before finalizing. Could you tell us what ${transactions.length === 1 ? "it was" : "each was"} for? Just fill in the last column or reply with a quick note.`
+  );
+  const [outro, setOutro] = useState(`Thanks so much,\nIronbooks`);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<{ ok: true; recipients: string[]; messageId?: string | null } | { ok: false; message: string } | null>(null);
+
+  const BRAND = { teal: "#2D7A75", tealDark: "#1F5D58", navy: "#0F1F2E", slate: "#475569", border: "#CBD5E1", white: "#FFFFFF", tealLighter: "#F4F9F8" };
+  const rowsHtml = transactions
+    .map((t, i) => {
+      const bg = i % 2 === 0 ? BRAND.white : BRAND.tealLighter;
+      return `<tr style="background:${bg};">
+        <td style="border:1px solid ${BRAND.border};padding:8px 10px;color:${BRAND.slate};white-space:nowrap;">${esc(t.date)}</td>
+        <td style="border:1px solid ${BRAND.border};padding:8px 10px;color:${BRAND.navy};">${esc(t.name || t.memo || "—")}</td>
+        <td style="border:1px solid ${BRAND.border};padding:8px 10px;text-align:right;color:${BRAND.navy};font-weight:600;">${money(t.amount)}</td>
+        <td style="border:1px solid ${BRAND.border};padding:8px 10px;background:${BRAND.white};">&nbsp;</td>
+      </tr>`;
+    })
+    .join("");
+  const introHtml = intro.split("\n").map((l) => esc(l)).join("<br>");
+  const outroHtml = outro.split("\n").map((l) => esc(l)).join("<br>");
+  const html = `<div style="font-family:'Figtree',Helvetica,Arial,sans-serif;color:${BRAND.navy};max-width:640px;margin:0 auto;">
+  <div style="background:${BRAND.navy};color:${BRAND.white};padding:16px 20px;border-radius:10px 10px 0 0;font-size:19px;font-weight:700;">Ironbooks</div>
+  <div style="border:1px solid ${BRAND.border};border-top:none;padding:22px 20px;border-radius:0 0 10px 10px;">
+    <p style="line-height:1.55;margin:0 0 14px 0;">${introHtml}</p>
+    <table style="border-collapse:collapse;width:100%;font-size:13px;margin:6px 0 16px 0;border:1px solid ${BRAND.border};">
+      <thead><tr style="background:${BRAND.teal};">
+        <th style="border:1px solid ${BRAND.tealDark};padding:9px 10px;text-align:left;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Date</th>
+        <th style="border:1px solid ${BRAND.tealDark};padding:9px 10px;text-align:left;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Description</th>
+        <th style="border:1px solid ${BRAND.tealDark};padding:9px 10px;text-align:right;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Amount</th>
+        <th style="border:1px solid ${BRAND.tealDark};padding:9px 10px;text-align:left;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">What was this for?</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <p style="line-height:1.55;margin:0;">${outroHtml}</p>
+  </div>
+</div>`;
+  const text = `${intro}\n\n${transactions.map((t) => `• ${t.date} — ${t.name || t.memo || "—"} — ${money(t.amount)}  → what was this for? ______`).join("\n")}\n\n${outro}`;
+
+  async function send() {
+    if (sending) return;
+    setSending(true);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/ask-client-transactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject, html, text, account_name: accountName, transaction_count: transactions.length }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Couldn't send the email");
+      setResult({ ok: true, recipients: json.recipients || [], messageId: json.message_id || null });
+    } catch (e: any) {
+      setResult({ ok: false, message: e?.message || "Couldn't send the email" });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-200 flex items-start justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-navy flex items-center gap-2"><Mail size={18} className="text-teal" /> Ask {clientName}</h3>
+            <p className="text-xs text-ink-slate mt-1">{transactions.length} transaction{transactions.length === 1 ? "" : "s"} from “{accountName}”. Edit below, preview, then send via Resend.</p>
+          </div>
+          <button onClick={onClose} className="text-ink-slate hover:text-navy"><XIcon size={20} /></button>
+        </div>
+
+        <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">Subject</label>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none text-sm text-navy" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">Intro</label>
+            <textarea value={intro} onChange={(e) => setIntro(e.target.value)} rows={4} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none text-sm text-navy leading-relaxed" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">Transactions (preview)</label>
+            <div className="rounded-lg border border-gray-200 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="bg-teal text-white">
+                  <th className="text-left px-3 py-2 font-semibold">Date</th>
+                  <th className="text-left px-3 py-2 font-semibold">Description</th>
+                  <th className="text-right px-3 py-2 font-semibold">Amount</th>
+                  <th className="text-left px-3 py-2 font-semibold">What was this for?</th>
+                </tr></thead>
+                <tbody>
+                  {transactions.map((t, i) => (
+                    <tr key={i} className="border-b border-gray-50">
+                      <td className="px-3 py-1.5 text-ink-slate whitespace-nowrap">{t.date}</td>
+                      <td className="px-3 py-1.5 text-navy">{t.name || t.memo || "—"}</td>
+                      <td className="px-3 py-1.5 text-right font-mono text-navy">{money(t.amount)}</td>
+                      <td className="px-3 py-1.5 text-ink-light italic">client fills in</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">Closing</label>
+            <textarea value={outro} onChange={(e) => setOutro(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none text-sm text-navy leading-relaxed" />
+          </div>
+          {result?.ok && (
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800 flex items-start gap-2">
+              <CheckCircle2 size={15} className="mt-0.5 flex-shrink-0" />
+              <span><strong>Sent via Resend</strong> to <strong>{result.recipients.join(", ")}</strong>.
+                <span className="block text-xs text-green-700 mt-0.5">Logged to this client&apos;s email history{result.messageId ? ` · Resend id ${result.messageId.slice(0, 12)}…` : ""}.</span>
+              </span>
+            </div>
+          )}
+          {result && !result.ok && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{result.message}</div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-3">
+          <button onClick={onClose} className="text-sm font-semibold text-ink-slate hover:text-navy">Close</button>
+          <button
+            onClick={send}
+            disabled={sending || (result?.ok ?? false)}
+            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg disabled:opacity-60"
+          >
+            {sending ? <Loader2 size={14} className="animate-spin" /> : result?.ok ? <CheckCircle2 size={14} /> : <Mail size={14} />}
+            {sending ? "Sending…" : result?.ok ? "Sent" : "Send via Resend"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
