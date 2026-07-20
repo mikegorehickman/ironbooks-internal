@@ -215,7 +215,7 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
         <div className="flex items-center gap-2">
           <Link
             href={`/jobs/new?client=${clientLink.id}&redo=1`}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal text-white text-xs font-semibold hover:bg-teal-dark"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:text-navy hover:border-gray-300"
             title="Re-run COA cleanup — applies the latest master chart and skips the redo confirmation"
           >
             <RefreshCw size={13} />
@@ -226,13 +226,6 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
             initialUrgent={!!(clientLink as any).urgent_flag}
             initialNote={(clientLink as any).urgent_flag_note || null}
           />
-          <Link
-            href={`/clients/${clientLink.id}/messages`}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:text-navy hover:border-gray-300"
-          >
-            <Mail size={13} />
-            Messages
-          </Link>
           {canImpersonate && <ViewAsClientButton clientLinkId={clientLink.id} />}
           <ResendLoginLink clientLinkId={clientLink.id} />
           {canImpersonate && (
@@ -2639,7 +2632,7 @@ function ViewAsClientButton({ clientLinkId }: { clientLinkId: string }) {
     <button
       onClick={handleViewAs}
       disabled={loading}
-      className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal hover:text-teal-dark border border-teal/40 hover:border-teal bg-white px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal hover:text-teal-dark border border-gray-200 hover:border-teal bg-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
       title="Open this client's portal in a new tab as if you were them — for QA, screenshots, or debugging what they see"
     >
       {loading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}

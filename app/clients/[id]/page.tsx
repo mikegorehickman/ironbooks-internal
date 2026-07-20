@@ -384,15 +384,21 @@ export default async function ClientProfilePage({
                 <FileText size={13} /> Export Tax Docs
               </Link>
             )}
-            {macroStage && (
-              <span
-                className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${MACRO_STAGE_META[macroStage].tone}`}
-                title={MACRO_STAGE_META[macroStage].description}
-              >
-                {MACRO_STAGE_META[macroStage].label}
-              </span>
+            {/* One stage indicator only — the detailed LifecyclePill (e.g. "In
+                production") already implies the macro stage, so the separate
+                macro pill ("Production") next to it was redundant. */}
+            {lifecycle ? (
+              <LifecyclePill status={lifecycle} size="md" />
+            ) : (
+              macroStage && (
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${MACRO_STAGE_META[macroStage].tone}`}
+                  title={MACRO_STAGE_META[macroStage].description}
+                >
+                  {MACRO_STAGE_META[macroStage].label}
+                </span>
+              )
             )}
-            {lifecycle && <LifecyclePill status={lifecycle} size="md" />}
             <ClientSwitcher
               currentId={clientLink.id}
               currentName={clientLink.client_name || "Client"}
