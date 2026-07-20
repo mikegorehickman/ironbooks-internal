@@ -244,10 +244,16 @@ async function undoOneOperation(ctx: {
   const realm = client.qbo_realm_id as string;
   const token = await getValidToken(clientLinkId, service as any);
   const accounts = await fetchAllAccountsIncludingInactive(realm, token);
-  // Exact-name resolution; if a name exists both active + inactive, the source
-  // is usually the inactive one (it was retired) and the target the active one.
+  // Exact-name resolution — but QBO RENAMES an account to "<name> (deleted)"
+  // when it's inactivated, so retired merge sources only match with that
+  // suffix stripped (the first live dry-run failed exactly here: "Bookkeeping"
+  // not found because QBO holds it as "Bookkeeping (deleted)"). If a name
+  // exists both active + inactive, the source is usually the inactive one
+  // (it was retired) and the target the active one.
+  const stripDeleted = (n: string) => n.replace(/\s*\(deleted\)\s*$/i, "").trim();
   const findExact = (name: string, preferInactive: boolean): QBOAccount | null => {
-    const matches = accounts.filter((a) => String(a.Name).trim() === name);
+    const want = stripDeleted(name);
+    const matches = accounts.filter((a) => stripDeleted(String(a.Name)) === want);
     if (matches.length === 0) return null;
     const sorted = [...matches].sort((a, b) => {
       const ai = a.Active === false ? 0 : 1;
@@ -339,7 +345,9 @@ async function undoOneOperation(ctx: {
     manual: ops.filter((o) => o.kind === "manual").length,
     amount_moved_back: r2(ops.filter((o) => o.kind !== "manual").reduce((s, o) => s + Math.abs(o.amount || 0), 0)),
   };
-  const cleanName = String(source.Name).replace(PRE_RETYPE_RE, "").trim();
+  // Strip BOTH suffixes QBO/the engine may have stacked on the original:
+  // "Payroll Expenses (pre-retype 39) (deleted)" → "Payroll Expenses".
+  const cleanName = stripDeleted(String(source.Name)).replace(PRE_RETYPE_RE, "").trim();
   const postPlanned = isRetype
     ? [`inactivate twin "${target.Name}"`, `rename "${source.Name}" → "${cleanName}"`]
     : source.Active === false
