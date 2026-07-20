@@ -42,6 +42,52 @@ export interface LifecycleInput {
   month_waiting_client?: boolean | null;  // current run board_status = waiting_client
 }
 
+/**
+ * The three macro-stages that form the SNAP lifecycle spine. Every client is at
+ * exactly one. This is the single source of truth the client workspace, the
+ * Clients table, and Oversight all key off — the detailed LifecycleStatus above
+ * is the sub-status WITHIN a stage.
+ *
+ *   onboarding → cleanup → production
+ */
+export type MacroStage = "onboarding" | "cleanup" | "production";
+
+export const MACRO_STAGE_META: Record<MacroStage, { label: string; tone: string; order: number; description: string }> = {
+  onboarding: { label: "Onboarding", tone: "bg-slate-100 text-slate-700", order: 0, description: "Connect QuickBooks, capture the foundation, request documents." },
+  cleanup:    { label: "Cleanup",    tone: "bg-blue-50 text-blue-700",    order: 1, description: "Bring the books to correct before going live." },
+  production: { label: "Production", tone: "bg-teal/10 text-teal",        order: 2, description: "Live — daily reconciliation and monthly close." },
+};
+
+/**
+ * Macro-stage from the raw signals — mirrors the top-level branching of
+ * deriveLifecycleStatus so status and stage never disagree. Prefer this when you
+ * have the LifecycleInput (it resolves the review/waiting states that are
+ * stage-ambiguous by looking at daily_recon + cleanup_completed).
+ */
+export function deriveMacroStage(c: LifecycleInput): MacroStage {
+  if (c.daily_recon_enabled && c.cleanup_completed_at) return "production";
+  if (c.cleanup_completed_at) return "cleanup"; // signed off, awaiting promotion
+  // Onboarding = genuinely pre-work: not connected AND no cleanup activity yet.
+  // The moment they connect or any COA/reclass work exists, they're in Cleanup.
+  const anyCleanupWork =
+    !!c.has_active_coa || !!c.has_active_reclass || !!c.has_complete_coa ||
+    !!c.has_complete_reclass || c.cleanup_review_state === "in_review";
+  if (c.status === "onboarding" && !c.qbo_connected && !anyCleanupWork) return "onboarding";
+  return "cleanup";
+}
+
+/**
+ * Best-effort macro-stage from a detailed status alone (for callers that only
+ * carry the string). ready_for_review / waiting_on_client are stage-ambiguous
+ * (they occur in both cleanup and production) → default to cleanup; use
+ * deriveMacroStage(input) when the flags are available.
+ */
+export function macroStageOfStatus(s: LifecycleStatus): MacroStage {
+  if (s === "onboarding") return "onboarding";
+  if (s === "in_production" || s === "done") return "production";
+  return "cleanup";
+}
+
 export const LIFECYCLE_META: Record<LifecycleStatus, { label: string; tone: string; order: number; group: "Pipeline" | "Review" | "Live" }> = {
   onboarding:        { label: "Onboarding",        tone: "bg-slate-100 text-slate-600",     order: 0,  group: "Pipeline" },
   needs_cleanup:     { label: "Needs cleanup",     tone: "bg-slate-100 text-slate-700",     order: 1,  group: "Pipeline" },
@@ -99,18 +145,25 @@ export const ACTIVE_JOB_STATUSES = ["pending", "executing", "in_review", "failed
  * Pass the already-loaded client_links row; only job/month/message signals are
  * fetched here.
  */
-export async function deriveLifecycleForClient(
+type ClientLifecycleRow = {
+  id: string;
+  status?: string | null;
+  qbo_realm_id?: string | null;
+  cleanup_completed_at?: string | null;
+  cleanup_review_state?: string | null;
+  daily_recon_enabled?: boolean | null;
+  bs_enabled?: boolean | null;
+};
+
+/**
+ * Gather the live signals for one client into a LifecycleInput. Both the status
+ * and the macro-stage derive from this single object, so they can never
+ * disagree. Best-effort — each query is guarded.
+ */
+export async function gatherLifecycleInput(
   service: SupabaseClient,
-  client: {
-    id: string;
-    status?: string | null;
-    qbo_realm_id?: string | null;
-    cleanup_completed_at?: string | null;
-    cleanup_review_state?: string | null;
-    daily_recon_enabled?: boolean | null;
-    bs_enabled?: boolean | null;
-  }
-): Promise<LifecycleStatus> {
+  client: ClientLifecycleRow
+): Promise<LifecycleInput> {
   const id = client.id;
   const jobRows = async (table: string): Promise<{ status: string }[]> => {
     try {
@@ -157,7 +210,7 @@ export async function deriveLifecycleForClient(
     /* ignore */
   }
 
-  return deriveLifecycleStatus({
+  return {
     status: client.status,
     qbo_connected: !!client.qbo_realm_id,
     cleanup_completed_at: client.cleanup_completed_at,
@@ -172,5 +225,29 @@ export async function deriveLifecycleForClient(
     month_done,
     month_review,
     month_waiting_client: month_waiting,
-  });
+  };
+}
+
+/**
+ * Detailed lifecycle status for ONE client (unchanged signature — existing
+ * callers keep working).
+ */
+export async function deriveLifecycleForClient(
+  service: SupabaseClient,
+  client: ClientLifecycleRow
+): Promise<LifecycleStatus> {
+  return deriveLifecycleStatus(await gatherLifecycleInput(service, client));
+}
+
+/**
+ * The canonical lifecycle for ONE client: both the macro-stage (the spine) and
+ * the detailed sub-status, from one signal-gather so they always agree. This is
+ * what the client workspace, Clients table, and Oversight should call.
+ */
+export async function deriveClientLifecycle(
+  service: SupabaseClient,
+  client: ClientLifecycleRow
+): Promise<{ stage: MacroStage; status: LifecycleStatus }> {
+  const input = await gatherLifecycleInput(service, client);
+  return { stage: deriveMacroStage(input), status: deriveLifecycleStatus(input) };
 }
