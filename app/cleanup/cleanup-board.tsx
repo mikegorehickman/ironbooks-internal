@@ -279,6 +279,8 @@ export function CleanupBoard() {
   // to match the badges: cleanup-stage cards don't render billing chips, and
   // a filter that keeps badge-less cards reads as broken.
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+  // Per-assignee filter — "see only my/this bookkeeper's accounts".
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
 
   const urgentFirst = (cards: KanbanCard[]) =>
     [...cards].sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent));
@@ -289,6 +291,10 @@ export function CleanupBoard() {
         const a = attention[c.id];
         return a && (a.escalations.length > 0 || a.bs_owed || a.disconnected || a.stuck_job);
       });
+    if (assigneeFilter !== "all")
+      out = out.filter((c) =>
+        assigneeFilter === "unassigned" ? !c.bookkeeper : c.bookkeeper?.id === assigneeFilter
+      );
     return out;
   };
 
@@ -337,6 +343,21 @@ export function CleanupBoard() {
       {/* Funnel strip — clickable counts that filter the board */}
       {!loading && (
         <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Assignee filter — "show only this bookkeeper's accounts". */}
+          <select
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            className="text-xs font-semibold px-2.5 py-1 rounded-full border border-gray-200 bg-white text-navy outline-none hover:border-teal cursor-pointer"
+            title="Filter the board to one bookkeeper's accounts"
+          >
+            <option value="all">All assignees</option>
+            <option value="unassigned">Unassigned</option>
+            {bookkeepers.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.full_name}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => setFlaggedOnly((f) => !f)}
             className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
