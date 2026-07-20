@@ -108,16 +108,23 @@ export async function fetchRecentTransactions(
       const query = encodeURIComponent(
         `SELECT * FROM ${type} WHERE TxnDate >= '${startStr}' MAXRESULTS 1000`
       );
-      const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
+      const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}&minorversion=70`);
       const txs = data.QueryResponse?.[type] || [];
 
       for (const tx of txs) {
         for (const line of tx.Line || []) {
-          const accountRef =
-            line.AccountBasedExpenseLineDetail?.AccountRef ||
-            line.JournalEntryLineDetail?.AccountRef;
+          // Expense can be booked against an ACCOUNT (AccountBasedExpenseLineDetail /
+          // JournalEntryLineDetail) OR against a Product/Service ITEM
+          // (ItemBasedExpenseLineDetail) — the latter has no inline AccountRef but
+          // is still real spend. A design studio (Jeva) books purchases against
+          // items, so dropping item lines lost ALL 60 of its purchases → 0 rules.
+          const acctDetail =
+            line.AccountBasedExpenseLineDetail || line.JournalEntryLineDetail;
+          const itemDetail = line.ItemBasedExpenseLineDetail;
+          if (!acctDetail && !itemDetail) continue; // subtotal/discount/junk line
 
-          if (!accountRef) continue;
+          const accountRef = acctDetail?.AccountRef;
+          const itemName = itemDetail?.ItemRef?.name;
 
           // Get description from multiple possible places
           const description =
@@ -133,8 +140,8 @@ export async function fetchRecentTransactions(
             date: tx.TxnDate,
             amount: Math.abs(line.Amount || tx.TotalAmt || 0),
             description: String(description).trim(),
-            accountId: accountRef.value,
-            accountName: accountRef.name || "Unknown",
+            accountId: accountRef?.value || "",
+            accountName: accountRef?.name || (itemName ? `Item: ${itemName}` : "Uncategorized"),
           });
         }
       }
