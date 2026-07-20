@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { resolveClientContactEmails, sendResendEmail } from "@/lib/client-comms";
+import { resolveClientContactEmails, sendResendEmailTracked } from "@/lib/client-comms";
 
 export const dynamic = "force-dynamic";
 
@@ -83,21 +83,44 @@ export async function POST(
   }
 
   const replyTo = (actor as any)?.email || "admin@ironbooks.com";
-  const sent = await sendResendEmail({ to: recipients, subject, html, text, replyTo });
+  // Tracked send: returns the Resend message id (durable proof it left our
+  // side) and the REAL error string when it doesn't — so a failure surfaces
+  // the actual cause (bad domain, missing key, bounce) instead of a generic
+  // "try Copy" that hides why nothing arrived.
+  const result = await sendResendEmailTracked({ to: recipients, subject, html, text, replyTo });
 
-  if (!sent) {
+  // Log every attempt to client_email_log (queryable email history; the Resend
+  // webhook later flips status delivered/bounced by matching provider_message_id).
+  const nowIso = new Date().toISOString();
+  try {
+    await (service as any).from("client_email_log").insert(
+      recipients.map((addr) => ({
+        client_link_id: clientLinkId,
+        to_address: addr,
+        subject,
+        email_type: "reclass_questions",
+        status: result.ok ? "sent" : "failed",
+        provider_message_id: result.messageId || null,
+        error: result.ok ? null : result.error || "unknown",
+        created_by: user.id,
+        ts: nowIso,
+      })) as any
+    );
+  } catch (e: any) {
+    console.warn(`[email-questions] client_email_log insert failed: ${e?.message}`);
+  }
+
+  if (!result.ok) {
     return NextResponse.json(
       {
-        error:
-          "Email service failed to send. Use “Copy Email Body + Table” and paste it into Double instead.",
+        error: `Email didn't send — ${result.error || "Resend rejected the request"}. Fix the issue or use “Copy for Double” as a fallback.`,
         reason: "send_failed",
       },
       { status: 502 }
     );
   }
 
-  // Audit trail — mirrors the support-ticket pattern so sends are queryable
-  // from /admin/audit (who emailed which client, when, how many recipients).
+  // Audit trail — queryable from /admin/audit (who emailed which client, when).
   await service.from("audit_log").insert({
     event_type: "reclass_questions_email_sent",
     user_id: user.id,
@@ -108,9 +131,10 @@ export async function POST(
       sent_by: (actor as any)?.full_name || (actor as any)?.email || user.id,
       recipients,
       subject,
-      sent_at: new Date().toISOString(),
+      provider_message_id: result.messageId || null,
+      sent_at: nowIso,
     } as any,
   });
 
-  return NextResponse.json({ ok: true, sent: true, recipients });
+  return NextResponse.json({ ok: true, sent: true, recipients, message_id: result.messageId || null });
 }

@@ -1524,7 +1524,7 @@ function ClientEmailModal({
   // Direct-send state (Send Email button → Resend, no Double copy-paste)
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<
-    { ok: true; recipients: string[] } | { ok: false; message: string } | null
+    { ok: true; recipients: string[]; messageId?: string | null } | { ok: false; message: string } | null
   >(null);
 
   // Build the HTML the bookkeeper pastes into Double's rich-text editor.
@@ -1696,7 +1696,7 @@ function ClientEmailModal({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Couldn't send the email");
-      setSendResult({ ok: true, recipients: json.recipients || [] });
+      setSendResult({ ok: true, recipients: json.recipients || [], messageId: json.message_id || null });
     } catch (err: any) {
       setSendResult({ ok: false, message: err?.message || "Couldn't send the email" });
     } finally {
@@ -1725,7 +1725,7 @@ function ClientEmailModal({
 
         {/* Instructions strip */}
         <div className="px-6 py-3 bg-purple-50 border-b border-purple-100 text-xs text-purple-900">
-          <strong>How to send:</strong> Click "Copy Email" → open the Double client portal for {clientName} → paste into a new email → send. The table will render as a proper HTML table so the client can fill in the right column directly in their reply.
+          <strong>Send Email</strong> delivers this straight to {clientName} via Resend and logs it to their email history — the client fills in the right column and replies to you. <span className="text-purple-700">(Or use “Copy for Double” to paste it elsewhere.)</span>
         </div>
 
         {/* Body */}
@@ -1842,9 +1842,13 @@ function ClientEmailModal({
             <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800 flex items-start gap-2">
               <CheckCircle2 size={15} className="mt-0.5 flex-shrink-0" />
               <span>
-                Sent to{" "}
+                <strong>Sent via Resend</strong> to{" "}
                 <strong>{sendResult.recipients.join(", ")}</strong>. The client can
                 fill in the table and reply directly to you.
+                <span className="block text-xs text-green-700 mt-0.5">
+                  Logged to this client&apos;s email history
+                  {sendResult.messageId ? ` · Resend id ${sendResult.messageId.slice(0, 12)}…` : ""}.
+                </span>
               </span>
             </div>
           )}
