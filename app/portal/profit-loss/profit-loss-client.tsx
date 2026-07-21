@@ -608,7 +608,7 @@ function BucketSection({
                 });
               }}
               title="Suggest a different category for this line"
-              className="text-ink-light hover:text-violet-600 transition-colors p-1 rounded hover:bg-violet-50"
+              className="text-ink-light hover:text-teal-dark transition-colors p-1 rounded hover:bg-teal-light"
             >
               <Tag size={13} />
             </button>
@@ -733,7 +733,7 @@ function CustomRangePicker({
         <button
           onClick={onApply}
           disabled={loading || !start || !end}
-          className="px-4 py-2 bg-gradient-to-r from-teal to-teal-dark text-white rounded-lg text-sm font-semibold hover:from-teal-dark hover:to-teal-dark disabled:opacity-50 inline-flex items-center gap-1.5 flex-shrink-0 transition-all"
+          className="px-4 py-2 bg-teal-lighter-dark text-white rounded-lg text-sm font-semibold hover:from-teal-dark hover:to-teal-dark disabled:opacity-50 inline-flex items-center gap-1.5 flex-shrink-0 transition-all"
         >
           {loading ? <Loader2 size={13} className="animate-spin" /> : <CalendarRange size={13} />}
           {loading ? "Loading…" : "Run"}
@@ -1243,7 +1243,7 @@ function FlagTransactionModal({
               {(suggestionsLoading || suggestions.length > 0) && (
                 <div>
                   <label className="text-xs font-semibold text-ink-slate uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles size={11} className="text-violet-600" />
+                    <Sparkles size={11} className="text-teal-dark" />
                     Suggested alternatives
                     <span className="text-[10px] font-normal text-ink-light normal-case">
                       (optional — pick one to turn this into a re-categorize request)
@@ -1262,8 +1262,8 @@ function FlagTransactionModal({
                             key={s.account_id}
                             className={`flex items-start gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
                               checked
-                                ? "border-violet-400 bg-violet-50"
-                                : "border-slate-200 hover:border-violet-200 hover:bg-violet-50/30"
+                                ? "border-teal-border bg-teal-light"
+                                : "border-slate-200 hover:border-teal-border hover:bg-teal-light/30"
                             }`}
                           >
                             <input
@@ -1491,7 +1491,7 @@ function ReclassRequestModal({
       <div className="bg-white rounded-2xl max-w-lg w-full shadow-xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Tag size={16} className="text-violet-600" />
+            <Tag size={16} className="text-teal-dark" />
             <h3 className="font-bold text-navy">
               {isTxnLevel ? "Re-categorize this transaction" : "Suggest a different category"}
             </h3>
@@ -1554,7 +1554,7 @@ function ReclassRequestModal({
                   Move to which category? <span className="text-red-700">*</span>
                 </label>
                 {targetAccount ? (
-                  <div className="mt-1 flex items-center justify-between gap-2 px-3 py-2 border border-violet-300 bg-violet-50 rounded-lg">
+                  <div className="mt-1 flex items-center justify-between gap-2 px-3 py-2 border border-teal-border bg-teal-light rounded-lg">
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-navy truncate">{targetAccount.fully_qualified_name}</div>
                       <div className="text-[10px] text-ink-light">{targetAccount.account_type} · {targetAccount.account_sub_type}</div>
@@ -1577,7 +1577,7 @@ function ReclassRequestModal({
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search categories — e.g. Marketing"
-                        className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-violet-300 focus:outline-none"
+                        className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-teal-border focus:outline-none"
                       />
                     </div>
                     {accountsLoading ? (
@@ -1596,7 +1596,7 @@ function ReclassRequestModal({
                             key={a.id}
                             type="button"
                             onClick={() => { setTargetAccount(a); if (error) setError(null); }}
-                            className="w-full text-left px-3 py-2 hover:bg-violet-50 transition-colors"
+                            className="w-full text-left px-3 py-2 hover:bg-teal-light transition-colors"
                           >
                             <div className="text-sm text-navy truncate">{a.fully_qualified_name}</div>
                             <div className="text-[10px] text-ink-light">{a.account_type} · {a.account_sub_type}</div>
@@ -1623,7 +1623,7 @@ function ReclassRequestModal({
                   }
                   maxLength={1500}
                   rows={3}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-violet-300 focus:outline-none"
+                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-teal-border focus:outline-none"
                 />
                 <div className="text-[11px] text-ink-light mt-1 flex items-center justify-between">
                   <span>Your bookkeeper sees this verbatim and decides whether to approve.</span>
@@ -1644,7 +1644,7 @@ function ReclassRequestModal({
                 <button
                   onClick={submit}
                   disabled={submitting || !reason.trim() || !targetAccount}
-                  className="px-4 py-1.5 bg-violet-600 text-white rounded-lg text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 inline-flex items-center gap-1.5"
+                  className="px-4 py-1.5 bg-navy text-white rounded-lg text-sm font-semibold hover:bg-navy-deep disabled:opacity-50 inline-flex items-center gap-1.5"
                 >
                   {submitting ? <Loader2 size={12} className="animate-spin" /> : <Tag size={12} />}
                   {submitting ? "Sending…" : "Send request"}

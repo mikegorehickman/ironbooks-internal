@@ -32,7 +32,7 @@ interface Props {
 const TIER_COLORS: Record<string, string> = {
   teal:   "bg-teal/10 text-teal border-teal/20",
   blue:   "bg-blue-50 text-blue-700 border-blue-200",
-  violet: "bg-violet-50 text-violet-700 border-violet-200",
+  violet: "bg-teal-light text-teal-dark border-teal-border",
   navy:   "bg-navy/10 text-navy border-navy/20",
 };
 

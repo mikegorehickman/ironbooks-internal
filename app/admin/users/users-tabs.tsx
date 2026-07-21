@@ -8,11 +8,14 @@ import { ClientsManagement, type ClientRow } from "./clients-management";
 export function UsersTabs({
   employees,
   clients,
+  initialTab = "employees",
 }: {
   employees: any[];
   clients: ClientRow[];
+  /** Deep-link target (?tab=clients on the page) — clients used to be 3 clicks deep. */
+  initialTab?: "employees" | "clients";
 }) {
-  const [tab, setTab] = useState<"employees" | "clients">("employees");
+  const [tab, setTab] = useState<"employees" | "clients">(initialTab);
 
   return (
     <div>

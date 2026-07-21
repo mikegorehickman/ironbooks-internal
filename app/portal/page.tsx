@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   TrendingUp, TrendingDown, AlertCircle, MessageSquare, ArrowRight,
   DollarSign, Wallet, Sparkles, CheckCircle2, Scissors,
@@ -36,6 +37,21 @@ export default async function PortalOverview() {
     return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
   }
   const { ctx } = ctxResult;
+
+  // New clients land on the onboarding wizard by default (soft gate) — send
+  // them there until they've finished the required steps (form + docs).
+  {
+    const svc = createServiceSupabase();
+    const { data: cl } = await (svc as any)
+      .from("client_links")
+      .select("status, cleanup_completed_at, daily_recon_enabled, portal_onboarding")
+      .eq("id", ctx.clientLinkId)
+      .maybeSingle();
+    const { shouldShowOnboarding, onboardingRequiredDone, readOnboardingState } = await import("@/lib/portal-onboarding");
+    if (cl && shouldShowOnboarding(cl) && !onboardingRequiredDone(readOnboardingState(cl))) {
+      redirect("/portal/onboarding");
+    }
+  }
 
   // Resolve the most-recent fully-closed accounting period. The portal shows
   // that month by default; "this month so far" is misleading when the

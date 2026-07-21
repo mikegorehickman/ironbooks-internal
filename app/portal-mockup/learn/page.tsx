@@ -172,7 +172,7 @@ function TrackCard({ icon: Icon, title, description, progress, total, color, loc
   const colors: Record<string, string> = {
     teal: "border-teal/30 bg-teal/5",
     amber: "border-amber-200 bg-amber-50",
-    purple: "border-purple-200 bg-purple-50",
+    purple: "border-teal-border bg-teal-light",
     slate: "border-slate-200 bg-slate-50 opacity-60",
   };
   const pct = total > 0 ? Math.round((progress / total) * 100) : 0;

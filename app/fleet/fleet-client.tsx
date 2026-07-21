@@ -282,9 +282,9 @@ function PanelShell({
       border: "border-amber-200",
     },
     purple: {
-      color: "text-purple-700",
-      bg: "bg-purple-50",
-      border: "border-purple-200",
+      color: "text-teal-dark",
+      bg: "bg-teal-light",
+      border: "border-teal-border",
     },
     blue: { color: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200" },
     slate: {
@@ -488,7 +488,7 @@ function PanelC({ integrations, isSenior }: { integrations: IntegrationIssue[]; 
         {integrations.slice(0, 20).map((i, idx) => (
           <div
             key={`${i.kind}:${i.client.id}:${idx}`}
-            className="px-4 py-2.5 hover:bg-purple-50/40 transition-colors flex items-start gap-3"
+            className="px-4 py-2.5 hover:bg-teal-light/40 transition-colors flex items-start gap-3"
           >
             <div className="w-40 flex-shrink-0">
               <ClientCell client={i.client} href={`/clients/${i.client.id}`} />
@@ -499,7 +499,7 @@ function PanelC({ integrations, isSenior }: { integrations: IntegrationIssue[]; 
                   className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                     i.kind === "qbo_token_expired"
                       ? "text-red-700 bg-red-100"
-                      : "text-purple-700 bg-purple-100"
+                      : "text-teal-dark bg-teal-light"
                   }`}
                 >
                   {i.kind.replace(/_/g, " ")}
@@ -507,7 +507,7 @@ function PanelC({ integrations, isSenior }: { integrations: IntegrationIssue[]; 
                 <AgeBadge days={i.age_days} />
               </div>
               <div className="text-[11px] text-ink-slate mt-1">{i.detail}</div>
-              <div className="text-[10px] text-purple-700 mt-0.5 font-semibold">
+              <div className="text-[10px] text-teal-dark mt-0.5 font-semibold">
                 → {i.recommended_action}
               </div>
             </div>

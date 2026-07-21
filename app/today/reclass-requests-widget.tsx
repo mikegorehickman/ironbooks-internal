@@ -67,22 +67,25 @@ export function ReclassRequestsWidget({
   requests: PendingReclassRequest[];
 }) {
   const [requests, setRequests] = useState<PendingReclassRequest[]>(initial);
+  // Home shows the top 5; nothing on Home ever scrolls 20+ rows.
+  const [showAll, setShowAll] = useState(false);
+  const visibleRequests = showAll ? requests : requests.slice(0, 5);
 
   if (requests.length === 0) return null;
 
   return (
-    <section className="bg-white rounded-2xl border-2 border-violet-300 overflow-hidden">
-      <div className="px-5 py-3 bg-violet-50 border-b border-violet-200 flex items-center gap-2">
-        <Tag size={16} className="text-violet-700" />
-        <h2 className="text-sm font-bold text-violet-900 uppercase tracking-wider">
+    <section className="bg-white rounded-2xl border-2 border-teal-border overflow-hidden">
+      <div className="px-5 py-3 bg-teal-light border-b border-teal-border flex items-center gap-2">
+        <Tag size={16} className="text-teal-dark" />
+        <h2 className="text-sm font-bold text-teal-dark uppercase tracking-wider">
           Client reclass requests · {requests.length} to review
         </h2>
-        <span className="text-xs text-violet-700 ml-auto">
+        <span className="text-xs text-teal-dark ml-auto">
           Approve to reclassify matching txns + create a bank rule
         </span>
       </div>
-      <ul className="divide-y divide-violet-100">
-        {requests.map((r) => (
+      <ul className="divide-y divide-teal">
+        {visibleRequests.map((r) => (
           <li key={r.id}>
             <ReclassRow
               req={r}
@@ -93,6 +96,14 @@ export function ReclassRequestsWidget({
           </li>
         ))}
       </ul>
+      {requests.length > 5 && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="w-full px-5 py-2.5 text-left text-xs font-semibold text-teal-dark hover:text-navy border-t border-hairline transition-colors"
+        >
+          {showAll ? "Show top 5" : `Show all ${requests.length}`}
+        </button>
+      )}
     </section>
   );
 }
@@ -180,11 +191,11 @@ function ReclassRow({
   const hoursAgo = Math.floor((Date.now() - new Date(req.requested_at).getTime()) / 3_600_000);
 
   return (
-    <div className="px-5 py-3 hover:bg-violet-50/30 transition-colors">
+    <div className="px-5 py-3 hover:bg-teal-light/30 transition-colors">
       <div className="flex items-start gap-3">
         <button
           onClick={toggleExpand}
-          className="text-violet-600 hover:text-violet-800 mt-0.5 flex-shrink-0"
+          className="text-teal-dark hover:text-teal-dark mt-0.5 flex-shrink-0"
         >
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
@@ -252,7 +263,7 @@ function ReclassRow({
                     </div>
                     {preview.data.sample.length > 0 && (
                       <details className="mt-2">
-                        <summary className="cursor-pointer text-[11px] text-violet-700 font-semibold">
+                        <summary className="cursor-pointer text-[11px] text-teal-dark font-semibold">
                           Show sample ({preview.data.sample.length})
                         </summary>
                         <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
@@ -323,7 +334,7 @@ function ReclassRow({
                     placeholder="e.g. USPS charges for shipping invoices are correctly in Postage — Marketing is for promotional spend."
                     maxLength={1500}
                     rows={3}
-                    className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded focus:border-violet-300 focus:outline-none"
+                    className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded focus:border-teal-border focus:outline-none"
                   />
                 </div>
               )}

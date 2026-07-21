@@ -811,7 +811,7 @@ export function BalanceSheetLanding({
             surfaces that and fills the table so the bookkeeper approves
             instead of retyping. */}
         {!loading && Object.keys(stmtByAccount).length > 0 && (
-          <div className="mx-5 mt-4 rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-3">
+          <div className="mx-5 mt-4 rounded-xl border border-teal-border bg-teal-light/70 px-4 py-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="text-xs text-navy leading-relaxed">
                 <strong className="font-bold">
@@ -822,7 +822,7 @@ export function BalanceSheetLanding({
                   <>
                     {" "}— {autoFilled.size} row{autoFilled.size === 1 ? "" : "s"} below auto-filled with the
                     statement&apos;s ending balance + end date (marked{" "}
-                    <span className="text-indigo-700 font-semibold">from statement</span>). Review, then Save &amp;
+                    <span className="text-teal-dark font-semibold">from statement</span>). Review, then Save &amp;
                     Review Gaps.
                   </>
                 ) : (
@@ -831,7 +831,7 @@ export function BalanceSheetLanding({
               </div>
               <button
                 onClick={applyStatementData}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-800 hover:bg-indigo-100"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-teal-border bg-white px-3 py-1.5 text-xs font-bold text-teal-dark hover:bg-teal-light"
               >
                 <Sparkles size={12} /> Fill from statements
               </button>
@@ -983,7 +983,7 @@ export function BalanceSheetLanding({
                         />
                         {autoFilled.has(a.qbo_account_id) && stmtByAccount[String(a.qbo_account_id)] && (
                           <span
-                            className="text-[9px] text-indigo-600 mt-0.5 text-right truncate"
+                            className="text-[9px] text-teal-dark mt-0.5 text-right truncate"
                             title={stmtByAccount[String(a.qbo_account_id)].display_name}
                           >
                             from statement

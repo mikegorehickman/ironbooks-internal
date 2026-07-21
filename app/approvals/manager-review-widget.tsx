@@ -26,18 +26,18 @@ function ago(iso: string | null): string {
  */
 export function ManagerReviewWidget({ rows }: { rows: ManagerReviewRow[] }) {
   return (
-    <section className="bg-white rounded-2xl border-2 border-violet-200 overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-3 bg-violet-50 border-b border-violet-100">
-        <ClipboardCheck size={16} className="text-violet-700" />
+    <section className="bg-white rounded-2xl border-2 border-teal-border overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-3 bg-teal-light border-b border-teal-border">
+        <ClipboardCheck size={16} className="text-teal-dark" />
         <h2 className="text-sm font-bold text-navy">Ready for manager review</h2>
-        <span className="ml-auto text-xs font-bold text-violet-700 bg-violet-100 rounded-full px-2 py-0.5">{rows.length}</span>
+        <span className="ml-auto text-xs font-bold text-teal-dark bg-teal-light rounded-full px-2 py-0.5">{rows.length}</span>
       </div>
       <ul className="divide-y divide-gray-50">
         {rows.map((r) => (
           <li key={r.id}>
             <Link
               href={`/clients/${r.id}`}
-              className="flex items-center gap-3 px-5 py-3 hover:bg-violet-50/40 group"
+              className="flex items-center gap-3 px-5 py-3 hover:bg-teal-light/40 group"
             >
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold text-navy truncate">{r.client_name}</div>
@@ -45,7 +45,7 @@ export function ManagerReviewWidget({ rows }: { rows: ManagerReviewRow[] }) {
                   Submitted{r.submitted_by ? ` by ${r.submitted_by}` : ""}{r.submitted_at ? ` · ${ago(r.submitted_at)}` : ""}
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1 text-xs font-semibold text-violet-700 group-hover:text-violet-900 flex-shrink-0">
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-teal-dark group-hover:text-teal-dark flex-shrink-0">
                 Review &amp; send <ArrowRight size={13} />
               </span>
             </Link>

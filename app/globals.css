@@ -3,22 +3,31 @@
 @tailwind utilities;
 
 :root {
-  --brand-teal: #2D7A75;
-  --brand-teal-dark: #1F5D58;
-  --brand-teal-light: #E8F2F0;
+  /* Ironbooks design language (2026-07 refresh) — keep in sync with
+     tailwind.config.ts. Exact values from the approved mockup. */
+  --brand-teal: #3E908D;
+  --brand-teal-dark: #2A6E6B;
+  --brand-teal-light: #EDF5F4;
   --brand-teal-lighter: #F4F9F8;
-  --brand-navy: #0F1F2E;
-  --brand-slate: #475569;
+  --brand-navy: #152F46;
+  --brand-slate: #5B6672;
+  --brand-gold: #DAB461;
+  --brand-rust: #954E44;
+  --rail: #1E3D5C;
   /* App canvas — the page background behind white cards/containers.
      Single source of truth for both the internal app and the client
-     portal; deliberately a clear step deeper than white so panels read
-     as distinct floating surfaces. Tune here to adjust contrast app-wide. */
-  --app-canvas: #D4DCE8;
+     portal. Tune here to adjust contrast app-wide. */
+  --app-canvas: #F5F7F9;
 }
 
 * {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* All numbers line up in columns — metric strips, tables, money. */
+body {
+  font-variant-numeric: tabular-nums;
 }
 
 ::-webkit-scrollbar {
@@ -29,9 +38,9 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #E5E7EB;
+  background: #e5e7eb;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94A3B8;
+  background: #8a96a1;
 }

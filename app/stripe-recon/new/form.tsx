@@ -364,7 +364,7 @@ export function NewStripeReconForm({
         )}
 
         {upgradeFromJobId && (
-          <div className="p-3 rounded-lg bg-purple-50 border border-purple-200 text-xs text-purple-900">
+          <div className="p-3 rounded-lg bg-teal-light border border-teal-border text-xs text-teal-dark">
             ↪ <strong>Upgrading to the Stripe API path.</strong> The previous
             recon used the QBO-AI matcher. Running this will replace the
             AI-matched <code className="font-mono">[Ironbooks]</code> lines on
@@ -552,7 +552,7 @@ export function NewStripeReconForm({
                   !isStripeConnected
                     ? "bg-gray-50 border-gray-200 cursor-not-allowed opacity-60"
                     : method === "stripe_api"
-                    ? "bg-purple-50 border-purple-500 text-purple-900"
+                    ? "bg-teal-light border-teal text-teal-dark"
                     : "bg-white border-gray-200 hover:border-gray-300 text-navy"
                 }`}
               >

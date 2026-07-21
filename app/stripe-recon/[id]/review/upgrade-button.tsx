@@ -86,8 +86,8 @@ export function UpgradeToStripeApiButton({
         disabled={busy}
         className={
           isPrimary
-            ? "w-full inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
-            : "inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+            ? "w-full inline-flex items-center justify-center gap-2 bg-navy hover:bg-navy-deep disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+            : "inline-flex items-center gap-2 bg-navy hover:bg-navy-deep disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-lg"
         }
       >
         {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}

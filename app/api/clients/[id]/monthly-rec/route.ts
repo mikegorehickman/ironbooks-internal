@@ -105,6 +105,8 @@ export async function POST(
     reason?: string;
     /** send_draft: the question for the client. */
     question?: string;
+    /** reject: manager's note on what to fix. */
+    notes?: string;
   };
   try {
     body = await request.json();
@@ -112,7 +114,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const action = body.action;
-  if (!["run", "statements", "spot_check", "submit", "send", "send_draft", "reopen", "board", "mark_complete", "verify", "dismiss_finding", "undismiss_finding"].includes(action || "")) {
+  if (!["run", "statements", "spot_check", "submit", "send", "send_draft", "reopen", "reject", "board", "mark_complete", "verify", "dismiss_finding", "undismiss_finding"].includes(action || "")) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
@@ -1047,6 +1049,46 @@ export async function POST(
       package_error: packageError,
       qbo_close_error: qboCloseError,
     });
+  }
+
+  // reject — senior Manager Reject on a production close in review. Bounces the
+  // run to 'failed_review' with a required note; the assigned bookkeeper sees it
+  // on Today ("Sent back — needs rework") and reworks, then re-submits. No
+  // client email.
+  if (action === "reject") {
+    if (!isSenior) {
+      return NextResponse.json(
+        { error: "Only admin/lead can reject a close." },
+        { status: 403 }
+      );
+    }
+    const rejectNote = (body.notes || "").toString().trim();
+    if (!rejectNote) {
+      return NextResponse.json(
+        { error: "Add a note telling the bookkeeper what to fix before rejecting." },
+        { status: 400 }
+      );
+    }
+    const nowIso = new Date().toISOString();
+    const { data: run, error } = await (service as any)
+      .from("monthly_rec_runs")
+      .update({
+        status: "failed_review",
+        review_notes: rejectNote,
+        rejected_at: nowIso,
+        rejected_by: user.id,
+      })
+      .eq("client_link_id", clientLinkId)
+      .eq("period", period)
+      .select("*")
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await service.from("audit_log").insert({
+      user_id: user.id,
+      event_type: "monthly_rec_review_rejected",
+      request_payload: { client_link_id: clientLinkId, period, notes: rejectNote, rejected_at: nowIso } as any,
+    });
+    return NextResponse.json({ ok: true, run });
   }
 
   // reopen

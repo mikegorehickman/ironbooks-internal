@@ -187,9 +187,9 @@ export function VerificationPanel({
     : [];
 
   return (
-    <div className="bg-white border border-indigo-100 rounded-xl overflow-hidden">
-      <div className="flex items-center gap-2.5 px-3 py-2.5 bg-indigo-50/50 border-b border-indigo-100">
-        <ShieldCheck size={15} className="text-indigo-600 flex-shrink-0" />
+    <div className="bg-white border border-teal-border rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2.5 px-3 py-2.5 bg-teal-light/50 border-b border-teal-border">
+        <ShieldCheck size={15} className="text-teal-dark flex-shrink-0" />
         <div className="text-sm font-bold text-navy">Books Reliability</div>
         {v && band && (
           <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${band.chip}`}>
@@ -206,7 +206,7 @@ export function VerificationPanel({
             <button
               onClick={verify}
               disabled={verifying}
-              className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+              className="inline-flex items-center gap-1.5 bg-navy hover:bg-navy-deep disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
             >
               {verifying ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
               {v ? "Re-verify" : "Verify books"}

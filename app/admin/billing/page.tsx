@@ -1,3 +1,4 @@
+import { AppShell } from "@/components/AppShell";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { BillingTable } from "./billing-table";
@@ -197,17 +198,19 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   });
 
   return (
-    <BillingTable
-      year={year}
-      rows={rows}
-      fxUsdToCad={fxUsdToCad}
-      totals={totals}
-      monthlyProjected={monthlyProjected}
-      recon={recon}
-      unmatched={unmatched.map((u) => ({
-        who: u.who, amountCents: u.amount_cents, currency: u.currency, customerId: u.stripe_customer_id,
-      }))}
-      coverage={coverage}
-    />
+    <AppShell>
+      <BillingTable
+        year={year}
+        rows={rows}
+        fxUsdToCad={fxUsdToCad}
+        totals={totals}
+        monthlyProjected={monthlyProjected}
+        recon={recon}
+        unmatched={unmatched.map((u) => ({
+          who: u.who, amountCents: u.amount_cents, currency: u.currency, customerId: u.stripe_customer_id,
+        }))}
+        coverage={coverage}
+      />
+    </AppShell>
   );
 }

@@ -46,6 +46,8 @@ export function DuplicatesPanel({
   clientIds,
   showScan = false,
   title = "Duplicates",
+  maxRows,
+  viewAllHref,
 }: {
   /** Scope to one client (reclass stage) — enables the Scan button. */
   clientLinkId?: string;
@@ -53,6 +55,11 @@ export function DuplicatesPanel({
   clientIds?: string[] | null;
   showScan?: boolean;
   title?: string;
+  /** Cap the inline list (Home shows the top N by $ exposure — an admin's
+   *  fleet-wide list can run 300+ rows, which buried the whole screen). */
+  maxRows?: number;
+  /** "View all" destination when the list is capped (e.g. /admin/duplicates). */
+  viewAllHref?: string;
 }) {
   const [rows, setRows] = useState<DupRow[] | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -131,11 +138,37 @@ export function DuplicatesPanel({
       ) : rows.length === 0 ? (
         <div className="px-5 py-4 text-xs text-ink-light">No open duplicate findings.</div>
       ) : (
-        <div className="divide-y divide-gray-50">
-          {rows.map((r) => (
-            <FindingRow key={r.id} row={r} onDone={(id) => setRows((p) => (p || []).filter((x) => x.id !== id))} />
-          ))}
-        </div>
+        (() => {
+          // Capped view (Home): biggest $ exposure first, top N inline, the
+          // rest behind "View all" — never bury the screen in findings.
+          const sorted = maxRows
+            ? [...rows].sort((a, b) => Math.abs(b.amount || 0) - Math.abs(a.amount || 0))
+            : rows;
+          const visible = maxRows ? sorted.slice(0, maxRows) : sorted;
+          const hidden = sorted.length - visible.length;
+          return (
+            <>
+              <div className="divide-y divide-gray-50">
+                {visible.map((r) => (
+                  <FindingRow key={r.id} row={r} onDone={(id) => setRows((p) => (p || []).filter((x) => x.id !== id))} />
+                ))}
+              </div>
+              {hidden > 0 && (
+                <div className="px-5 py-2.5 border-t border-hairline text-xs">
+                  {viewAllHref ? (
+                    <a href={viewAllHref} className="font-semibold text-teal-dark hover:text-navy">
+                      View all {sorted.length} findings on the fleet page →
+                    </a>
+                  ) : (
+                    <span className="text-ink-light">
+                      +{hidden} more — work them from each client&apos;s reclass stage.
+                    </span>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()
       )}
     </div>
   );

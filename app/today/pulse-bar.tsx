@@ -1,52 +1,38 @@
 "use client";
 
 import Link from "next/link";
-import { ShieldAlert, AlertTriangle, CalendarClock, Clock, Inbox, CheckCircle2 } from "lucide-react";
 import { ViewAsSelector } from "./view-as-selector";
 import type { TodayCounts } from "@/lib/today-priority";
 
 /**
- * Pulse bar — the at-a-glance time-pressure summary that sits at the top of
- * /today. Five count chips answer "where's the pressure?" in one read; a 0
- * chip goes muted gray so an empty Blocked/Overdue reads instantly as
- * "good". Each chip jumps to the relevant section. Carries the month-end
- * status (a status, not an action) and the senior view-as selector.
+ * Metric strip — the at-a-glance time-pressure summary at the top of /today.
+ * One card, hairline-divided columns (no sub-cards, per the design language):
+ * label 11.5px caps muted, value 26px/800 tabular. A zero renders muted so an
+ * empty Blocked/Overdue reads instantly as "good"; each cell jumps to its
+ * section. Carries the month-end status and the senior view-as selector.
  */
 
-type Tone = "red" | "amber" | "teal";
-
-function Chip({
+function Cell({
   label,
-  count,
+  value,
   tone,
   href,
-  Icon,
 }: {
   label: string;
-  count: number;
-  tone: Tone;
+  value: string;
+  tone: "rust" | "gold" | "navy" | "muted" | "teal";
   href: string;
-  Icon: React.ComponentType<{ size?: number; className?: string }>;
 }) {
-  const active = count > 0;
-  const toneCls = !active
-    ? "bg-gray-50 text-ink-light border-gray-100"
-    : tone === "red"
-    ? "bg-red-50 text-red-700 border-red-200"
-    : tone === "amber"
-    ? "bg-amber-50 text-amber-800 border-amber-200"
-    : "bg-teal-light text-teal border-teal/30";
+  const color =
+    tone === "rust" ? "text-rust"
+    : tone === "gold" ? "text-gold-deep"
+    : tone === "teal" ? "text-teal-dark"
+    : tone === "muted" ? "text-ink-light"
+    : "text-navy";
   return (
-    <Link
-      href={href}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${toneCls} ${
-        active ? "hover:brightness-95" : ""
-      }`}
-      title={`${count} ${label.toLowerCase()}`}
-    >
-      <Icon size={13} className={active ? "" : "opacity-50"} />
-      <span className="tabular-nums font-bold">{count}</span>
-      <span className="hidden sm:inline opacity-80">{label}</span>
+    <Link href={href} className="block px-5 py-4 hover:bg-[#FBFCFD] transition-colors">
+      <div className="text-[11.5px] font-bold uppercase tracking-[0.12em] text-ink-light whitespace-nowrap">{label}</div>
+      <div className={`text-[26px] font-extrabold leading-tight mt-1 ${color}`}>{value}</div>
     </Link>
   );
 }
@@ -69,30 +55,25 @@ export function PulseBar({
   viewAs: string | null;
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl px-3 py-2.5 flex items-center gap-2 flex-wrap">
-      <Chip label="Blocked" count={counts.blocked} tone="red" href="#clients" Icon={ShieldAlert} />
-      <Chip label="Overdue" count={counts.overdue} tone="red" href="#work" Icon={AlertTriangle} />
-      <Chip label="Due today" count={counts.dueToday} tone="amber" href="#work" Icon={CalendarClock} />
-      <Chip label="Due soon" count={counts.dueSoon} tone="teal" href="#work" Icon={Clock} />
-      <Chip label="Needs you" count={counts.needsYou} tone="amber" href="#work" Icon={Inbox} />
-
-      <div className="flex-1 min-w-2" />
-
-      {totalClients > 0 && (
-        <Link
-          href="/production"
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:border-gray-300"
-          title="Monthly close board"
-        >
-          <CheckCircle2 size={13} className="text-emerald-600" />
-          <span className="tabular-nums">
-            <span className="font-bold text-navy">{monthlyClosedCount}</span>/{totalClients}
-          </span>
-          <span className="hidden md:inline opacity-80">closed · {closingPeriodLabel}</span>
-        </Link>
+    <div className="space-y-2">
+      {isSenior && (
+        <div className="flex justify-end">
+          <ViewAsSelector bookkeepers={bookkeepers} current={viewAs} />
+        </div>
       )}
-
-      {isSenior && <ViewAsSelector bookkeepers={bookkeepers} current={viewAs} />}
+      <div className="bg-white border border-cardline rounded-lg shadow-card grid grid-cols-3 md:grid-cols-6 divide-x divide-hairline overflow-x-auto">
+        <Cell label="Blocked" value={String(counts.blocked)} tone={counts.blocked > 0 ? "rust" : "muted"} href="#clients" />
+        <Cell label="Overdue" value={String(counts.overdue)} tone={counts.overdue > 0 ? "rust" : "muted"} href="#work" />
+        <Cell label="Due today" value={String(counts.dueToday)} tone={counts.dueToday > 0 ? "gold" : "muted"} href="#work" />
+        <Cell label="Due soon" value={String(counts.dueSoon)} tone={counts.dueSoon > 0 ? "navy" : "muted"} href="#work" />
+        <Cell label="Needs you" value={String(counts.needsYou)} tone={counts.needsYou > 0 ? "gold" : "muted"} href="#work" />
+        <Cell
+          label={`Closed · ${closingPeriodLabel}`}
+          value={totalClients > 0 ? `${monthlyClosedCount}/${totalClients}` : "—"}
+          tone="navy"
+          href="/production"
+        />
+      </div>
     </div>
   );
 }

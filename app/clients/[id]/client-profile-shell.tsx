@@ -31,9 +31,11 @@ import {
   Trash2,
   ClipboardCheck,
   StickyNote,
-  RefreshCw,
 } from "lucide-react";
 import { CleanupTab } from "./cleanup-tab";
+import { StageBanner } from "./stage-banner";
+import { AskClientComposer } from "@/components/AskClientComposer";
+import type { MacroStage, LifecycleStatus } from "@/lib/client-lifecycle";
 import { NotesPanel } from "./notes-panel";
 import { UrgentFlagButton } from "./urgent-flag-button";
 import type {
@@ -66,6 +68,7 @@ type ClientLink = {
   daily_recon_paused_reason?: string | null;
   daily_recon_enabled_at?: string | null;
   cleanup_completed_at?: string | null;
+  cleanup_sequence?: any;
   // Profile detail fields (migration 73)
   contact_first_name?: string | null;
   contact_last_name?: string | null;
@@ -92,13 +95,6 @@ type ClientLink = {
   bank_connected_to_software?: string | null;
   profile_updated_at?: string | null;
 };
-
-/** A client is "really linked" to Double when double_client_id is set AND
- *  isn't a "pending_" placeholder — those are created at silent-invite
- *  time before a real Double match has been picked. */
-function isLinkedToDouble(cl: { double_client_id: string | null }): boolean {
-  return !!cl.double_client_id && !cl.double_client_id.startsWith("pending_");
-}
 
 interface OverviewBundle {
   outstanding: OutstandingWork | null;
@@ -161,6 +157,10 @@ interface Props {
   onboarding?: OnboardingProfile | null;
   /** BS cleanup deferred → still owed (amber banner on Overview). */
   bsCleanupOwed?: boolean;
+  /** Lifecycle stage + detailed status (computed server-side) — drives the
+   *  in-body StageBanner + the stage-aware default tab. */
+  macroStage?: MacroStage | null;
+  lifecycleStatus?: LifecycleStatus | null;
 }
 
 type TabId = "overview" | "cleanup" | "profile" | "billing" | "pl" | "bs" | "bank" | "notes" | "activity";
@@ -177,8 +177,13 @@ const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: "activity", label: "Activity", icon: Clock },
 ];
 
-export function ClientProfileShell({ clientLink, actorRole, overview, financials, onboarding, bsCleanupOwed }: Props) {
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
+export function ClientProfileShell({ clientLink, actorRole, overview, financials, onboarding, bsCleanupOwed, macroStage, lifecycleStatus }: Props) {
+  // Stage-aware default tab: cleanup-stage clients land on the cleanup sequence
+  // (where their work is); everyone else on Overview. Initial only — the user
+  // can click anywhere.
+  const [activeTab, setActiveTab] = useState<TabId>(
+    macroStage === "cleanup" ? "cleanup" : "overview"
+  );
   const canImpersonate = actorRole === "admin" || actorRole === "lead";
 
   // Drill-down drawer state — shared across P&L and BS tabs. Holds the
@@ -207,39 +212,33 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href={`/jobs/new?client=${clientLink.id}&redo=1`}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal text-white text-xs font-semibold hover:bg-teal-dark"
-            title="Re-run COA cleanup — applies the latest master chart and skips the redo confirmation"
-          >
-            <RefreshCw size={13} />
-            Re-run COA Cleanup
-          </Link>
+          {/* Re-run COA Cleanup lives on the Cleanup tab (step 2) — no longer
+              duplicated in this header. */}
           <UrgentFlagButton
             clientLinkId={clientLink.id}
             initialUrgent={!!(clientLink as any).urgent_flag}
             initialNote={(clientLink as any).urgent_flag_note || null}
           />
-          <Link
-            href={`/clients/${clientLink.id}/messages`}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:text-navy hover:border-gray-300"
-          >
-            <Mail size={13} />
-            Messages
-          </Link>
           {canImpersonate && <ViewAsClientButton clientLinkId={clientLink.id} />}
           <ResendLoginLink clientLinkId={clientLink.id} />
-          <DoubleLinkControl
-            clientLinkId={clientLink.id}
-            doubleName={clientLink.double_client_name}
-            isLinked={isLinkedToDouble(clientLink)}
-            canUnlink={actorRole === "admin" || actorRole === "lead"}
-          />
           {canImpersonate && (
             <DeleteClientButton clientLinkId={clientLink.id} clientName={clientLink.client_name} />
           )}
         </div>
       </div>
+
+      {/* Stage banner — leads the workspace with the client's lifecycle stage
+          and the single next action, so the bookkeeper isn't guessing which of
+          nine tabs to open. */}
+      {macroStage && (
+        <StageBanner
+          stage={macroStage}
+          status={lifecycleStatus}
+          clientLinkId={clientLink.id}
+          canReject={canImpersonate}
+          onGoToTab={(tab) => setActiveTab(tab as TabId)}
+        />
+      )}
 
       {/* Tab strip — top-level navigation between financial views. Tabs are
           stateful (no URL change) so we keep page state per tab without
@@ -276,44 +275,81 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
         />
       )}
       {activeTab === "cleanup" && (
-        <CleanupTab clientLinkId={clientLink.id} clientName={clientLink.client_name} />
+        <CleanupTab
+          clientLinkId={clientLink.id}
+          clientName={clientLink.client_name}
+          cleanupCompletedAt={clientLink.cleanup_completed_at || null}
+          initialSequence={clientLink.cleanup_sequence ?? null}
+          stage={macroStage ?? null}
+          onNavigateTab={(tab) => setActiveTab(tab)}
+        />
       )}
       {activeTab === "profile" && (
         <ProfileTab clientLink={clientLink} onboarding={onboarding} actorRole={actorRole} />
       )}
       {activeTab === "billing" && <BillingTab clientLinkId={clientLink.id} />}
       {activeTab === "pl" && (
-        <PLTab
-          financials={financials}
-          clientLinkId={clientLink.id}
-          onDrill={(accountId, accountName) =>
-            setDrill({
-              accountId,
-              accountName,
-              kind: "pl",
-              start: financials.overview?.primaryMonth.start || "",
-              end: financials.overview?.primaryMonth.end || "",
-            })
-          }
-        />
+        <div className="space-y-3">
+          {canImpersonate && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+              <span className="text-xs text-ink-slate">
+                This is the bookkeeper view (COA check). Preview the exact P&amp;L the client sees in their portal.
+              </span>
+              <ViewAsClientButton
+                clientLinkId={clientLink.id}
+                portalPath="/portal/profit-loss"
+                label="See client's P&L"
+                title="Open the client's portal P&L in a new tab — exactly what they see"
+              />
+            </div>
+          )}
+          <PLTab
+            financials={financials}
+            clientLinkId={clientLink.id}
+            onDrill={(accountId, accountName) =>
+              setDrill({
+                accountId,
+                accountName,
+                kind: "pl",
+                start: financials.overview?.primaryMonth.start || "",
+                end: financials.overview?.primaryMonth.end || "",
+              })
+            }
+          />
+        </div>
       )}
       {activeTab === "bs" && (
-        <BSTab
-          financials={financials}
-          clientLinkId={clientLink.id}
-          onDrill={(accountId, accountName) =>
-            setDrill({
-              accountId,
-              accountName,
-              kind: "bs",
-              // BS drill defaults to last 90 days of activity hitting the
-              // account — gives the bookkeeper context without flooding
-              // them with multi-year history on the first click.
-              start: ymdDaysAgo(90),
-              end: ymdToday(),
-            })
-          }
-        />
+        <div className="space-y-3">
+          {canImpersonate && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+              <span className="text-xs text-ink-slate">
+                Preview the exact Balance Sheet the client sees in their portal.
+              </span>
+              <ViewAsClientButton
+                clientLinkId={clientLink.id}
+                portalPath="/portal/balance-sheet"
+                label="See client's Balance Sheet"
+                title="Open the client's portal Balance Sheet in a new tab — exactly what they see"
+              />
+            </div>
+          )}
+          <BSTab
+            financials={financials}
+            clientLinkId={clientLink.id}
+            onDrill={(accountId, accountName) =>
+              setDrill({
+                accountId,
+                accountName,
+                kind: "bs",
+                // BS drill defaults to last 90 days of activity hitting the
+                // account — gives the bookkeeper context without flooding
+                // them with multi-year history on the first click.
+                start: ymdDaysAgo(90),
+                end: ymdToday(),
+              })
+            }
+          />
+        </div>
       )}
       {activeTab === "bank" && <BankTab financials={financials} clientLinkId={clientLink.id} />}
 
@@ -393,7 +429,7 @@ function ProgressFlowChart({ progress }: { progress: ClientProgress }) {
           2026-07-17: "it just needs to be smart and obvious on what we
           need to do to move to the next step"). */}
       {next && (
-        <div className="mb-4 rounded-2xl bg-gradient-to-r from-teal to-teal-dark text-white p-4 flex items-center justify-between gap-4 flex-wrap shadow-md">
+        <div className="mb-4 rounded-2xl bg-teal-lighter-dark text-white p-4 flex items-center justify-between gap-4 flex-wrap shadow-md">
           <div className="min-w-0">
             <div className="text-[10px] font-bold uppercase tracking-wider text-white/70">
               {next.phase === "cleanup"
@@ -1019,70 +1055,6 @@ function OverviewTab({
         )}
       </section>
 
-      {/* SNAP-side summary stats — bank rules + recent jobs. Quick numeric
-          glance that complements the outstanding-work cards above. */}
-      {summary && (
-        <section>
-          <h2 className="text-base font-bold text-navy mb-3">SNAP status</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <StatCard
-              label="Active bank rules"
-              value={summary.activeBankRules}
-              subtext={
-                summary.lastRuleExportAt
-                  ? `Last exported ${new Date(summary.lastRuleExportAt).toLocaleDateString()}`
-                  : "Never exported to QBO"
-              }
-            />
-            <StatCard
-              label="Recent reclass jobs"
-              value={summary.recentReclassJobs.length}
-              subtext={
-                summary.recentReclassJobs[0]
-                  ? `Latest: ${summary.recentReclassJobs[0].status}`
-                  : "No reclass jobs yet"
-              }
-            />
-            <StatCard
-              label="Recent BS cleanups"
-              value={summary.recentCleanups.length}
-              subtext={
-                summary.recentCleanups[0]
-                  ? `Latest: ${summary.recentCleanups[0].status}`
-                  : "No cleanups yet"
-              }
-            />
-          </div>
-          {summary.recentReclassJobs.length > 0 && (
-            <div className="mt-4 bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-              {summary.recentReclassJobs.map((j) => (
-                <Link
-                  key={j.id}
-                  href={`/reclass/${j.id}/review`}
-                  className="flex items-center justify-between px-4 py-2.5 hover:bg-teal-lighter/50 transition-colors"
-                >
-                  <div className="text-sm">
-                    <span className="font-semibold text-navy">
-                      {j.workflow || "reclass"}
-                    </span>
-                    <span className="text-ink-slate mx-2">·</span>
-                    <span className="text-ink-slate">
-                      {j.sourceAccountName || "all accounts"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <StatusPill status={j.status} />
-                    <span className="text-xs text-ink-slate">
-                      {new Date(j.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
       {/* Recent activity strip — last 10 events from audit_log */}
       {activity.length > 0 && (
         <section>
@@ -1299,12 +1271,6 @@ function QboConnectionBanner({
             >
               {palette.buttonText} <ArrowRight size={15} />
             </a>
-            <Link
-              href={`/clients/${clientLinkId}/match-double`}
-              className={`text-xs font-semibold ${palette.body} hover:underline`}
-            >
-              Open client settings
-            </Link>
           </div>
         </div>
       </div>
@@ -1323,12 +1289,12 @@ function NoQboState({ clientLinkId }: { clientLinkId: string }) {
       <div className="text-xs text-ink-slate mb-3">
         Financial reports need a live QBO connection for this client.
       </div>
-      <Link
-        href={`/clients/${clientLinkId}/match-double`}
+      <a
+        href={`/api/qbo/connect?client_link_id=${clientLinkId}`}
         className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal hover:text-teal-dark"
       >
-        Configure client settings →
-      </Link>
+        Connect QuickBooks →
+      </a>
     </div>
   );
 }
@@ -1981,7 +1947,7 @@ function StatusPill({ status }: { status: string }) {
     in_review: "bg-amber-50 text-amber-700",
     executing: "bg-blue-50 text-blue-700",
     failed: "bg-red-50 text-red-700",
-    web_search_paused: "bg-purple-50 text-purple-700",
+    web_search_paused: "bg-teal-light text-teal-dark",
   };
   const className = styles[status] || "bg-gray-100 text-ink-slate";
   return (
@@ -2305,12 +2271,13 @@ function DrillDrawer({
         )}
 
         {askOpen && data && (
-          <AskClientTxnModal
+          <AskClientComposer
             clientLinkId={clientLinkId}
             clientName={clientName}
-            accountName={accountName}
+            emailType="ask_client_txns"
+            contextLabel={accountName}
             periodLabel={`${start} → ${end}`}
-            transactions={data.transactions
+            rows={data.transactions
               .filter((t) => selected.has(txnKey(t)))
               // de-dup split lines to one row per transaction
               .filter((t, i, arr) => arr.findIndex((x) => txnKey(x) === txnKey(t)) === i)
@@ -2336,169 +2303,6 @@ function DrillDrawer({
         )}
       </div>
     </>
-  );
-}
-
-// ─── ASK CLIENT (email about selected transactions) ─────────────────────
-// Draft → preview/edit → send via Resend. Composed from the transactions the
-// bookkeeper selected in the drill drawer; server ships it tracked (message id
-// + client_email_log row) so the "sent" banner is real, not hopeful.
-function AskClientTxnModal({
-  clientLinkId,
-  clientName,
-  accountName,
-  periodLabel,
-  transactions,
-  onClose,
-}: {
-  clientLinkId: string;
-  clientName: string;
-  accountName: string;
-  periodLabel: string;
-  transactions: Array<{ date: string; name: string | null; memo: string; amount: number }>;
-  onClose: () => void;
-}) {
-  const firstName = (clientName || "there").split(/[ ,]/)[0] || "there";
-  const money = (n: number) =>
-    `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const esc = (s: string) =>
-    (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-  const [subject, setSubject] = useState(
-    `Quick question on ${transactions.length} transaction${transactions.length === 1 ? "" : "s"} — ${clientName}`
-  );
-  const [intro, setIntro] = useState(
-    `Hi ${firstName},\n\nWhile cleaning up your books (${periodLabel}) we came across ${transactions.length} transaction${transactions.length === 1 ? "" : "s"} under "${accountName}" that we'd like to confirm before finalizing. Could you tell us what ${transactions.length === 1 ? "it was" : "each was"} for? Just fill in the last column or reply with a quick note.`
-  );
-  const [outro, setOutro] = useState(`Thanks so much,\nIronbooks`);
-  const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<{ ok: true; recipients: string[]; messageId?: string | null } | { ok: false; message: string } | null>(null);
-
-  const BRAND = { teal: "#2D7A75", tealDark: "#1F5D58", navy: "#0F1F2E", slate: "#475569", border: "#CBD5E1", white: "#FFFFFF", tealLighter: "#F4F9F8" };
-  const rowsHtml = transactions
-    .map((t, i) => {
-      const bg = i % 2 === 0 ? BRAND.white : BRAND.tealLighter;
-      return `<tr style="background:${bg};">
-        <td style="border:1px solid ${BRAND.border};padding:8px 10px;color:${BRAND.slate};white-space:nowrap;">${esc(t.date)}</td>
-        <td style="border:1px solid ${BRAND.border};padding:8px 10px;color:${BRAND.navy};">${esc(t.name || t.memo || "—")}</td>
-        <td style="border:1px solid ${BRAND.border};padding:8px 10px;text-align:right;color:${BRAND.navy};font-weight:600;">${money(t.amount)}</td>
-        <td style="border:1px solid ${BRAND.border};padding:8px 10px;background:${BRAND.white};">&nbsp;</td>
-      </tr>`;
-    })
-    .join("");
-  const introHtml = intro.split("\n").map((l) => esc(l)).join("<br>");
-  const outroHtml = outro.split("\n").map((l) => esc(l)).join("<br>");
-  const html = `<div style="font-family:'Figtree',Helvetica,Arial,sans-serif;color:${BRAND.navy};max-width:640px;margin:0 auto;">
-  <div style="background:${BRAND.navy};color:${BRAND.white};padding:16px 20px;border-radius:10px 10px 0 0;font-size:19px;font-weight:700;">Ironbooks</div>
-  <div style="border:1px solid ${BRAND.border};border-top:none;padding:22px 20px;border-radius:0 0 10px 10px;">
-    <p style="line-height:1.55;margin:0 0 14px 0;">${introHtml}</p>
-    <table style="border-collapse:collapse;width:100%;font-size:13px;margin:6px 0 16px 0;border:1px solid ${BRAND.border};">
-      <thead><tr style="background:${BRAND.teal};">
-        <th style="border:1px solid ${BRAND.tealDark};padding:9px 10px;text-align:left;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Date</th>
-        <th style="border:1px solid ${BRAND.tealDark};padding:9px 10px;text-align:left;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Description</th>
-        <th style="border:1px solid ${BRAND.tealDark};padding:9px 10px;text-align:right;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Amount</th>
-        <th style="border:1px solid ${BRAND.tealDark};padding:9px 10px;text-align:left;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">What was this for?</th>
-      </tr></thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
-    <p style="line-height:1.55;margin:0;">${outroHtml}</p>
-  </div>
-</div>`;
-  const text = `${intro}\n\n${transactions.map((t) => `• ${t.date} — ${t.name || t.memo || "—"} — ${money(t.amount)}  → what was this for? ______`).join("\n")}\n\n${outro}`;
-
-  async function send() {
-    if (sending) return;
-    setSending(true);
-    setResult(null);
-    try {
-      const res = await fetch(`/api/clients/${clientLinkId}/ask-client-transactions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, html, text, account_name: accountName, transaction_count: transactions.length }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Couldn't send the email");
-      setResult({ ok: true, recipients: json.recipients || [], messageId: json.message_id || null });
-    } catch (e: any) {
-      setResult({ ok: false, message: e?.message || "Couldn't send the email" });
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-200 flex items-start justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-navy flex items-center gap-2"><Mail size={18} className="text-teal" /> Ask {clientName}</h3>
-            <p className="text-xs text-ink-slate mt-1">{transactions.length} transaction{transactions.length === 1 ? "" : "s"} from “{accountName}”. Edit below, preview, then send via Resend.</p>
-          </div>
-          <button onClick={onClose} className="text-ink-slate hover:text-navy"><XIcon size={20} /></button>
-        </div>
-
-        <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">Subject</label>
-            <input value={subject} onChange={(e) => setSubject(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none text-sm text-navy" />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">Intro</label>
-            <textarea value={intro} onChange={(e) => setIntro(e.target.value)} rows={4} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none text-sm text-navy leading-relaxed" />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">Transactions (preview)</label>
-            <div className="rounded-lg border border-gray-200 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead><tr className="bg-teal text-white">
-                  <th className="text-left px-3 py-2 font-semibold">Date</th>
-                  <th className="text-left px-3 py-2 font-semibold">Description</th>
-                  <th className="text-right px-3 py-2 font-semibold">Amount</th>
-                  <th className="text-left px-3 py-2 font-semibold">What was this for?</th>
-                </tr></thead>
-                <tbody>
-                  {transactions.map((t, i) => (
-                    <tr key={i} className="border-b border-gray-50">
-                      <td className="px-3 py-1.5 text-ink-slate whitespace-nowrap">{t.date}</td>
-                      <td className="px-3 py-1.5 text-navy">{t.name || t.memo || "—"}</td>
-                      <td className="px-3 py-1.5 text-right font-mono text-navy">{money(t.amount)}</td>
-                      <td className="px-3 py-1.5 text-ink-light italic">client fills in</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">Closing</label>
-            <textarea value={outro} onChange={(e) => setOutro(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none text-sm text-navy leading-relaxed" />
-          </div>
-          {result?.ok && (
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800 flex items-start gap-2">
-              <CheckCircle2 size={15} className="mt-0.5 flex-shrink-0" />
-              <span><strong>Sent via Resend</strong> to <strong>{result.recipients.join(", ")}</strong>.
-                <span className="block text-xs text-green-700 mt-0.5">Logged to this client&apos;s email history{result.messageId ? ` · Resend id ${result.messageId.slice(0, 12)}…` : ""}.</span>
-              </span>
-            </div>
-          )}
-          {result && !result.ok && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{result.message}</div>
-          )}
-        </div>
-
-        <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-3">
-          <button onClick={onClose} className="text-sm font-semibold text-ink-slate hover:text-navy">Close</button>
-          <button
-            onClick={send}
-            disabled={sending || (result?.ok ?? false)}
-            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg disabled:opacity-60"
-          >
-            {sending ? <Loader2 size={14} className="animate-spin" /> : result?.ok ? <CheckCircle2 size={14} /> : <Mail size={14} />}
-            {sending ? "Sending…" : result?.ok ? "Sent" : "Send via Resend"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -2756,97 +2560,19 @@ function formatCurrencyExact(n: number): string {
   })}`;
 }
 
-function DoubleLinkControl({
+function ViewAsClientButton({
   clientLinkId,
-  doubleName,
-  isLinked,
-  canUnlink,
+  portalPath = "/portal",
+  label = "View as client",
+  title = "Open this client's portal in a new tab as if you were them — for QA, screenshots, or debugging what they see",
 }: {
   clientLinkId: string;
-  doubleName: string | null;
-  isLinked: boolean;
-  canUnlink: boolean;
+  /** Where in the portal to land — e.g. "/portal/profit-loss" to preview the
+   *  exact client-facing P&L. */
+  portalPath?: string;
+  label?: string;
+  title?: string;
 }) {
-  const router = useRouter();
-  const [unlinking, setUnlinking] = useState(false);
-
-  // Not yet linked → keep the original CTA. Mirrors the prior single-button
-  // behaviour so unmatched clients see no change.
-  if (!isLinked) {
-    return (
-      <Link
-        href={`/clients/${clientLinkId}/match-double`}
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-slate hover:text-navy border border-gray-200 hover:border-gray-300 bg-white px-3 py-2 rounded-lg transition-colors"
-      >
-        <SettingsIcon size={14} />
-        Match to Double
-      </Link>
-    );
-  }
-
-  // Linked → show the bound name as a badge, plus an Unlink CTA (admin/lead
-  // only). The badge is a Link to /match-double so a re-match flow stays
-  // one click away even before unlinking.
-  async function handleUnlink() {
-    if (!doubleName) return;
-    if (
-      !confirm(
-        `Unlink "${doubleName}" from this client?\n\n` +
-        `This removes the Double Finance association. You can re-match at ` +
-        `any time. SNAP's Double sync (reclass completion, end-close pulls, ` +
-        `etc) will stop until a new match is made.`
-      )
-    ) {
-      return;
-    }
-    setUnlinking(true);
-    try {
-      const res = await fetch(`/api/clients/${clientLinkId}/unlink-double`, {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Unlink failed");
-        setUnlinking(false);
-        return;
-      }
-      // Server-rendered page → force a refresh so the chip flips back to
-      // "Match to Double" without manual reload.
-      router.refresh();
-    } catch (e: any) {
-      alert(e?.message || "Unlink failed");
-      setUnlinking(false);
-    }
-  }
-
-  return (
-    <div className="inline-flex items-center gap-1">
-      <Link
-        href={`/clients/${clientLinkId}/match-double`}
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 border border-emerald-300 hover:border-emerald-500 bg-emerald-50 hover:bg-emerald-100 px-3 py-2 rounded-lg transition-colors max-w-[260px]"
-        title={`Linked to Double: ${doubleName}\nClick to re-match a different Double client`}
-      >
-        <SettingsIcon size={14} className="shrink-0" />
-        <span className="truncate">
-          Double: <span className="font-bold">{doubleName || "(unnamed)"}</span>
-        </span>
-      </Link>
-      {canUnlink && (
-        <button
-          onClick={handleUnlink}
-          disabled={unlinking}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-800 border border-red-200 hover:border-red-400 bg-white hover:bg-red-50 px-2.5 py-2 rounded-lg transition-colors disabled:opacity-50"
-          title="Unlink this client from Double (admin/lead only)"
-        >
-          {unlinking ? <Loader2 size={12} className="animate-spin" /> : <XIcon size={12} />}
-          Unlink
-        </button>
-      )}
-    </div>
-  );
-}
-
-function ViewAsClientButton({ clientLinkId }: { clientLinkId: string }) {
   const [loading, setLoading] = useState(false);
 
   async function handleViewAs() {
@@ -2863,9 +2589,9 @@ function ViewAsClientButton({ clientLinkId }: { clientLinkId: string }) {
         setLoading(false);
         return;
       }
-      // Open the portal in a new tab so the bookkeeper doesn't lose the
-      // internal context they were just looking at.
-      window.open(data.redirect || "/portal", "_blank");
+      // Impersonation cookie is set — open the requested portal page directly
+      // so the bookkeeper sees exactly what the client sees, in a new tab.
+      window.open(portalPath || data.redirect || "/portal", "_blank");
     } catch (e: any) {
       alert(e?.message || "Failed");
     } finally {
@@ -2877,11 +2603,11 @@ function ViewAsClientButton({ clientLinkId }: { clientLinkId: string }) {
     <button
       onClick={handleViewAs}
       disabled={loading}
-      className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal hover:text-teal-dark border border-teal/40 hover:border-teal bg-white px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
-      title="Open this client's portal in a new tab as if you were them — for QA, screenshots, or debugging what they see"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal hover:text-teal-dark border border-gray-200 hover:border-teal bg-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+      title={title}
     >
       {loading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
-      View as client
+      {label}
     </button>
   );
 }

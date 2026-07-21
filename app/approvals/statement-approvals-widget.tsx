@@ -49,13 +49,13 @@ function periodLabel(period: string): string {
 export function StatementApprovalsWidget({ rows }: { rows: StatementApprovalRow[] }) {
   if (rows.length === 0) return null;
   return (
-    <div className="bg-white rounded-2xl border-2 border-purple-200 overflow-hidden">
-      <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center gap-2">
-        <FileCheck2 size={16} className="text-purple-700" />
+    <div className="bg-white rounded-2xl border-2 border-teal-border overflow-hidden">
+      <div className="px-5 py-3 bg-teal-light border-b border-teal-border flex items-center gap-2">
+        <FileCheck2 size={16} className="text-teal-dark" />
         <h2 className="font-bold text-navy text-sm">
           Statements awaiting your approval ({rows.length})
         </h2>
-        <span className="text-[11px] text-purple-800 ml-1">
+        <span className="text-[11px] text-teal-dark ml-1">
           review → approve → sends to the client &amp; closes the period
         </span>
       </div>
@@ -64,7 +64,7 @@ export function StatementApprovalsWidget({ rows }: { rows: StatementApprovalRow[
           <li key={`${r.client_link_id}-${r.period}`}>
             <Link
               href={r.kind === "cleanup" ? "/cleanup" : "/production"}
-              className="flex items-center gap-3 px-5 py-3 hover:bg-purple-50/40 transition-colors"
+              className="flex items-center gap-3 px-5 py-3 hover:bg-teal-light/40 transition-colors"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -75,7 +75,7 @@ export function StatementApprovalsWidget({ rows }: { rows: StatementApprovalRow[
                       : `${periodLabel(r.period)} month-end — ready for review`}
                   </span>
                   {r.kind === "cleanup" && (
-                    <span className="text-[10px] font-bold bg-violet-100 text-violet-800 px-1.5 py-0.5 rounded">
+                    <span className="text-[10px] font-bold bg-teal-light text-teal-dark px-1.5 py-0.5 rounded">
                       NEW CLIENT
                     </span>
                   )}
@@ -92,7 +92,7 @@ export function StatementApprovalsWidget({ rows }: { rows: StatementApprovalRow[
                   {r.concerns ? ` — “${r.concerns.slice(0, 120)}${r.concerns.length > 120 ? "…" : ""}”` : ""}
                 </div>
               </div>
-              <ArrowRight size={14} className="text-purple-600 flex-shrink-0" />
+              <ArrowRight size={14} className="text-teal-dark flex-shrink-0" />
             </Link>
           </li>
         ))}

@@ -333,7 +333,7 @@ export function CommsTracker({
               </h3>
             </div>
             <p className="text-xs text-ink-slate mb-3">
-              Copied to clipboard. Paste into Double and send to{" "}
+              Copied to clipboard. Paste into your email client and send to{" "}
               <strong>{data.client_name}</strong>. {askEmail.vendor_count}{" "}
               vendor{askEmail.vendor_count === 1 ? "" : "s"} from {askEmail.transaction_count}{" "}
               flagged transaction{askEmail.transaction_count === 1 ? "" : "s"}.

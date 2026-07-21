@@ -303,7 +303,7 @@ export function VendorRemediationClient() {
                           {t.kind === "set_payee" ? (
                             <>
                               <span className="font-medium">{t.current_account}</span>
-                              <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">set missing payee</span>
+                              <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-teal-dark bg-teal-light rounded px-1.5 py-0.5">set missing payee</span>
                             </>
                           ) : (
                             <>

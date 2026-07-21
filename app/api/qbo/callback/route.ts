@@ -113,7 +113,7 @@ export async function GET(request: Request) {
         await markQboConnectionHealthy(serviceClient as any, existing.id);
 
         return NextResponse.redirect(
-          `${origin}/clients/${existing.id}/match-double?qbo_reauth=true`
+          `${origin}/clients/${existing.id}?qbo_reauth=true`
         );
       }
 
@@ -166,9 +166,9 @@ export async function GET(request: Request) {
       // until the video URL env is set). Fail-soft so it never blocks the redirect.
       await sendWalkthroughIfNeeded(serviceClient as any, inserted.id).catch(() => {});
 
-      // Send them to the Double matching screen for the new client they just connected
+      // Land on the new client's workspace right after connecting.
       return NextResponse.redirect(
-        `${origin}/clients/${inserted.id}/match-double?qbo_connected=true`
+        `${origin}/clients/${inserted.id}?qbo_connected=true`
       );
     } else {
       // ============ EXISTING CLIENT, ADDING/REFRESHING QBO ============

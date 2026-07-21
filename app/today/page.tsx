@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
+import { Greeting } from "./greeting";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -50,6 +51,8 @@ export default async function TodayPage({
     .single();
   const isSenior = ["admin", "lead"].includes((actor as any)?.role || "");
   const isAdmin = (actor as any)?.role === "admin";
+  // First name for the Home greeting ("Good morning, Lisa").
+  const firstName = String((actor as any)?.full_name || "").trim().split(/\s+/)[0] || "";
 
   // Seniors can view /today AS any bookkeeper (?viewas=<user_id>) — every
   // client-scoped widget below narrows to that bookkeeper's clients.
@@ -71,6 +74,70 @@ export default async function TodayPage({
   }
   const { data: clients } = await clientsQuery.order("client_name");
   const eligibleClients = (clients || []) as any[];
+
+  // Manager-rejected work bounced back to this bookkeeper to rework — both
+  // cleanup (client_links.cleanup_review_state='failed_review') and production
+  // closes (monthly_rec_runs.status='failed_review'). Top of "Your work".
+  let rejectedQuery = service
+    .from("client_links")
+    .select("id, client_name, cleanup_review_notes, cleanup_review_rejected_at, assigned_bookkeeper_id")
+    .eq("is_active", true)
+    .eq("cleanup_review_state" as any, "failed_review");
+  if (scopeUserId) rejectedQuery = rejectedQuery.eq("assigned_bookkeeper_id", scopeUserId);
+  const { data: rejectedCleanupRows } = await rejectedQuery.order("cleanup_review_rejected_at", { ascending: false });
+
+  const { data: rejectedRunRows } = await (service as any)
+    .from("monthly_rec_runs")
+    .select("client_link_id, period, review_notes, rejected_at, client_links!inner(client_name, assigned_bookkeeper_id, is_active)")
+    .eq("status", "failed_review")
+    .order("rejected_at", { ascending: false });
+
+  // ── "This week" wins — home should show progress, not only pressure. ──
+  // Scoped like everything else: bookkeepers see their own wins, seniors see
+  // the team's (or one bookkeeper's via view-as). Defensive: zero on error.
+  const weekAgoIso = new Date(Date.now() - 7 * 86400000).toISOString();
+  let winCloses = 0, winCleanups = 0, winDupCount = 0, winDupTotal = 0;
+  try {
+    let closesQ = (service as any).from("monthly_rec_runs")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "complete").gte("completed_at", weekAgoIso);
+    if (scopeUserId) closesQ = closesQ.eq("completed_by", scopeUserId);
+    let cleanupsQ = (service as any).from("client_links")
+      .select("id", { count: "exact", head: true })
+      .gte("cleanup_completed_at", weekAgoIso);
+    if (scopeUserId) cleanupsQ = cleanupsQ.eq("cleanup_completed_by", scopeUserId);
+    let dupsQ = (service as any).from("dup_findings")
+      .select("amount").eq("status", "resolved").gte("resolved_at", weekAgoIso);
+    if (scopeUserId) dupsQ = dupsQ.eq("resolved_by", scopeUserId);
+    const [c1, c2, d] = await Promise.all([closesQ, cleanupsQ, dupsQ]);
+    winCloses = c1.count || 0;
+    winCleanups = c2.count || 0;
+    const dupRows = (d.data as any[]) || [];
+    winDupCount = dupRows.length;
+    winDupTotal = dupRows.reduce((s, r) => s + Math.abs(Number(r.amount) || 0), 0);
+  } catch { /* wins are decoration — never break the page */ }
+  const hasWins = winCloses + winCleanups + winDupCount > 0;
+
+  const rejectedForRework: any[] = [
+    ...((rejectedCleanupRows || []) as any[]).map((r) => ({
+      id: r.id,
+      client_name: r.client_name,
+      note: r.cleanup_review_notes,
+      kind: "Cleanup",
+    })),
+    ...(((rejectedRunRows || []) as any[])
+      .filter((r) => {
+        const cl = r.client_links || {};
+        if (!cl.is_active) return false;
+        return !scopeUserId || cl.assigned_bookkeeper_id === scopeUserId;
+      })
+      .map((r) => ({
+        id: r.client_link_id,
+        client_name: r.client_links?.client_name || "Client",
+        note: r.review_notes,
+        kind: `Close ${r.period}`,
+      }))),
+  ];
 
   // ─── Client answers to ask-client transaction questions ───
   // The client picked an account in their portal; the bookkeeper confirms
@@ -314,7 +381,7 @@ export default async function TodayPage({
   ) {
     return (
       <AppShell>
-        <TopBar title="Today" subtitle="Production daily review — clients on auto-recon" />
+        <TopBar title={<Greeting name={firstName} />} subtitle="Production daily review — clients on auto-recon" />
         <div className="px-8 py-12 max-w-2xl">
           <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center space-y-4">
             <div className="inline-flex w-16 h-16 rounded-full bg-teal-lighter items-center justify-center">
@@ -479,6 +546,7 @@ export default async function TodayPage({
   // viewing the whole fleet, cleanup lives in the Team band instead — so
   // don't count it toward the personal "Your work" total in that case.
   const workCount =
+    rejectedForRework.length +
     pendingFlags.length +
     pendingReclassRequests.length +
     clientAnswers.length +
@@ -500,8 +568,25 @@ export default async function TodayPage({
 
   return (
     <AppShell>
-      <TopBar title="Today" subtitle={`Production daily review · ${today}`} />
+      <TopBar title={<Greeting name={firstName} />} subtitle={`Production daily review · ${today}`} />
       <div className="px-8 py-6 max-w-5xl space-y-5">
+        {/* Your day, one sentence — everything below is detail on this line. */}
+        <p className="text-sm text-ink-slate -mt-2">
+          {workCount > 0 ? (
+            <>
+              <span className="font-bold text-navy">{workCount}</span> thing{workCount === 1 ? "" : "s"} need{workCount === 1 ? "s" : ""} you
+            </>
+          ) : (
+            <span className="font-semibold text-teal-dark">You&apos;re clear — nothing needs you right now</span>
+          )}
+          {rejectedForRework.length > 0 && (
+            <> · <span className="font-bold text-rust">{rejectedForRework.length}</span> sent back</>
+          )}
+          {eligibleClients.length > 0 && (
+            <> · <span className="font-bold text-navy">{monthlyClosedCount}</span>/{eligibleClients.length} closed · {closingPeriodLabel}</>
+          )}
+        </p>
+
         {/* Pulse bar — time-pressure at a glance + month-end status + view-as */}
         <PulseBar
           counts={counts}
@@ -512,6 +597,23 @@ export default async function TodayPage({
           bookkeepers={allBookkeepers}
           viewAs={viewAs}
         />
+
+        {/* This week's wins — progress, not just pressure. Hides when empty. */}
+        {hasWins && (
+          <p className="text-[12.5px] text-ink-slate flex items-center gap-1.5 -mt-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-teal inline-block" />
+            <span className="font-bold uppercase tracking-wider text-[10.5px] text-ink-light mr-1">Past 7 days</span>
+            {winCloses > 0 && (
+              <><span className="font-bold text-teal-dark">{winCloses}</span> book{winCloses === 1 ? "" : "s"} closed</>
+            )}
+            {winCleanups > 0 && (
+              <>{winCloses > 0 && <span className="text-ink-light">·</span>} <span className="font-bold text-teal-dark">{winCleanups}</span> cleanup{winCleanups === 1 ? "" : "s"} finished</>
+            )}
+            {winDupCount > 0 && (
+              <>{winCloses + winCleanups > 0 && <span className="text-ink-light">·</span>} <span className="font-bold text-teal-dark">${Math.round(winDupTotal).toLocaleString()}</span> in duplicates cleared</>
+            )}
+          </p>
+        )}
 
         {/* Dead QBO connections — seniors only. Sits right up top so a broken
             connection (which silently blocks recon) is impossible to miss.
@@ -536,6 +638,33 @@ export default async function TodayPage({
             </div>
           ) : (
             <div className="space-y-4">
+              {/* Manager-rejected cleanups to rework — highest priority. */}
+              {rejectedForRework.length > 0 && (
+                <div className="rounded-2xl border border-red-200 bg-red-50/60 p-4">
+                  <div className="text-sm font-bold text-red-800 mb-2">
+                    Sent back — needs rework ({rejectedForRework.length})
+                  </div>
+                  <div className="space-y-2">
+                    {rejectedForRework.map((r, i) => (
+                      <Link
+                        key={`${r.id}-${i}`}
+                        href={r.kind === "Cleanup" ? `/clients/${r.id}?tab=cleanup` : `/production`}
+                        className="block rounded-lg border border-red-200 bg-white px-3 py-2 hover:border-red-400 transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-semibold text-navy">{r.client_name}</span>
+                          <span className="text-[11px] text-red-700 font-semibold">{r.kind} · Failed review →</span>
+                        </div>
+                        {r.note && (
+                          <p className="text-xs text-ink-slate mt-0.5">
+                            <span className="font-semibold">Manager:</span> {r.note}
+                          </p>
+                        )}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* Client-waiting items first (a human is blocked on a reply),
                   then your cleanup deadlines. Each widget self-manages its
                   resolve state and hides at zero rows. */}
@@ -544,13 +673,19 @@ export default async function TodayPage({
                 <ReclassRequestsWidget requests={pendingReclassRequests} />
               )}
               {clientAnswers.length > 0 && <ClientAnswersWidget rows={clientAnswers} />}
-              {/* Duplicate findings for this bookkeeper's production clients
-                  (weekly sweep + close-time scans). Hides itself when empty. */}
-              <DuplicatesPanel clientIds={scopeUserId ? eligibleClients.map((c: any) => c.id) : null} />
               {inboundComms.length > 0 && <ClientInboxWidget rows={inboundComms} />}
               {scopeUserId && cleanupDeadlines.length > 0 && (
                 <CleanupDeadlinesWidget rows={cleanupDeadlines} showBookkeeper={false} />
               )}
+              {/* Duplicate findings — LAST in the stack and capped to the top 5
+                  by $ exposure. An admin's fleet-wide list can run 300+ rows,
+                  which used to bury the whole Home screen; the full list lives
+                  on the fleet page. Hides itself when empty. */}
+              <DuplicatesPanel
+                clientIds={scopeUserId ? eligibleClients.map((c: any) => c.id) : null}
+                maxRows={5}
+                viewAllHref={isAdmin ? "/admin/duplicates" : undefined}
+              />
             </div>
           )}
         </section>

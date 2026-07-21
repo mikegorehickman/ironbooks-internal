@@ -657,7 +657,7 @@ export function ReclassReview({
         <TabButton
           active={activeTab === "ask_client"}
           onClick={() => setActiveTab("ask_client")}
-          icon={<span className="w-2 h-2 rounded-full bg-purple-600" />}
+          icon={<span className="w-2 h-2 rounded-full bg-navy" />}
           label="Ask Client"
           count={partitioned.ask.length}
         />
@@ -701,7 +701,7 @@ export function ReclassReview({
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
                     onClick={() => moveToAskClient(partitioned.review.map((r) => r.id))}
-                    className="text-sm bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700"
+                    className="text-sm bg-navy text-white px-3 py-1.5 rounded-lg hover:bg-navy-deep"
                     title="Move all rows to Ask Client so the client can clarify"
                   >
                     Move all to Ask Client
@@ -736,7 +736,7 @@ export function ReclassReview({
                 </span>
                 <button
                   onClick={() => moveToAskClient(partitioned.flagged.map((r) => r.id))}
-                  className="text-sm bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 flex-shrink-0"
+                  className="text-sm bg-navy text-white px-3 py-1.5 rounded-lg hover:bg-navy-deep flex-shrink-0"
                   title="Move all rows to Ask Client so the client can clarify"
                 >
                   Move all to Ask Client
@@ -758,8 +758,8 @@ export function ReclassReview({
         {activeTab === "ask_client" && (
           <>
             {partitioned.ask.length > 0 && (
-              <div className="p-3 bg-purple-50 border-b border-purple-100 flex items-center justify-between gap-3">
-                <span className="text-sm text-purple-800">
+              <div className="p-3 bg-teal-light border-b border-teal-border flex items-center justify-between gap-3">
+                <span className="text-sm text-teal-dark">
                   <HelpCircle size={14} className="inline mr-1" />
                   Rows here will be sent to the client for clarification when you execute — one portal
                   message + one email listing all {partitioned.ask.length} transaction
@@ -768,7 +768,7 @@ export function ReclassReview({
                 </span>
                 <button
                   onClick={() => setEmailModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-sm bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 flex-shrink-0"
+                  className="inline-flex items-center gap-1.5 text-sm bg-navy text-white px-3 py-1.5 rounded-lg hover:bg-navy-deep flex-shrink-0"
                 >
                   <Mail size={14} />
                   Draft Email to Client ({partitioned.ask.length})
@@ -1149,7 +1149,7 @@ function RowTable({
                 <td className="px-4 py-2.5 text-right">
                   <button
                     onClick={() => onMoveToAskClient(r.id)}
-                    className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 inline-flex items-center gap-1"
+                    className="text-xs px-2 py-1 bg-teal-light text-teal-dark rounded hover:bg-teal-light inline-flex items-center gap-1"
                     title="Move this row to the Ask Client bucket"
                   >
                     <HelpCircle size={11} />
@@ -1711,7 +1711,7 @@ function ClientEmailModal({
         <div className="px-6 py-4 border-b border-gray-200 flex items-start justify-between">
           <div>
             <h3 className="text-lg font-bold text-navy flex items-center gap-2">
-              <Mail size={18} className="text-purple-600" />
+              <Mail size={18} className="text-teal-dark" />
               Email to {clientName}
             </h3>
             <p className="text-xs text-ink-slate mt-1">
@@ -1724,8 +1724,8 @@ function ClientEmailModal({
         </div>
 
         {/* Instructions strip */}
-        <div className="px-6 py-3 bg-purple-50 border-b border-purple-100 text-xs text-purple-900">
-          <strong>Send Email</strong> delivers this straight to {clientName} via Resend and logs it to their email history — the client fills in the right column and replies to you. <span className="text-purple-700">(Or use “Copy for Double” to paste it elsewhere.)</span>
+        <div className="px-6 py-3 bg-teal-light border-b border-teal-border text-xs text-teal-dark">
+          <strong>Send Email</strong> delivers this straight to {clientName} via Resend and logs it to their email history — the client fills in the right column and replies to you. <span className="text-teal-dark">(Or use “Copy for Double” to paste it elsewhere.)</span>
         </div>
 
         {/* Body */}
@@ -1738,7 +1738,7 @@ function ClientEmailModal({
               </label>
               <button
                 onClick={copySubject}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-purple-700 hover:text-purple-900"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-teal-dark hover:text-teal-dark"
               >
                 {copied === "subject" ? <CheckCircle2 size={12} /> : <Send size={12} />}
                 {copied === "subject" ? "Copied" : "Copy subject"}
@@ -1876,7 +1876,7 @@ function ClientEmailModal({
             )}
             <button
               onClick={copyBody}
-              className="inline-flex items-center gap-2 bg-white border border-purple-200 hover:bg-purple-50 text-purple-700 text-sm font-semibold px-4 py-2.5 rounded-lg"
+              className="inline-flex items-center gap-2 bg-white border border-teal-border hover:bg-teal-light text-teal-dark text-sm font-semibold px-4 py-2.5 rounded-lg"
             >
               {copied === "body" ? <CheckCircle2 size={14} /> : <Send size={14} />}
               {copied === "body" ? "Copied!" : "Copy for Double"}

@@ -5,7 +5,7 @@ import { TopBar } from "@/components/TopBar";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { notFound, redirect } from "next/navigation";
 import { ClientProfileShell } from "./client-profile-shell";
-import { deriveLifecycleForClient } from "@/lib/client-lifecycle";
+import { deriveClientLifecycle, MACRO_STAGE_META } from "@/lib/client-lifecycle";
 import { LifecyclePill } from "@/components/LifecyclePill";
 import { ClientSwitcher } from "@/components/ClientSwitcher";
 import {
@@ -340,8 +340,11 @@ export default async function ClientProfilePage({
   // Precise lifecycle stage for the header pill — the unmistakable
   // "onboarding/cleanup vs in-production" signal, same source as /clients.
   let lifecycle = null;
+  let macroStage: "onboarding" | "cleanup" | "production" | null = null;
   try {
-    lifecycle = await deriveLifecycleForClient(service, clientLink as any);
+    const lc = await deriveClientLifecycle(service, clientLink as any);
+    lifecycle = lc.status;
+    macroStage = lc.stage;
   } catch { /* non-critical */ }
 
   return (
@@ -381,7 +384,21 @@ export default async function ClientProfilePage({
                 <FileText size={13} /> Export Tax Docs
               </Link>
             )}
-            {lifecycle && <LifecyclePill status={lifecycle} size="md" />}
+            {/* One stage indicator only — the detailed LifecyclePill (e.g. "In
+                production") already implies the macro stage, so the separate
+                macro pill ("Production") next to it was redundant. */}
+            {lifecycle ? (
+              <LifecyclePill status={lifecycle} size="md" />
+            ) : (
+              macroStage && (
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${MACRO_STAGE_META[macroStage].tone}`}
+                  title={MACRO_STAGE_META[macroStage].description}
+                >
+                  {MACRO_STAGE_META[macroStage].label}
+                </span>
+              )
+            )}
             <ClientSwitcher
               currentId={clientLink.id}
               currentName={clientLink.client_name || "Client"}
@@ -394,6 +411,8 @@ export default async function ClientProfilePage({
         actorRole={role}
         onboarding={onboarding}
         bsCleanupOwed={bsCleanupOwed}
+        macroStage={macroStage}
+        lifecycleStatus={lifecycle}
         overview={{
           outstanding,
           activity,

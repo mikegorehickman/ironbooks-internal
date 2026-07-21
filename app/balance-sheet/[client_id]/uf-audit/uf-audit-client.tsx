@@ -72,13 +72,13 @@ interface QboAccount {
 
 const RESOLUTION_LABELS: Record<string, { label: string; color: string; description: string }> = {
   pending: { label: "Needs decision", color: "bg-amber-100 text-amber-800", description: "Decide what to do with this orphan" },
-  owner_draw: { label: "Owner Draw", color: "bg-purple-100 text-purple-800", description: "Cash kept by owner — JE: Dr Owner Draw, Cr UF" },
+  owner_draw: { label: "Owner Draw", color: "bg-teal-light text-teal-dark", description: "Cash kept by owner — JE: Dr Owner Draw, Cr UF" },
   write_off: { label: "Write-off", color: "bg-red-100 text-red-800", description: "Not a real payment — JE: Dr Bad Debt (or similar), Cr UF" },
   duplicate_recategorize: { label: "Duplicate", color: "bg-blue-100 text-blue-800", description: "Real deposit exists elsewhere — bookkeeper finds + re-categorizes in QBO" },
   void_duplicate: { label: "Void duplicate", color: "bg-rose-100 text-rose-800", description: "Confirmed duplicate — VOIDS the duplicate Payment in QBO (removes the double-counted cash)" },
   void_pair: { label: "Void pair", color: "bg-rose-100 text-rose-900", description: "CRM duplicate pair — VOIDS the payment AND the invoice it was applied to. UF down, A/R down by any open invoice balance, income backed out. No bank involved." },
   create_deposit: { label: "Create deposit", color: "bg-teal-100 text-teal-800", description: "Real money still in UF — posts a Bank Deposit to sweep UF → the chosen bank account" },
-  clear_duplicate: { label: "Clear duplicate", color: "bg-indigo-100 text-indigo-800", description: "Cash already in bank via a separate bank-feed deposit — posts a $0 deposit that clears UF and reverses the double-counted income. Bank + A/R untouched." },
+  clear_duplicate: { label: "Clear duplicate", color: "bg-teal-light text-teal-dark", description: "Cash already in bank via a separate bank-feed deposit — posts a $0 deposit that clears UF and reverses the double-counted income. Bank + A/R untouched." },
   ask_client: { label: "Queued for client", color: "bg-orange-100 text-orange-800", description: "Added to the confirmation email — awaiting client reply, no auto-write" },
   manual_investigation: { label: "Investigate", color: "bg-gray-100 text-gray-700", description: "Flag, do nothing automated" },
   executed: { label: "Done ✓", color: "bg-emerald-100 text-emerald-700", description: "Posted to QBO" },
@@ -455,7 +455,7 @@ export function UfAuditClient({
             <button
               onClick={() => draftEmail(emailFilter)}
               disabled={emailLoading || scan.orphan_count === 0}
-              className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+              className="inline-flex items-center gap-1.5 bg-navy hover:bg-navy-deep disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
               title={`Draft a branded email to ${clientName}'s owner asking what happened to each orphan payment`}
             >
               {emailLoading ? (
@@ -1388,7 +1388,7 @@ function EmailDraftModal({
         <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <Mail size={18} className="text-purple-600" />
+              <Mail size={18} className="text-teal-dark" />
               <h3 className="text-lg font-bold text-navy">
                 Draft client email — {clientName}
               </h3>

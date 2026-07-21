@@ -163,14 +163,14 @@ export default async function ArRecoveryLanding({
           {/* Uncategorized Income Recovery */}
           <Link
             href={`/balance-sheet/${client_id}/uncat-income-recovery`}
-            className="block p-5 bg-white border-2 border-slate-200 rounded-lg hover:border-purple-500 hover:shadow-md transition group"
+            className="block p-5 bg-white border-2 border-slate-200 rounded-lg hover:border-teal hover:shadow-md transition group"
           >
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-8 h-8 bg-purple-100 text-purple-700 rounded flex items-center justify-center">
+              <div className="w-8 h-8 bg-teal-light text-teal-dark rounded flex items-center justify-center">
                 <Sparkles size={16} />
               </div>
               <div className="font-bold text-navy">Uncategorized Income Recovery</div>
-              <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-semibold">
+              <span className="text-[10px] px-1.5 py-0.5 bg-teal-light text-teal-dark rounded font-semibold">
                 NEW
               </span>
             </div>
@@ -180,7 +180,7 @@ export default async function ArRecoveryLanding({
               Claude infers customer from bank descriptions, one-click apply.
             </p>
             {uncatScan && (
-              <div className="text-[11px] text-purple-700 font-semibold">
+              <div className="text-[11px] text-teal-dark font-semibold">
                 Last scan: {uncatScan.deposits_scanned || 0} deposits ·{" "}
                 {Number(uncatScan.total_uncat_amount || 0).toLocaleString("en-US", {
                   style: "currency",

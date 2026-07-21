@@ -534,8 +534,8 @@ function ActionRow({
           </div>
         ) : action.action === "merge" && action.new_name ? (
           <div className="flex items-center gap-1.5">
-            <GitMerge size={13} className="text-purple-600 flex-shrink-0" />
-            <span className="font-semibold text-purple-700 text-xs">Merge into {action.new_name}</span>
+            <GitMerge size={13} className="text-teal-dark flex-shrink-0" />
+            <span className="font-semibold text-teal-dark text-xs">Merge into {action.new_name}</span>
           </div>
         ) : action.new_name ? (
           <div className="flex items-center gap-1.5">

@@ -2,16 +2,22 @@ import { AppShell } from "@/components/AppShell";
 import { TopBar } from "@/components/TopBar";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { sweepStaleJobs } from "@/lib/stale-jobs";
-import { Plus } from "lucide-react";
 import { ClientsList } from "./clients-list";
-import { CompletedAccounts } from "./completed-accounts";
 import { InReviewAccounts } from "./in-review-accounts";
-import { ManagerDashboard, type ManagerRow } from "./manager-dashboard";
+import { type ManagerRow } from "./manager-dashboard";
 import { StripeInviteSuggestions, type StripeInviteSuggestion } from "./stripe-invite-suggestions";
-import { deriveLifecycleStatus } from "@/lib/client-lifecycle";
+import { deriveLifecycleStatus, macroStageOfStatus } from "@/lib/client-lifecycle";
 import { previousMonthPeriod } from "@/lib/monthly-rec";
 
-export default async function ClientsPage() {
+export default async function ClientsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ stage?: string }>;
+}) {
+  const sp = (await searchParams) || {};
+  const initialStage = ["onboarding", "cleanup", "production"].includes(sp.stage || "")
+    ? (sp.stage as "onboarding" | "cleanup" | "production")
+    : "all";
   // Watchdog: auto-fail any job that's been hung in `executing` past its
   // window before we render. Cheap (indexed UPDATEs, usually 0 rows) and
   // means a bookkeeper hitting the clients page after a silent worker
@@ -152,6 +158,10 @@ export default async function ClientsPage() {
       };
     });
   }
+
+  // Ids of clients with a pending Stripe-invite suggestion — drives the
+  // "Stripe" filter pill + its action panel on the unified Clients table.
+  const stripePendingIds = new Set<string>(stripeInviteSuggestions.map((s) => s.client_link_id));
 
   const linksData = linksRes.data || [];
 
@@ -601,43 +611,34 @@ export default async function ClientsPage() {
             : "") +
           ` · ${completedClients.length} completed`
         }
-        actions={
-          <a
-            href="/api/qbo/connect"
-            className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-4 py-2 rounded-lg"
-          >
-            <Plus size={16} />
-            Connect QuickBooks Client
-          </a>
-        }
       />
       <div className="px-8 py-6 space-y-8">
-        {/* Nightly stripe-invite-detector results — clients with Stripe-tagged
-            QBO deposits but no connection. Rehomed from the retired /dashboard
-            nav entry; one-click Send invite. Senior-only. */}
-        {canEdit && stripeInviteSuggestions.length > 0 && (
-          <StripeInviteSuggestions suggestions={stripeInviteSuggestions} />
-        )}
-        <ManagerDashboard
-          rows={managerRows}
-          bookkeepers={(bookkeepersRes.data || []).map((b: any) => ({ id: b.id, full_name: b.full_name }))}
-          canEdit={!!canEdit}
-        />
+        {/* Re-IA: ONE clients table across every lifecycle stage. The old
+            ManagerDashboard/CompletedAccounts, the In-Review strip and the
+            Stripe-invite strip are all folded in — they surface as filter
+            pills, and their action panels appear only when that filter is
+            active (no always-on tables stacked above). QBO connect lives on the
+            client workspace now, not a generic top-of-page button. */}
         <ClientsList
-          initialClients={activeClients.map((c: any) => ({ ...c, lifecycle: lifecycleById.get(c.id) ?? null })) as any}
+          initialClients={enrichedClients
+            .filter((c: any) => c.id)
+            .map((c: any) => {
+              const lc = lifecycleById.get(c.id) ?? null;
+              return {
+                ...c,
+                lifecycle: lc,
+                macroStage: lc ? macroStageOfStatus(lc) : null,
+                needs_review: inReviewById.has(c.id),
+                stripe_pending: stripePendingIds.has(c.id),
+              };
+            }) as any}
+          initialStage={initialStage}
           bookkeepers={bookkeepersRes.data || []}
           currentUserId={user?.id || ""}
           canEdit={!!canEdit}
+          inReviewClients={inReviewClients}
+          stripeSuggestions={canEdit ? stripeInviteSuggestions : []}
         />
-        {inReviewClients.length > 0 && (
-          <InReviewAccounts
-            clients={inReviewClients}
-            canApprove={!!canEdit}
-          />
-        )}
-        {completedClients.length > 0 && (
-          <CompletedAccounts clients={completedClients} canEdit={!!canEdit} />
-        )}
       </div>
     </AppShell>
   );

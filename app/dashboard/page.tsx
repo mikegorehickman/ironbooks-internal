@@ -526,11 +526,11 @@ export default async function DashboardPage() {
             first so fresh opportunities are visible immediately. */}
         {readyForCleanup.length > 0 && (
           <div className="rounded-xl bg-white border border-gray-200 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-white">
+            <div className="px-5 py-4 border-b border-gray-200 bg-teal-lighter">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-lg bg-purple-100">
-                    <CreditCard size={16} className="text-purple-700" />
+                  <div className="p-2 rounded-lg bg-teal-light">
+                    <CreditCard size={16} className="text-teal-dark" />
                   </div>
                   <div>
                     <h2 className="text-base font-bold text-navy">
@@ -541,7 +541,7 @@ export default async function DashboardPage() {
                     </p>
                   </div>
                 </div>
-                <span className="rounded-full bg-purple-600 text-white text-xs font-bold px-2.5 py-1">
+                <span className="rounded-full bg-navy text-white text-xs font-bold px-2.5 py-1">
                   {readyForCleanup.length}
                 </span>
               </div>
@@ -556,7 +556,7 @@ export default async function DashboardPage() {
                   <Link
                     key={c.id}
                     href={`/jobs/new?client=${c.id}`}
-                    className="flex items-center gap-4 px-5 py-3 hover:bg-purple-50/40 transition-colors"
+                    className="flex items-center gap-4 px-5 py-3 hover:bg-teal-light/40 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -930,8 +930,8 @@ export default async function DashboardPage() {
           <div className="rounded-xl bg-white border border-gray-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-purple-100">
-                  <CreditCard size={16} className="text-purple-600" />
+                <div className="p-2 rounded-lg bg-teal-light">
+                  <CreditCard size={16} className="text-teal-dark" />
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-navy flex items-center gap-2">
@@ -949,7 +949,7 @@ export default async function DashboardPage() {
                   </p>
                 </div>
               </div>
-              <span className="text-xs font-semibold text-purple-700">
+              <span className="text-xs font-semibold text-teal-dark">
                 {stripeConnected} total connected
               </span>
             </div>

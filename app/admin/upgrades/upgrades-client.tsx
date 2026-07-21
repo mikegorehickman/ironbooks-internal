@@ -11,7 +11,7 @@ import type { UpgradeReport, UpgradeRow, Recommendation } from "@/lib/upgrade-si
 const TIER_COLORS: Record<string, string> = {
   insight: "bg-teal-light text-teal",
   discipline: "bg-blue-100 text-blue-700",
-  vision: "bg-violet-100 text-violet-700",
+  vision: "bg-teal-light text-teal-dark",
   scale: "bg-navy/10 text-navy",
 };
 
@@ -333,7 +333,7 @@ function UpgradeCard({
             <button
               onClick={() => onDraftMessage(r)}
               disabled={busy[`msg-${r.clientLinkId}`]}
-              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-purple-700 border border-purple-200 hover:bg-purple-50 rounded-md px-2.5 py-1"
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-teal-dark border border-teal-border hover:bg-teal-light rounded-md px-2.5 py-1"
               title="Draft an upgrade message using their Grain call history"
             >
               {busy[`msg-${r.clientLinkId}`] ? <Loader2 size={12} className="animate-spin" /> : <MessageSquare size={12} />}
@@ -404,7 +404,7 @@ function MessageModal({
         <div className="px-5 py-4 border-b border-gray-200 flex items-start justify-between gap-3">
           <div>
             <h3 className="font-bold text-navy flex items-center gap-2">
-              <MessageSquare size={16} className="text-purple-600" /> Upgrade message — {data.row.company}
+              <MessageSquare size={16} className="text-teal-dark" /> Upgrade message — {data.row.company}
             </h3>
             <p className="text-xs text-ink-slate mt-1">
               {data.usedGrain

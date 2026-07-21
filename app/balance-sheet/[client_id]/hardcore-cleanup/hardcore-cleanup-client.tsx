@@ -77,7 +77,7 @@ interface QboAccount {
 const RESOLUTION_LABELS: Record<string, { label: string; color: string }> = {
   pending: { label: "Pending", color: "bg-amber-100 text-amber-800" },
   je_writeoff: { label: "JE write-off", color: "bg-red-100 text-red-800" },
-  direct_void: { label: "Void", color: "bg-purple-100 text-purple-800" },
+  direct_void: { label: "Void", color: "bg-teal-light text-teal-dark" },
   keep: { label: "Keep", color: "bg-emerald-100 text-emerald-800" },
   manual: { label: "Manual", color: "bg-gray-100 text-ink-slate" },
   executed: { label: "Done ✓", color: "bg-emerald-200 text-emerald-900" },
@@ -962,7 +962,7 @@ function ItemRow({
             <div className="text-xs text-ink-slate mt-1 italic">{item.reasoning}</div>
           )}
           {crmJob && (
-            <div className="text-[11px] text-purple-700 mt-1">
+            <div className="text-[11px] text-teal-dark mt-1">
               CRM job: {crmJob.crm_job_id ? `#${crmJob.crm_job_id} · ` : ""}
               {crmJob.job_name || crmJob.customer_name} · {fmtMoney(crmJob.amount)} · {crmJob.job_date || "no date"}
             </div>
@@ -1028,9 +1028,9 @@ function ItemRow({
           </div>
 
           {/* Direct void */}
-          <div className="bg-purple-50 border border-purple-200 rounded p-3">
-            <div className="text-xs font-bold text-purple-900 mb-1">Direct void (open period only)</div>
-            <div className="text-[11px] text-purple-800 mb-2">
+          <div className="bg-teal-light border border-teal-border rounded p-3">
+            <div className="text-xs font-bold text-teal-dark mb-1">Direct void (open period only)</div>
+            <div className="text-[11px] text-teal-dark mb-2">
               Voids the invoice in QBO. Use only when the invoice is in a period that hasn't been
               reported on — otherwise filed totals change.{" "}
               <strong>If the invoice has any payments applied, voiding leaves them as orphan
@@ -1054,7 +1054,7 @@ function ItemRow({
                     if (!confirm(msg)) return;
                     onResolve([item.id], { resolution: "direct_void" });
                   }}
-                  className="px-2 py-1 bg-purple-600 text-white text-xs font-semibold rounded hover:bg-purple-700"
+                  className="px-2 py-1 bg-navy text-white text-xs font-semibold rounded hover:bg-navy-deep"
                 >
                   <Trash2 size={11} className="inline mr-1" />
                   Mark for void
@@ -1303,7 +1303,7 @@ function BulkActionsByType({
                 <>
                   <button
                     onClick={() => confirmAndResolve(g.ids, "direct_void", "Void in QBO")}
-                    className="px-2.5 py-1 text-[11px] font-bold rounded bg-purple-600 text-white hover:bg-purple-700"
+                    className="px-2.5 py-1 text-[11px] font-bold rounded bg-navy text-white hover:bg-navy-deep"
                     title="Void each QBO invoice. Open-period only."
                   >
                     Void all {g.rows.length}

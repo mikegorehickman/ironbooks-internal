@@ -758,7 +758,7 @@ export function CoaAuditClient({
                         )}
                         {(d.wrongParent?.length || 0) > 0 && (
                           <div>
-                            <div className="font-semibold text-violet-700 mb-1">
+                            <div className="font-semibold text-teal-dark mb-1">
                               Wrong nesting — move under the master heading ({d.wrongParent!.length})
                             </div>
                             <div className="text-ink-light mb-1">
@@ -784,7 +784,7 @@ export function CoaAuditClient({
                             <div>
                               <div className="font-semibold text-orange-600 mb-1 flex items-center gap-2">
                                 Merge duplicates into the master account ({merges.length})
-                                {d.aiSuggestions && <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">AI-suggested</span>}
+                                {d.aiSuggestions && <span className="text-[10px] font-bold text-teal-dark bg-teal-light px-1.5 py-0.5 rounded">AI-suggested</span>}
                               </div>
                               {merges.length > 0 ? (
                                 <>

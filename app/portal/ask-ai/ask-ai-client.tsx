@@ -268,7 +268,7 @@ export function AskAiClient({ starters }: { starters: string[] }) {
         {empty ? (
           <div className="h-full flex flex-col">
             <div className="text-center pt-6 pb-5">
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-teal to-teal-dark flex items-center justify-center shadow-sm">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-teal-lighter-dark flex items-center justify-center shadow-sm">
                 <Wand2 size={26} className="text-white" />
               </div>
               <div className="font-bold text-navy text-lg mt-3">What can I help you understand?</div>
@@ -328,7 +328,7 @@ export function AskAiClient({ starters }: { starters: string[] }) {
           <button
             onClick={() => send()}
             disabled={streaming || !input.trim()}
-            className="px-4 py-2 bg-gradient-to-r from-teal to-teal-dark text-white rounded-lg text-sm font-semibold hover:from-teal-dark hover:to-teal-dark disabled:opacity-50 inline-flex items-center gap-1.5 flex-shrink-0 transition-all"
+            className="px-4 py-2 bg-teal-lighter-dark text-white rounded-lg text-sm font-semibold hover:from-teal-dark hover:to-teal-dark disabled:opacity-50 inline-flex items-center gap-1.5 flex-shrink-0 transition-all"
           >
             {streaming ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
             {streaming ? "Thinking…" : "Send"}
@@ -358,7 +358,7 @@ function StarterCard({ text, onClick, disabled }: { text: string; onClick: () =>
 function UserBubble({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex justify-end">
-      <div className="bg-gradient-to-br from-teal to-teal-dark text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] text-sm whitespace-pre-wrap shadow-sm">
+      <div className="bg-teal-lighter-dark text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] text-sm whitespace-pre-wrap shadow-sm">
         {children}
       </div>
     </div>
@@ -368,7 +368,7 @@ function UserBubble({ children }: { children: React.ReactNode }) {
 function AiBubble({ children, streaming }: { children: React.ReactNode; streaming?: boolean }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal to-teal-dark flex items-center justify-center flex-shrink-0 shadow-sm">
+      <div className="w-8 h-8 rounded-full bg-teal-lighter-dark flex items-center justify-center flex-shrink-0 shadow-sm">
         <Sparkles size={14} className="text-white" />
       </div>
       <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-navy max-w-[85%] leading-relaxed">

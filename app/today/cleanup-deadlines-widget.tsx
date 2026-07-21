@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
 import { AlarmClock, ArrowRight } from "lucide-react";
 
 export interface CleanupDeadlineRow {
@@ -21,8 +24,12 @@ export function CleanupDeadlinesWidget({
   rows: CleanupDeadlineRow[];
   showBookkeeper: boolean;
 }) {
+  // Home shows the top 5 (overdue first — rows arrive sorted); toggle for the rest.
+  const [showAll, setShowAll] = useState(false);
   if (rows.length === 0) return null;
   const overdueCount = rows.filter((r) => r.overdue).length;
+  const sorted = [...rows].sort((a, b) => Number(b.overdue) - Number(a.overdue));
+  const visible = showAll ? sorted : sorted.slice(0, 5);
   return (
     <div className={`bg-white rounded-2xl border-2 overflow-hidden ${overdueCount > 0 ? "border-red-300" : "border-teal/30"}`}>
       <div className={`px-5 py-3 border-b flex items-center gap-2 ${overdueCount > 0 ? "bg-red-50 border-red-100" : "bg-teal/5 border-teal/20"}`}>
@@ -37,7 +44,7 @@ export function CleanupDeadlinesWidget({
         )}
       </div>
       <ul className="divide-y divide-gray-50">
-        {rows.map((r) => (
+        {visible.map((r) => (
           <li key={r.client_link_id}>
             <Link
               href="/cleanup"
@@ -69,6 +76,14 @@ export function CleanupDeadlinesWidget({
           </li>
         ))}
       </ul>
+      {rows.length > 5 && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="w-full px-5 py-2.5 text-left text-xs font-semibold text-teal-dark hover:text-navy border-t border-hairline transition-colors"
+        >
+          {showAll ? "Show top 5" : `Show all ${rows.length}`}
+        </button>
+      )}
     </div>
   );
 }

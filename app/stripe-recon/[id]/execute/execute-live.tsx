@@ -121,8 +121,8 @@ export function StripeReconExecute({
                 <XCircle size={28} className="text-red-600" />
               </div>
             ) : (
-              <div className="rounded-full w-14 h-14 flex items-center justify-center bg-purple-100">
-                <Loader2 size={28} className="text-purple-600 animate-spin" />
+              <div className="rounded-full w-14 h-14 flex items-center justify-center bg-teal-light">
+                <Loader2 size={28} className="text-teal-dark animate-spin" />
               </div>
             )}
             <div>
@@ -200,12 +200,12 @@ export function StripeReconExecute({
                     ) : m.error_message ? (
                       <XCircle size={14} className="text-red-500" />
                     ) : (
-                      <Loader2 size={14} className="text-purple-500 animate-spin" />
+                      <Loader2 size={14} className="text-teal-dark animate-spin" />
                     )}
                   </div>
                   <div>
                     <div className="flex items-center gap-1.5 font-semibold text-sm text-navy">
-                      <CreditCard size={12} className="text-purple-500" />
+                      <CreditCard size={12} className="text-teal-dark" />
                       ${Number(m.deposit_amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}
                     </div>
                     <div className="text-[11px] text-ink-light">{m.qbo_deposit_id}</div>
@@ -213,7 +213,7 @@ export function StripeReconExecute({
                   <div className="text-xs text-ink-slate truncate">
                     {(m.matched_customer_names || []).join(", ") || "—"}
                   </div>
-                  <div className="text-xs text-purple-700">
+                  <div className="text-xs text-teal-dark">
                     ${Number(m.computed_fee).toFixed(2)}
                     {isCanada && Number(m.computed_tax) > 0 && (
                       <span className="text-blue-600 ml-1">+ ${Number(m.computed_tax).toFixed(2)}</span>
@@ -225,7 +225,7 @@ export function StripeReconExecute({
                     ) : m.error_message ? (
                       <span className="text-red-700" title={m.error_message}>Failed</span>
                     ) : (
-                      <span className="text-purple-600">Pending</span>
+                      <span className="text-teal-dark">Pending</span>
                     )}
                   </div>
                 </div>

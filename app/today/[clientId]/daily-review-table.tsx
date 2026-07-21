@@ -294,7 +294,7 @@ export function DailyReviewTable({
             <button
               onClick={() => bulkAct("ask_client")}
               disabled={bulkBusy}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500 hover:bg-purple-600 text-white text-xs font-bold disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-navy hover:bg-navy text-white text-xs font-bold disabled:opacity-50"
             >
               <HelpCircle size={12} /> Ask client
             </button>
@@ -506,7 +506,7 @@ export function DailyReviewTable({
                           <button
                             onClick={() => act(r, "ask_client")}
                             disabled={isBusy}
-                            className="inline-flex items-center gap-1 px-2 py-1 border border-purple-300 text-purple-700 text-xs rounded hover:bg-purple-50 disabled:opacity-50"
+                            className="inline-flex items-center gap-1 px-2 py-1 border border-teal-border text-teal-dark text-xs rounded hover:bg-teal-light disabled:opacity-50"
                             title="Ask: hold for client input, surfaces in next client email"
                           >
                             <HelpCircle size={11} />
@@ -586,9 +586,9 @@ function SourceBadge({ source }: { source: string | null }) {
   if (!source) return <span className="text-xs text-ink-light">—</span>;
   const labels: Record<string, { label: string; color: string; icon?: React.ReactNode }> = {
     kb: { label: "KB", color: "bg-blue-50 text-blue-700 border-blue-100" },
-    bank_rule: { label: "Bank rule", color: "bg-purple-50 text-purple-700 border-purple-100" },
+    bank_rule: { label: "Bank rule", color: "bg-teal-light text-teal-dark border-teal-border" },
     ai: { label: "AI", color: "bg-teal-lighter text-teal border-teal/20", icon: <Sparkles size={9} /> },
-    web_search: { label: "Web", color: "bg-indigo-50 text-indigo-700 border-indigo-100" },
+    web_search: { label: "Web", color: "bg-teal-light text-teal-dark border-teal-border" },
     unmatched: { label: "Unmatched", color: "bg-gray-50 text-ink-slate border-gray-100" },
   };
   const cfg = labels[source] || labels.unmatched;
@@ -606,7 +606,7 @@ function DecisionBadge({ decision }: { decision: string }) {
     approved: { label: "Approved", color: "bg-emerald-100 text-emerald-700" },
     auto_approved: { label: "Auto-approved", color: "bg-teal-lighter text-teal" },
     rejected: { label: "Rejected", color: "bg-red-100 text-red-700" },
-    ask_client: { label: "Ask client", color: "bg-purple-100 text-purple-700" },
+    ask_client: { label: "Ask client", color: "bg-teal-light text-teal-dark" },
     pending: { label: "Pending", color: "bg-amber-100 text-amber-700" },
   };
   const c = cfg[decision] || cfg.pending;

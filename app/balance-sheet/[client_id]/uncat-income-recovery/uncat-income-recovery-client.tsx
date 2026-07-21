@@ -84,7 +84,7 @@ const RESOLUTION_LABELS: Record<string, { label: string; color: string }> = {
   customer_deposits: { label: "Customer Deposits", color: "bg-blue-100 text-blue-800" },
   ask_client: { label: "Ask Client", color: "bg-orange-100 text-orange-800" },
   write_off: { label: "Write-off", color: "bg-red-100 text-red-800" },
-  move_to_revenue: { label: "Move to revenue", color: "bg-purple-100 text-purple-800" },
+  move_to_revenue: { label: "Move to revenue", color: "bg-teal-light text-teal-dark" },
   manual_investigation: { label: "Investigate", color: "bg-gray-100 text-gray-700" },
   executed: { label: "Done ✓", color: "bg-emerald-200 text-emerald-900" },
   failed: { label: "Failed", color: "bg-red-200 text-red-900" },
@@ -94,7 +94,7 @@ const RESOLUTION_LABELS: Record<string, { label: string; color: string }> = {
 const CLASSIFICATION_LABELS: Record<string, { label: string; color: string }> = {
   exact_single: { label: "1 match", color: "bg-emerald-100 text-emerald-800" },
   exact_multi: { label: "Multiple", color: "bg-amber-100 text-amber-800" },
-  ai_inferred: { label: "AI guess", color: "bg-purple-100 text-purple-800" },
+  ai_inferred: { label: "AI guess", color: "bg-teal-light text-teal-dark" },
   no_match: { label: "No match", color: "bg-gray-100 text-ink-slate" },
 };
 
@@ -631,7 +631,7 @@ function AiStatusBanner({
 
   if (scan.ai_status === "running") {
     return (
-      <div className="p-3 bg-purple-50 border border-purple-200 rounded text-sm text-purple-900 flex items-center gap-2">
+      <div className="p-3 bg-teal-light border border-teal-border rounded text-sm text-teal-dark flex items-center gap-2">
         <Loader2 size={14} className="animate-spin" />
         AI customer inference is running…
       </div>
@@ -641,7 +641,7 @@ function AiStatusBanner({
   if (scan.ai_status === "success") {
     if (scan.ai_items_inferred === 0) return null;
     return (
-      <div className="p-3 bg-purple-50 border border-purple-200 rounded text-xs text-purple-900 flex items-center gap-2">
+      <div className="p-3 bg-teal-light border border-teal-border rounded text-xs text-teal-dark flex items-center gap-2">
         <Sparkles size={14} />
         AI identified {scan.ai_items_inferred} customer{scan.ai_items_inferred === 1 ? "" : "s"} from bank descriptions ({scan.ai_duration_ms != null ? `${(scan.ai_duration_ms / 1000).toFixed(1)}s` : ""}).
       </div>
@@ -744,7 +744,7 @@ function ItemRow({
             {item.description || item.private_note || <span className="italic">(no description)</span>}
           </div>
           {item.ai_reasoning && (
-            <div className="text-[11px] text-purple-700 mt-0.5 italic">
+            <div className="text-[11px] text-teal-dark mt-0.5 italic">
               <Sparkles size={10} className="inline mr-0.5" />
               {item.ai_reasoning}
               {item.ai_confidence && ` (${Math.round(item.ai_confidence * 100)}% confident)`}
@@ -928,8 +928,8 @@ function ResolutionPicker({
 
       {/* Move to revenue picker */}
       {incomeAccounts.length > 0 && (
-        <details className="p-2 bg-white border border-purple-200 rounded">
-          <summary className="text-xs font-semibold text-purple-900 cursor-pointer">
+        <details className="p-2 bg-white border border-teal-border rounded">
+          <summary className="text-xs font-semibold text-teal-dark cursor-pointer">
             → Move to revenue account
           </summary>
           <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
@@ -943,7 +943,7 @@ function ResolutionPicker({
                     target_account_name: a.name,
                   })
                 }
-                className="block w-full text-left text-xs px-2 py-1 hover:bg-purple-50 rounded"
+                className="block w-full text-left text-xs px-2 py-1 hover:bg-teal-light rounded"
               >
                 {a.name}{" "}
                 <span className="text-ink-slate text-[10px]">({a.accountType})</span>

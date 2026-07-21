@@ -12,6 +12,7 @@ import { createServiceSupabase } from "@/lib/supabase";
 import { PortalErrorState } from "../error-state";
 import { ProfitLossClient } from "./profit-loss-client";
 import { StatementSwitcher } from "../financial-statements/statement-switcher";
+import { StatementReviewNotes } from "../statement-review-notes";
 import { NoClosedPeriodState } from "../no-closed-period";
 
 /**
@@ -101,6 +102,9 @@ export default async function ProfitLossPage() {
         }}
         closedSource={closed.base.source}
       />
+      {ctx.impersonating && (
+        <StatementReviewNotes clientLinkId={ctx.clientLinkId} kind="pl" statementLabel="P&L" />
+      )}
     </div>
   );
 }

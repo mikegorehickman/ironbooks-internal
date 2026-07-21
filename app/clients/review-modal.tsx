@@ -115,6 +115,30 @@ export function CleanupReviewModal({
     }
   }
 
+  const [rejecting, setRejecting] = useState(false);
+  async function reject() {
+    if (!notes.trim()) {
+      setError("Add a note telling the bookkeeper what to fix before rejecting.");
+      return;
+    }
+    setRejecting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/clients/${client.id}/reject-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: notes.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      onClose();
+      router.refresh();
+    } catch (e: any) {
+      setError(e.message || "Failed to reject");
+      setRejecting(false);
+    }
+  }
+
   if (!mounted) return null;
 
   const submittedAgo = (() => {
@@ -210,29 +234,29 @@ export function CleanupReviewModal({
             </div>
             <p className="text-xs text-ink-slate leading-relaxed">
               The clipboard will contain a branded email with the PDF link
-              embedded. Paste into Double&apos;s client portal email and send to{" "}
+              embedded. Paste it into your email client and send to{" "}
               <span className="font-semibold text-navy">{client.client_name}</span>.
             </p>
             <button
               onClick={copyEmail}
               disabled={!pdfUrl}
-              className="w-full inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+              className="w-full inline-flex items-center justify-center gap-2 bg-navy hover:bg-navy-deep disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
             >
               {emailCopied ? <CheckCircle2 size={15} /> : <Mail size={15} />}
-              {emailCopied ? "Copied — paste into Double!" : "Copy branded email to clipboard"}
+              {emailCopied ? "Copied to clipboard!" : "Copy branded email to clipboard"}
             </button>
           </div>
 
-          {/* Step 3: Notes + approve */}
+          {/* Step 3: Notes + approve / reject */}
           <div className="space-y-2 pt-2 border-t border-gray-100">
             <div className="text-xs font-bold uppercase tracking-wider text-ink-slate">
-              Step 3 · Approve & close out
+              Step 3 · Approve or send back
             </div>
             <input
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Review notes (optional — saved on the client record)"
+              placeholder="Review notes (saved on the client; required to send back)"
               className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none text-xs text-navy"
             />
             {error && (
@@ -242,7 +266,7 @@ export function CleanupReviewModal({
             )}
             <button
               onClick={approve}
-              disabled={approving}
+              disabled={approving || rejecting}
               className="w-full inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
             >
               {approving ? (
@@ -254,9 +278,19 @@ export function CleanupReviewModal({
                 ? "Approving…"
                 : `Approve & mark ${client.client_name} complete`}
             </button>
+            <button
+              onClick={reject}
+              disabled={approving || rejecting}
+              className="w-full inline-flex items-center justify-center gap-2 border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-60 text-sm font-semibold px-5 py-2 rounded-lg"
+              title="Bounce this cleanup back to the bookkeeper to rework — no client email is sent"
+            >
+              {rejecting ? <Loader2 size={16} className="animate-spin" /> : <X size={16} />}
+              {rejecting ? "Sending back…" : "Reject — send back to bookkeeper"}
+            </button>
             <p className="text-[11px] text-ink-light text-center">
-              Confirms the PDF was sent to the client. Moves them to Completed
-              Accounts (month-over-month).
+              Approve confirms the PDF was sent and moves the client to Production.
+              Reject bounces it back to the bookkeeper (Failed Review) with your
+              note — no client email.
             </p>
           </div>
         </div>

@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { CleanupReviewModal } from "./review-modal";
 
-interface InReviewClient {
+export interface InReviewClient {
   id: string;
   client_name: string;
   jurisdiction: "US" | "CA";

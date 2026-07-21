@@ -383,7 +383,7 @@ function JobRow({ job }: { job: UnifiedJob }) {
           </span>
         ) : job.type === "reclass" ? (
           <span title="Reclassification" className="flex items-center gap-1.5">
-            <Shuffle size={14} className="text-purple-600" />
+            <Shuffle size={14} className="text-teal-dark" />
             <span className="text-xs font-semibold text-navy">
               {job.summary.is_rollback ? "Rollback" : "Reclass"}
             </span>

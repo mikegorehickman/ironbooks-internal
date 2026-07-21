@@ -254,7 +254,7 @@ export function StripeConnectModal({
         <div className="px-6 py-4 border-b border-gray-200 flex items-start justify-between">
           <div>
             <h3 className="text-lg font-bold text-navy flex items-center gap-2">
-              <CreditCard size={18} className="text-purple-600" />
+              <CreditCard size={18} className="text-teal-dark" />
               Stripe Connect Link
             </h3>
             <p className="text-xs text-ink-slate mt-1">
@@ -406,8 +406,8 @@ export function StripeConnectModal({
           {/* Post-generation view */}
           {generated && (
             <div className="space-y-4">
-              <div className="rounded-xl bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 p-5">
-                <div className="text-xs font-bold uppercase tracking-wider text-purple-700 mb-1">
+              <div className="rounded-xl bg-teal-light border border-teal-border p-5">
+                <div className="text-xs font-bold uppercase tracking-wider text-teal-dark mb-1">
                   ✓ Link generated
                 </div>
                 <div className="font-semibold text-navy">{generated.client_name}</div>
@@ -533,7 +533,7 @@ export function StripeConnectModal({
                 </p>
                 <button
                   onClick={copyEmail}
-                  className="w-full inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+                  className="w-full inline-flex items-center justify-center gap-2 bg-navy hover:bg-navy-deep text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
                 >
                   {copied === "email" ? <CheckCircle2 size={15} /> : <Mail size={15} />}
                   {copied === "email" ? "Copied!" : "Copy Branded Email to Clipboard"}
@@ -555,7 +555,7 @@ export function StripeConnectModal({
             <button
               onClick={handleGenerate}
               disabled={!selectedId || generating}
-              className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+              className="inline-flex items-center gap-2 bg-navy hover:bg-navy-deep disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
             >
               {generating ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               {generating ? "Generating..." : "Generate Link"}

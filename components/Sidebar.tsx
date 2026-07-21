@@ -7,6 +7,8 @@ import {
   Shield, CreditCard, ChevronDown, ChevronRight, Sun, TrendingUp,
   HeartPulse, Gauge, BadgeCheck,
   ClipboardCheck, ListChecks, UserPlus, GraduationCap, Settings as SettingsIcon, Inbox, ListTodo, LifeBuoy, ExternalLink, Landmark, Mail,
+  Home as HomeIcon, Eye, FileText, CalendarClock,
+  PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useEffect, useState } from "react";
@@ -18,32 +20,31 @@ import { StripeConnectModal } from "./StripeConnectModal";
  *  UF Audit, BS Wizard, GST/HST Audit) deliberately have NO nav entries:
  *  you start them from the client — cleanup-board card steps, the /clients
  *  row quick-actions, or the profile Cleanup tab — already scoped. */
+// Re-IA nav shrink — four spines: Home / Clients / Oversight / Admin. Home
+// absorbs Today + Inbox + Tasks; Oversight absorbs Approvals + Advisor + Fleet
+// Health. Those six routes still work (the hubs render them), they're just off
+// the nav now. Pipelines + Support stay in the daily set; the rest move to the
+// collapsible Tools drawer.
 const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newTab?: boolean }[] = [
-  { href: "/today", label: "Today", icon: Sun },
-  { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/support", label: "Support", icon: LifeBuoy, newTab: true },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
-  // Onboarding + Cleanup + Production kanbans live on ONE screen now — /board
-  // with a pipeline toggle. The old routes still work for deep links.
-  { href: "/board", label: "Pipelines", icon: ClipboardCheck },
+  { href: "/home", label: "Home", icon: HomeIcon },
   { href: "/clients", label: "Clients", icon: Users },
+  { href: "/board", label: "Pipelines", icon: ClipboardCheck },
+  { href: "/support", label: "Support", icon: LifeBuoy, newTab: true },
+];
+
+/** Oversight — the single senior hub (Approvals + Advisor + Fleet Health). */
+const productionNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
+  { href: "/oversight", label: "Oversight", icon: Eye, senior: true },
+];
+
+/** Secondary fleet-wide views — collapsed under Tools. Anything client-scoped
+ *  starts from the client workspace. */
+const toolsNav = [
+  { href: "/statements", label: "Statements", icon: FileText },
+  { href: "/prior-year-cleanup", label: "Prior-Year Cleanup", icon: CalendarClock },
   { href: "/coa-audit", label: "COA Audit", icon: ListChecks },
   { href: "/history", label: "History", icon: Clock },
-];
-
-/** Production — the board and the senior approval queue (statements,
- *  files, escalations, flagged transactions — one queue). The daily-recon
- *  engine controls live on the /admin hub. */
-const productionNav: { href: string; label: string; icon: any; senior?: boolean }[] = [
-  // Production board folded into /board (Pipelines toggle) with the other kanbans.
-  { href: "/approvals", label: "Approvals", icon: BadgeCheck, senior: true },
-];
-
-/** Fleet-wide views only — anything client-scoped starts from the client. */
-const toolsNav = [
-  { href: "/fleet", label: "Fleet Health", icon: Gauge },
   { href: "/tax-exports", label: "Tax Exports", icon: Landmark },
-  { href: "/advisor", label: "Advisor", icon: HeartPulse },
   { href: "/templates", label: "Master COA", icon: BookOpen },
 ];
 
@@ -67,6 +68,18 @@ export function Sidebar() {
   const [flaggedCount, setFlaggedCount] = useState(0);
   const [unreadComms, setUnreadComms] = useState(0);
   const [stripeModalOpen, setStripeModalOpen] = useState(false);
+  // Collapsed = icon-only rail. Hydrated from localStorage AFTER mount (SSR
+  // renders expanded; reading storage in the initializer would mismatch).
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    if (localStorage.getItem("snap.sidebar.collapsed") === "1") setCollapsed(true);
+  }, []);
+  function toggleCollapsed() {
+    setCollapsed((v) => {
+      localStorage.setItem("snap.sidebar.collapsed", v ? "0" : "1");
+      return !v;
+    });
+  }
 
   // Tools always starts collapsed — even on a tools route — so the Work
   // section stays the visual default. The user can pop it open per page.
@@ -144,7 +157,7 @@ export function Sidebar() {
   // nav (middleware also confines them to /admin/billing).
   if (isBillingAdmin) {
     return (
-      <aside className="flex flex-col h-screen sticky top-0 w-56 bg-navy text-white">
+      <aside className="flex flex-col h-screen sticky top-0 w-[232px] bg-rail text-white">
         <div className="px-4 py-4 border-b border-white/10">
           <div className="flex items-center gap-2.5">
             <img src="/logo.png" alt="Ironbooks" className="w-9 h-9 object-contain flex-shrink-0" />
@@ -161,7 +174,7 @@ export function Sidebar() {
         </nav>
         <div className="px-2.5 py-3 border-t border-white/10">
           <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg bg-white/5">
-            <div className="rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 w-8 h-8 bg-teal">{userName.charAt(0) || "?"}</div>
+            <div className="rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 w-8 h-8 bg-gold text-navy">{userName.charAt(0) || "?"}</div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold leading-tight truncate">{userName || "Loading..."}</div>
               <div className="text-[11px] leading-tight truncate text-white/45 capitalize">billing admin</div>
@@ -180,35 +193,35 @@ export function Sidebar() {
     (pathname.startsWith("/rules/") && /\/(rules)\/[^/]+\//.test(pathname));
 
   return (
-    <aside className="flex flex-col h-screen sticky top-0 w-56 bg-navy text-white">
-      <div className="px-4 py-4 border-b border-white/10">
-        <div className="flex items-center gap-2.5">
+    <aside className={`flex flex-col h-screen sticky top-0 bg-rail text-white transition-[width] duration-150 ${collapsed ? "w-[64px]" : "w-[232px]"}`}>
+      <div className={`py-4 border-b border-white/10 ${collapsed ? "px-2" : "px-4"}`}>
+        <div className={`flex items-center ${collapsed ? "flex-col gap-2" : "gap-2.5"}`}>
           <img
             src="/logo.png"
             alt="Ironbooks SNAP"
             className="w-9 h-9 object-contain flex-shrink-0"
           />
-          <div>
-            <div className="font-bold text-base tracking-tight leading-none">Ironbooks</div>
-            <div className="text-[11px] mt-0.5 text-white/45">Bookkeeper OS</div>
-          </div>
+          {!collapsed && (
+            <div className="flex-1 min-w-0">
+              <div className="font-brand font-medium text-[15px] tracking-[0.14em] leading-none uppercase">Ironbooks</div>
+              <div className="text-[10.5px] mt-1 tracking-[0.08em] uppercase text-[#7E99B3]">Bookkeeper OS</div>
+            </div>
+          )}
+          <button
+            onClick={toggleCollapsed}
+            className="text-white/35 hover:text-white/80 transition-colors flex-shrink-0"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
         </div>
       </div>
 
       <nav className="flex-1 px-2.5 py-3 overflow-y-auto">
-        <Link
-          href="/jobs/new"
-          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all mb-4 ${
-            cleanupActive
-              ? "bg-teal text-white shadow-sm"
-              : "bg-teal hover:bg-teal-dark text-white"
-          }`}
-        >
-          <Sparkles size={16} />
-          <span>New Cleanup</span>
-        </Link>
-
-        <NavSection label="Work" />
+        {/* No global "New Cleanup" button — cleanup always starts from a client
+            (Pipelines → a client card's "Continue cleanup", or the client
+            workspace Cleanup tab), never a picker-first flow. */}
+        <NavSection label="Work" collapsed={collapsed} />
         {dailyNav
           .filter((item) => !item.senior || isSenior)
           .map((item) => (
@@ -216,43 +229,51 @@ export function Sidebar() {
               key={item.href}
               item={item}
               pathname={pathname}
-              badgeCount={item.href === "/today" ? unreadComms : undefined}
+              badgeCount={item.href === "/home" ? unreadComms : undefined}
               badgeTone="red"
-            />
-          ))}
-
-        <NavSection label="Production" className="mt-3" />
-        {productionNav
-          .filter((item) => !item.senior || isSenior)
-          .map((item) => (
-            <NavItem
-              key={item.href}
-              item={item}
-              pathname={pathname}
-              badgeCount={item.href === "/approvals" ? flaggedCount : undefined}
+              collapsed={collapsed}
             />
           ))}
 
         {isSenior && (
           <>
+            <NavSection label="Oversight" className="mt-3" collapsed={collapsed} />
+            {productionNav
+              .filter((item) => !item.senior || isSenior)
+              .map((item) => (
+                <NavItem
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  badgeCount={item.href === "/oversight" ? flaggedCount : undefined}
+                  collapsed={collapsed}
+                />
+              ))}
+          </>
+        )}
+
+        {isSenior && (
+          <>
             <button
               onClick={() => setToolsOpen((v) => !v)}
-              className="w-full flex items-center gap-2 px-3 py-2 mt-3 text-[10px] font-bold uppercase tracking-wider text-white/35 hover:text-white/60 transition-colors"
+              title="Tools"
+              className={`w-full flex items-center gap-2 py-2 mt-3 text-[10px] font-bold uppercase tracking-wider text-white/35 hover:text-white/60 transition-colors ${collapsed ? "justify-center px-0" : "px-3"}`}
             >
               {toolsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              Tools
+              {!collapsed && "Tools"}
             </button>
             {toolsOpen && (
               <div className="space-y-0.5">
                 {toolsNav.map((item) => (
-                  <NavItem key={item.href} item={item} pathname={pathname} dim />
+                  <NavItem key={item.href} item={item} pathname={pathname} dim collapsed={collapsed} />
                 ))}
                 <button
                   onClick={() => setStripeModalOpen(true)}
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-medium text-white/40 hover:bg-white/5 hover:text-white/70 transition-all mb-0.5"
+                  title="Stripe connect link"
+                  className={`w-full flex items-center rounded-lg text-[13px] font-medium text-white/40 hover:bg-white/5 hover:text-white/70 transition-all mb-0.5 ${collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-3 py-1.5"}`}
                 >
                   <CreditCard size={14} />
-                  Stripe connect link
+                  {!collapsed && "Stripe connect link"}
                 </button>
               </div>
             )}
@@ -261,48 +282,64 @@ export function Sidebar() {
 
         {isAdmin && (
           <>
-            <NavSection label="Admin" className="mt-4" />
+            <NavSection label="Admin" className="mt-4" collapsed={collapsed} />
             {adminItems.map((item) => (
-              <NavItem key={item.href} item={item} pathname={pathname} />
+              <NavItem key={item.href} item={item} pathname={pathname} collapsed={collapsed} />
             ))}
           </>
         )}
 
         {/* Handbook — whole team, pinned to the very bottom of the nav. */}
         <div className="mt-4 pt-3 border-t border-white/10">
-          <NavItem item={handbookNav} pathname={pathname} />
+          <NavItem item={handbookNav} pathname={pathname} collapsed={collapsed} />
         </div>
       </nav>
 
       <div className="px-2.5 py-3 border-t border-white/10">
-        <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg bg-white/5">
-          <div className="rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 w-8 h-8 bg-teal">
-            {userName.charAt(0) || "?"}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold leading-tight truncate">
-              {userName || "Loading..."}
+        {collapsed ? (
+          <div className="flex flex-col items-center gap-2.5 py-1">
+            <div className="rounded-full flex items-center justify-center font-bold text-sm w-8 h-8 bg-gold text-navy" title={`${userName} · ${userRole}`}>
+              {userName.charAt(0) || "?"}
             </div>
-            <div className="text-[11px] leading-tight truncate text-white/45 capitalize">
-              {userRole}
-            </div>
+            <Link href="/settings" className="text-white/40 hover:text-white transition-colors" title="Settings · email signature">
+              <SettingsIcon size={15} />
+            </Link>
+            <button onClick={handleSignOut} className="text-white/40 hover:text-white transition-colors" title="Sign out">
+              <LogOut size={15} />
+            </button>
           </div>
-          <Link href="/settings" className="text-white/40 hover:text-white transition-colors" title="Settings · email signature">
-            <SettingsIcon size={15} />
-          </Link>
-          <button onClick={handleSignOut} className="text-white/40 hover:text-white transition-colors">
-            <LogOut size={15} />
-          </button>
-        </div>
+        ) : (
+          <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg bg-white/5">
+            <div className="rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 w-8 h-8 bg-gold text-navy">
+              {userName.charAt(0) || "?"}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold leading-tight truncate">
+                {userName || "Loading..."}
+              </div>
+              <div className="text-[11px] leading-tight truncate text-white/45 capitalize">
+                {userRole}
+              </div>
+            </div>
+            <Link href="/settings" className="text-white/40 hover:text-white transition-colors" title="Settings · email signature">
+              <SettingsIcon size={15} />
+            </Link>
+            <button onClick={handleSignOut} className="text-white/40 hover:text-white transition-colors">
+              <LogOut size={15} />
+            </button>
+          </div>
+        )}
       </div>
       {stripeModalOpen && <StripeConnectModal onClose={() => setStripeModalOpen(false)} />}
     </aside>
   );
 }
 
-function NavSection({ label, className = "" }: { label: string; className?: string }) {
+function NavSection({ label, className = "", collapsed }: { label: string; className?: string; collapsed?: boolean }) {
+  // Collapsed rail: section labels become thin dividers.
+  if (collapsed) return <div className={`my-2 mx-2 border-t border-white/10 ${className}`} />;
   return (
-    <div className={`mb-1.5 px-3 text-[10px] font-bold uppercase tracking-wider text-white/30 ${className}`}>
+    <div className={`mb-1.5 px-3 text-[10.5px] font-bold uppercase tracking-wider text-[#8FA9C2] ${className}`}>
       {label}
     </div>
   );
@@ -314,27 +351,42 @@ function NavItem({
   badgeCount,
   badgeTone = "amber",
   dim,
+  collapsed,
 }: {
   item: { href: string; label: string; icon: any; newTab?: boolean };
   pathname: string;
   badgeCount?: number;
   badgeTone?: "amber" | "red";
   dim?: boolean;
+  collapsed?: boolean;
 }) {
   // newTab items (e.g. Support → Freshdesk) open externally, so they never
   // match the current path and never show as active.
   const active = !item.newTab && (pathname === item.href || pathname.startsWith(item.href + "/"));
   const Icon = item.icon;
 
-  const className = `w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all mb-0.5 ${
+  const className = `relative w-full flex items-center rounded-lg text-sm font-medium transition-all mb-0.5 ${
+    collapsed ? "justify-center px-0 py-2.5" : "gap-2.5 px-3 py-2"
+  } ${
     active
-      ? "bg-teal/20 text-white"
+      ? "bg-white/[0.12] text-white font-semibold"
       : dim
       ? "text-white/40 hover:bg-white/5 hover:text-white/75"
-      : "text-white/70 hover:bg-white/5 hover:text-white"
+      : "text-[#B9CBDC] hover:bg-white/5 hover:text-white"
   }`;
 
-  const inner = (
+  const inner = collapsed ? (
+    <>
+      <Icon size={dim ? 15 : 17} className="flex-shrink-0" />
+      {badgeCount != null && badgeCount > 0 && (
+        <span
+          className={`absolute top-1 right-1.5 w-2 h-2 rounded-full ${
+            badgeTone === "red" ? "bg-rust" : "bg-gold text-navy"
+          }`}
+        />
+      )}
+    </>
+  ) : (
     <>
       <Icon size={dim ? 14 : 16} className="flex-shrink-0" />
       <span className="text-[13px]">{item.label}</span>
@@ -342,7 +394,7 @@ function NavItem({
       {badgeCount != null && badgeCount > 0 && (
         <span
           className={`ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white tabular-nums ${
-            badgeTone === "red" ? "bg-red-500" : "bg-amber-500/90"
+            badgeTone === "red" ? "bg-rust" : "bg-gold text-navy"
           }`}
         >
           {badgeCount > 999 ? "999+" : badgeCount}
@@ -354,14 +406,14 @@ function NavItem({
   // Open externally in a new tab (full navigation, not SPA routing).
   if (item.newTab) {
     return (
-      <a href={item.href} target="_blank" rel="noopener noreferrer" className={className}>
+      <a href={item.href} target="_blank" rel="noopener noreferrer" className={className} title={collapsed ? item.label : undefined}>
         {inner}
       </a>
     );
   }
 
   return (
-    <Link href={item.href} className={className}>
+    <Link href={item.href} className={className} title={collapsed ? item.label : undefined}>
       {inner}
     </Link>
   );

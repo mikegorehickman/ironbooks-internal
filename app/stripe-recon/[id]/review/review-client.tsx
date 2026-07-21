@@ -217,7 +217,7 @@ export function StripeReconReview({
           <button
             onClick={executeRecon}
             disabled={executing || counts.auto === 0}
-            className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+            className="inline-flex items-center gap-2 bg-navy hover:bg-navy-deep disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
           >
             {executing ? <Loader2 className="animate-spin" size={16} /> : <ArrowRight size={16} />}
             {executing ? "Starting..." : `Apply ${counts.auto} match${counts.auto === 1 ? "" : "es"} to QuickBooks`}
@@ -279,7 +279,7 @@ function MatchRow({
         {/* Deposit */}
         <div>
           <div className="flex items-center gap-1.5 font-semibold text-sm text-navy">
-            <CreditCard size={13} className="text-purple-500" />
+            <CreditCard size={13} className="text-teal-dark" />
             ${Number(match.deposit_amount).toLocaleString("en-US", { maximumFractionDigits: 2 })}
           </div>
           <div className="text-xs text-ink-slate">{match.deposit_date}</div>
@@ -306,7 +306,7 @@ function MatchRow({
 
         {/* Fee */}
         <div>
-          <div className="text-sm font-semibold text-purple-700">
+          <div className="text-sm font-semibold text-teal-dark">
             ${Number(match.computed_fee).toFixed(2)}
             {isCanada && Number(match.computed_tax) > 0 && (
               <span className="text-blue-600 ml-1">+ ${Number(match.computed_tax).toFixed(2)} tax</span>
@@ -393,14 +393,14 @@ function MatchRow({
               </div>
 
               {/* Negative — Stripe fee */}
-              <div className="text-[10px] font-bold uppercase tracking-wider text-purple-700 mt-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-teal-dark mt-2">
                 Stripe deductions
               </div>
-              <div className="flex items-center justify-between text-sm bg-white rounded px-3 py-1.5 border border-purple-100">
-                <span className="text-purple-800">
+              <div className="flex items-center justify-between text-sm bg-white rounded px-3 py-1.5 border border-teal-border">
+                <span className="text-teal-dark">
                   Stripe processing fee {isCanada ? "(pre-tax)" : ""} — to Bank Charges & Fees
                 </span>
-                <span className="font-semibold text-purple-700">
+                <span className="font-semibold text-teal-dark">
                   −${Number(match.computed_fee).toFixed(2)}
                 </span>
               </div>

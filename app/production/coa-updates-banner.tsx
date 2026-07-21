@@ -100,23 +100,23 @@ export function CoaUpdatesBanner({
   }
 
   return (
-    <div className="bg-violet-50 border-2 border-violet-300 rounded-2xl p-4">
+    <div className="bg-teal-light border-2 border-teal-border rounded-2xl p-4">
       <div className="flex items-start gap-3">
-        <div className="p-1.5 rounded-lg bg-violet-100 flex-shrink-0">
-          <Sparkles size={16} className="text-violet-700" />
+        <div className="p-1.5 rounded-lg bg-teal-light flex-shrink-0">
+          <Sparkles size={16} className="text-teal-dark" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-bold text-violet-900">
+          <div className="text-sm font-bold text-teal-dark">
             {cats.length} new COA categor{cats.length === 1 ? "y" : "ies"} available since this client's cleanup
           </div>
-          <p className="text-xs text-violet-800/80 mt-0.5">
+          <p className="text-xs text-teal-dark/80 mt-0.5">
             {clientName} was cleaned on the older chart. Create the new accounts and let the AI
             suggest transactions to move into them.
           </p>
 
           <button
             onClick={() => setExpanded((v) => !v)}
-            className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-violet-700 hover:text-violet-900"
+            className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-teal-dark hover:text-teal-dark"
           >
             {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             {expanded ? "Hide" : "Show"} the new categories
@@ -126,7 +126,7 @@ export function CoaUpdatesBanner({
               {cats.map((c) => (
                 <span
                   key={c.account_name}
-                  className="text-[11px] font-semibold bg-white border border-violet-200 text-violet-800 px-2 py-0.5 rounded-full"
+                  className="text-[11px] font-semibold bg-white border border-teal-border text-teal-dark px-2 py-0.5 rounded-full"
                 >
                   {c.account_name}
                 </span>
@@ -142,7 +142,7 @@ export function CoaUpdatesBanner({
             <button
               onClick={applyAndRescan}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 bg-navy hover:bg-navy-deep text-white text-xs font-bold px-3.5 py-1.5 rounded-lg disabled:opacity-50"
             >
               {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
               {busy ? "Creating accounts & starting AI…" : "Create accounts & re-scan"}

@@ -3,7 +3,15 @@ import { TopBar } from "@/components/TopBar";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { UsersTabs } from "./users-tabs";
 
-export default async function AdminUsersPage() {
+export default async function AdminUsersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  // ?tab=clients deep-links straight to the Clients tab (the admin hub's
+  // "Clients" button) — clients were otherwise 3 clicks deep (Mike, 2026-07-21).
+  const sp = await searchParams;
+  const initialTab = sp.tab === "clients" ? ("clients" as const) : ("employees" as const);
   const supabase = await createServerSupabase();
   const service = createServiceSupabase();
 
@@ -112,7 +120,7 @@ export default async function AdminUsersPage() {
         subtitle={`${employees?.length || 0} employees · ${clients.length} clients`}
       />
       <div className="px-8 py-6">
-        <UsersTabs employees={employees || []} clients={clients} />
+        <UsersTabs employees={employees || []} clients={clients} initialTab={initialTab} />
       </div>
     </AppShell>
   );

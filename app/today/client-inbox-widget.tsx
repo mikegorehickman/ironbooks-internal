@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
 import { ArrowRight, FileText, Inbox, Paperclip } from "lucide-react";
 import type { CommAttachment } from "@/lib/client-comms";
 
@@ -55,6 +58,10 @@ export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
     g.files += r.attachments?.length || 0;
   }
   const groups = order.map((id) => byClient.get(id)!);
+  // Home shows the top 5 clients; nothing on Home ever scrolls 20+ rows.
+  // (Client component now — the toggle is the only interactivity.)
+  const [showAll, setShowAll] = useState(false);
+  const visibleGroups = showAll ? groups : groups.slice(0, 5);
 
   return (
     <div className="bg-white rounded-2xl border border-teal/20 overflow-hidden">
@@ -71,7 +78,7 @@ export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
         )}
       </div>
       <ul className="divide-y divide-gray-50">
-        {groups.map((g) => (
+        {visibleGroups.map((g) => (
           <li key={g.client_link_id}>
             <Link
               href={`/clients/${g.client_link_id}/messages`}
@@ -113,6 +120,14 @@ export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
           </li>
         ))}
       </ul>
+      {groups.length > 5 && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="w-full px-5 py-2.5 text-left text-xs font-semibold text-teal-dark hover:text-navy border-t border-hairline transition-colors"
+        >
+          {showAll ? "Show top 5" : `Show all ${groups.length}`}
+        </button>
+      )}
     </div>
   );
 }

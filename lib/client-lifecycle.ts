@@ -19,6 +19,7 @@ export type LifecycleStatus =
   | "bs_cleanup"        // reclass done, balance-sheet cleanup outstanding
   | "ready_to_close"    // pipeline done (BS skipped/finished), not yet submitted for review
   | "ready_for_review"  // cleanup submitted, awaiting manager approval (cleanup_review_state='in_review')
+  | "failed_review"     // manager rejected — bounced back to the bookkeeper to rework
   | "waiting_on_client" // blocked waiting on the client
   | "completed"         // cleanup signed off, not yet promoted to production
   | "in_production"     // signed off + daily recon on
@@ -42,18 +43,68 @@ export interface LifecycleInput {
   month_waiting_client?: boolean | null;  // current run board_status = waiting_client
 }
 
+/**
+ * The three macro-stages that form the SNAP lifecycle spine. Every client is at
+ * exactly one. This is the single source of truth the client workspace, the
+ * Clients table, and Oversight all key off — the detailed LifecycleStatus above
+ * is the sub-status WITHIN a stage.
+ *
+ *   onboarding → cleanup → production
+ */
+export type MacroStage = "onboarding" | "cleanup" | "production";
+
+export const MACRO_STAGE_META: Record<MacroStage, { label: string; tone: string; order: number; description: string }> = {
+  onboarding: { label: "Onboarding", tone: "bg-slate-100 text-slate-700", order: 0, description: "Connect QuickBooks, capture the foundation, request documents." },
+  cleanup:    { label: "Cleanup",    tone: "bg-blue-50 text-blue-700",    order: 1, description: "Bring the books to correct before going live." },
+  production: { label: "Production", tone: "bg-teal/10 text-teal",        order: 2, description: "Live — daily reconciliation and monthly close." },
+};
+
+/**
+ * Macro-stage from the raw signals — mirrors the top-level branching of
+ * deriveLifecycleStatus so status and stage never disagree. Prefer this when you
+ * have the LifecycleInput (it resolves the review/waiting states that are
+ * stage-ambiguous by looking at daily_recon + cleanup_completed).
+ */
+export function deriveMacroStage(c: LifecycleInput): MacroStage {
+  if (c.daily_recon_enabled && c.cleanup_completed_at) return "production";
+  if (c.cleanup_completed_at) return "cleanup"; // signed off, awaiting promotion
+  // Onboarding = genuinely pre-work: not connected AND no cleanup activity yet.
+  // The moment they connect or any COA/reclass work exists, they're in Cleanup.
+  const anyCleanupWork =
+    !!c.has_active_coa || !!c.has_active_reclass || !!c.has_complete_coa ||
+    !!c.has_complete_reclass || c.cleanup_review_state === "in_review" ||
+    c.cleanup_review_state === "failed_review";
+  if (c.status === "onboarding" && !c.qbo_connected && !anyCleanupWork) return "onboarding";
+  return "cleanup";
+}
+
+/**
+ * Best-effort macro-stage from a detailed status alone (for callers that only
+ * carry the string). ready_for_review / waiting_on_client are stage-ambiguous
+ * (they occur in both cleanup and production) → default to cleanup; use
+ * deriveMacroStage(input) when the flags are available.
+ */
+export function macroStageOfStatus(s: LifecycleStatus): MacroStage {
+  if (s === "onboarding") return "onboarding";
+  if (s === "in_production" || s === "done") return "production";
+  return "cleanup";
+}
+
 export const LIFECYCLE_META: Record<LifecycleStatus, { label: string; tone: string; order: number; group: "Pipeline" | "Review" | "Live" }> = {
-  onboarding:        { label: "Onboarding",        tone: "bg-slate-100 text-slate-600",     order: 0,  group: "Pipeline" },
-  needs_cleanup:     { label: "Needs cleanup",     tone: "bg-slate-100 text-slate-700",     order: 1,  group: "Pipeline" },
-  coa_cleanup:       { label: "COA cleanup",       tone: "bg-blue-50 text-blue-700",        order: 2,  group: "Pipeline" },
-  reclassify:        { label: "Reclassify",        tone: "bg-indigo-50 text-indigo-700",    order: 3,  group: "Pipeline" },
-  bs_cleanup:        { label: "BS cleanup",        tone: "bg-cyan-50 text-cyan-700",        order: 4,  group: "Pipeline" },
-  ready_to_close:    { label: "Ready to close",    tone: "bg-fuchsia-50 text-fuchsia-700",  order: 5,  group: "Review" },
-  waiting_on_client: { label: "Waiting on client", tone: "bg-amber-50 text-amber-700",      order: 6,  group: "Review" },
-  ready_for_review:  { label: "Ready for review",  tone: "bg-violet-50 text-violet-700",    order: 7,  group: "Review" },
-  completed:         { label: "Completed",         tone: "bg-emerald-50 text-emerald-700",  order: 8,  group: "Live" },
-  in_production:     { label: "In production",     tone: "bg-teal/10 text-teal",            order: 9,  group: "Live" },
-  done:              { label: "Done",              tone: "bg-emerald-100 text-emerald-800", order: 10, group: "Live" },
+  // Pill tones follow the design-language color discipline: grey = not yet
+  // moving, teal = in motion / positive, gold = needs a human, rust = problem.
+  onboarding:        { label: "Onboarding",        tone: "bg-pillgrey-tint border border-pillgrey-border text-ink-slate", order: 0,  group: "Pipeline" },
+  needs_cleanup:     { label: "Needs cleanup",     tone: "bg-pillgrey-tint border border-pillgrey-border text-ink-slate", order: 1,  group: "Pipeline" },
+  coa_cleanup:       { label: "COA cleanup",       tone: "bg-teal-light border border-teal-border text-teal-dark",        order: 2,  group: "Pipeline" },
+  reclassify:        { label: "Reclassify",        tone: "bg-teal-light border border-teal-border text-teal-dark",        order: 3,  group: "Pipeline" },
+  bs_cleanup:        { label: "BS cleanup",        tone: "bg-teal-light border border-teal-border text-teal-dark",        order: 4,  group: "Pipeline" },
+  ready_to_close:    { label: "Ready to close",    tone: "bg-gold-tint border border-gold-border text-gold-deep",         order: 5,  group: "Review" },
+  waiting_on_client: { label: "Waiting on client", tone: "bg-gold-tint border border-gold-border text-gold-deep",         order: 6,  group: "Review" },
+  ready_for_review:  { label: "Ready for review",  tone: "bg-gold-tint border border-gold-border text-gold-deep",         order: 7,  group: "Review" },
+  failed_review:     { label: "Failed review",     tone: "bg-rust-tint border border-rust-border text-rust",              order: 6.5, group: "Review" },
+  completed:         { label: "Completed",         tone: "bg-teal-light border border-teal-border text-teal-dark",        order: 8,  group: "Live" },
+  in_production:     { label: "In production",     tone: "bg-teal-light border border-teal-border text-teal-dark",        order: 9,  group: "Live" },
+  done:              { label: "Done",              tone: "bg-teal-light border border-teal-border text-teal-dark",        order: 10, group: "Live" },
 };
 
 /**
@@ -72,6 +123,8 @@ export function deriveLifecycleStatus(c: LifecycleInput): LifecycleStatus {
   if (c.cleanup_completed_at) return "completed";
 
   // ── Manager-actionable ──
+  // Rejected by the manager — bounced back to the bookkeeper to rework.
+  if (c.cleanup_review_state === "failed_review") return "failed_review";
   if (c.cleanup_review_state === "in_review") return "ready_for_review";
   if (c.open_ask_client) return "waiting_on_client";
 
@@ -99,18 +152,25 @@ export const ACTIVE_JOB_STATUSES = ["pending", "executing", "in_review", "failed
  * Pass the already-loaded client_links row; only job/month/message signals are
  * fetched here.
  */
-export async function deriveLifecycleForClient(
+type ClientLifecycleRow = {
+  id: string;
+  status?: string | null;
+  qbo_realm_id?: string | null;
+  cleanup_completed_at?: string | null;
+  cleanup_review_state?: string | null;
+  daily_recon_enabled?: boolean | null;
+  bs_enabled?: boolean | null;
+};
+
+/**
+ * Gather the live signals for one client into a LifecycleInput. Both the status
+ * and the macro-stage derive from this single object, so they can never
+ * disagree. Best-effort — each query is guarded.
+ */
+export async function gatherLifecycleInput(
   service: SupabaseClient,
-  client: {
-    id: string;
-    status?: string | null;
-    qbo_realm_id?: string | null;
-    cleanup_completed_at?: string | null;
-    cleanup_review_state?: string | null;
-    daily_recon_enabled?: boolean | null;
-    bs_enabled?: boolean | null;
-  }
-): Promise<LifecycleStatus> {
+  client: ClientLifecycleRow
+): Promise<LifecycleInput> {
   const id = client.id;
   const jobRows = async (table: string): Promise<{ status: string }[]> => {
     try {
@@ -157,7 +217,7 @@ export async function deriveLifecycleForClient(
     /* ignore */
   }
 
-  return deriveLifecycleStatus({
+  return {
     status: client.status,
     qbo_connected: !!client.qbo_realm_id,
     cleanup_completed_at: client.cleanup_completed_at,
@@ -172,5 +232,29 @@ export async function deriveLifecycleForClient(
     month_done,
     month_review,
     month_waiting_client: month_waiting,
-  });
+  };
+}
+
+/**
+ * Detailed lifecycle status for ONE client (unchanged signature — existing
+ * callers keep working).
+ */
+export async function deriveLifecycleForClient(
+  service: SupabaseClient,
+  client: ClientLifecycleRow
+): Promise<LifecycleStatus> {
+  return deriveLifecycleStatus(await gatherLifecycleInput(service, client));
+}
+
+/**
+ * The canonical lifecycle for ONE client: both the macro-stage (the spine) and
+ * the detailed sub-status, from one signal-gather so they always agree. This is
+ * what the client workspace, Clients table, and Oversight should call.
+ */
+export async function deriveClientLifecycle(
+  service: SupabaseClient,
+  client: ClientLifecycleRow
+): Promise<{ stage: MacroStage; status: LifecycleStatus }> {
+  const input = await gatherLifecycleInput(service, client);
+  return { stage: deriveMacroStage(input), status: deriveLifecycleStatus(input) };
 }

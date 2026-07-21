@@ -80,7 +80,7 @@ function StripeRow({ c }: { c: RosterClient }) {
         <button
           onClick={resend}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 text-[12px] font-semibold rounded-md border border-purple-200 bg-white text-purple-700 hover:bg-purple-50 px-2.5 py-1.5 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 text-[12px] font-semibold rounded-md border border-teal-border bg-white text-teal-dark hover:bg-teal-light px-2.5 py-1.5 disabled:opacity-50"
         >
           {busy ? <Loader2 size={12} className="animate-spin" /> : done ? <CheckCircle2 size={12} /> : <Send size={12} />}
           {done ? "Re-sent" : "Resend email"}

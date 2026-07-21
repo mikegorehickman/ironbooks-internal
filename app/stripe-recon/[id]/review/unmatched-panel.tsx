@@ -194,7 +194,7 @@ export function UnmatchedPanel({
             </div>
             <button
               onClick={() => setConnectModalOpen(true)}
-              className="w-full inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
+              className="w-full inline-flex items-center justify-center gap-2 bg-navy hover:bg-navy-deep text-white text-sm font-semibold px-5 py-2.5 rounded-lg"
             >
               <CreditCard size={16} />
               Send Stripe Connect link to {clientName}

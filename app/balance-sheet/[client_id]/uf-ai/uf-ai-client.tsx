@@ -824,7 +824,7 @@ export function UfAiClient({
                         className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
                           je.effect === "increased_uf"
                             ? "bg-blue-100 text-blue-800"
-                            : "bg-violet-100 text-violet-800"
+                            : "bg-teal-light text-teal-dark"
                         }`}
                       >
                         {je.effect === "increased_uf" ? "↑ UF" : "↓ UF"}

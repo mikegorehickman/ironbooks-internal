@@ -689,14 +689,14 @@ function UnmatchedUfTab({
   return (
     <div className="space-y-3">
       {pendingIds.length > 0 && (
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-sm text-purple-900">
+        <div className="bg-teal-light border border-teal-border rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-sm text-teal-dark">
             <span className="font-bold">{pendingIds.length}</span> UF deposit{pendingIds.length === 1 ? "" : "s"} with no CRM job match.
             <span className="ml-1 text-xs">Bulk-generate "ask the client" emails for all, OR expand each to manually pick matching jobs.</span>
           </div>
           <button
             onClick={() => onResolve(pendingIds, { resolution: "ask_client" })}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded inline-flex items-center gap-1"
+            className="px-3 py-1.5 bg-navy hover:bg-navy-deep text-white text-xs font-bold rounded inline-flex items-center gap-1"
           >
             <Mail size={12} />
             Ask client about all
@@ -742,7 +742,7 @@ function UnmatchedUfRow({
   const matchOk = Math.abs(pickedSum - targetAmount) < 0.5;
 
   return (
-    <div className={`${item.resolution === "ask_client" ? "bg-purple-50/30" : ""}`}>
+    <div className={`${item.resolution === "ask_client" ? "bg-teal-light/30" : ""}`}>
       <div className="px-4 py-2.5 flex items-center justify-between gap-3">
         <button
           onClick={() => setExpanded(!expanded)}
@@ -766,7 +766,7 @@ function UnmatchedUfRow({
           )}
           <button
             onClick={() => onResolve([item.id], { resolution: "ask_client" })}
-            className="text-xs font-semibold text-purple-700 hover:text-purple-900 inline-flex items-center gap-1"
+            className="text-xs font-semibold text-teal-dark hover:text-teal-dark inline-flex items-center gap-1"
           >
             <Mail size={11} /> Ask client
           </button>
@@ -952,7 +952,7 @@ function PreviewModal({
             <>
               <span className="text-ink-slate">·</span>
               <span>
-                <span className="font-bold text-purple-700">{data.summary.ask_client_count}</span> ask-client emails
+                <span className="font-bold text-teal-dark">{data.summary.ask_client_count}</span> ask-client emails
               </span>
             </>
           )}
@@ -1068,7 +1068,7 @@ function opKindBadge(kind: string) {
     direct_void: { label: "QBO WRITE", color: "bg-emerald-100 text-emerald-800" },
     push_invoice: { label: "QBO WRITE", color: "bg-emerald-100 text-emerald-800" },
     apply_payment: { label: "QBO WRITE", color: "bg-emerald-100 text-emerald-800" },
-    ask_client: { label: "EMAIL", color: "bg-purple-100 text-purple-800" },
+    ask_client: { label: "EMAIL", color: "bg-teal-light text-teal-dark" },
     keep: { label: "NO-OP", color: "bg-gray-100 text-ink-slate" },
     manual: { label: "NO-OP", color: "bg-gray-100 text-ink-slate" },
   };

@@ -59,7 +59,7 @@ type ChipKey =
   | "not_started";
 
 const CHIP_META: Record<ChipKey, { label: string; cls: string; rank: number }> = {
-  signoff_submitted: { label: "Awaiting mgr review", cls: "bg-purple-100 text-purple-700", rank: 0 },
+  signoff_submitted: { label: "Awaiting mgr review", cls: "bg-teal-light text-teal-dark", rank: 0 },
   signoff_only: { label: "Sign-off only", cls: "bg-emerald-100 text-emerald-700", rank: 1 },
   needs_rules: { label: "Needs bank rules", cls: "bg-teal/15 text-teal-dark", rank: 2 },
   reclass_review: { label: "Reclass in review", cls: "bg-blue-100 text-blue-700", rank: 3 },
@@ -279,6 +279,8 @@ export function CleanupBoard() {
   // to match the badges: cleanup-stage cards don't render billing chips, and
   // a filter that keeps badge-less cards reads as broken.
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+  // Per-assignee filter — "see only my/this bookkeeper's accounts".
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
 
   const urgentFirst = (cards: KanbanCard[]) =>
     [...cards].sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent));
@@ -289,6 +291,10 @@ export function CleanupBoard() {
         const a = attention[c.id];
         return a && (a.escalations.length > 0 || a.bs_owed || a.disconnected || a.stuck_job);
       });
+    if (assigneeFilter !== "all")
+      out = out.filter((c) =>
+        assigneeFilter === "unassigned" ? !c.bookkeeper : c.bookkeeper?.id === assigneeFilter
+      );
     return out;
   };
 
@@ -307,7 +313,7 @@ export function CleanupBoard() {
   const COLS: { id: keyof typeof collapsed; title: string; tone: string; hint: string }[] = [
     { id: "needs_cleanup", title: "Needs Cleanup", tone: "border-gray-200", hint: "New — start with COA cleanup" },
     { id: "in_progress", title: "In Progress", tone: "border-teal/40", hint: "Working the checklist" },
-    { id: "review", title: "Awaiting Mgr Review", tone: "border-purple-300", hint: "Statements submitted — manager approves & sends" },
+    { id: "review", title: "Awaiting Mgr Review", tone: "border-teal-border", hint: "Statements submitted — manager approves & sends" },
   ];
 
   return (
@@ -322,13 +328,6 @@ export function CleanupBoard() {
           statements are sent to the client and the account moves to{" "}
           <strong>Production</strong> (ongoing management).
         </p>
-        <Link
-          href="/jobs/new"
-          className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-xs font-bold px-3 py-2 rounded-lg"
-        >
-          <Plus size={13} />
-          New Cleanup
-        </Link>
       </div>
 
       {/* Escalations — triage happens ON the board, not in another tool. */}
@@ -337,6 +336,21 @@ export function CleanupBoard() {
       {/* Funnel strip — clickable counts that filter the board */}
       {!loading && (
         <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Assignee filter — "show only this bookkeeper's accounts". */}
+          <select
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            className="text-xs font-semibold px-2.5 py-1 rounded-full border border-gray-200 bg-white text-navy outline-none hover:border-teal cursor-pointer"
+            title="Filter the board to one bookkeeper's accounts"
+          >
+            <option value="all">All assignees</option>
+            <option value="unassigned">Unassigned</option>
+            {bookkeepers.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.full_name}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => setFlaggedOnly((f) => !f)}
             className={`text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
@@ -658,7 +672,7 @@ function CleanupCard({
             {s.label.startsWith("6") && hasSignoff && (
               <button
                 onClick={onOpenSignoff}
-                className="inline-flex items-center gap-0.5 text-[10px] font-bold text-purple-700 hover:underline"
+                className="inline-flex items-center gap-0.5 text-[10px] font-bold text-teal-dark hover:underline"
               >
                 Review sign-off <ArrowUpRight size={9} />
               </button>

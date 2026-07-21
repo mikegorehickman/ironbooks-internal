@@ -73,7 +73,7 @@ interface SpotCheck {
 }
 
 interface Run {
-  status: "open" | "pending_review" | "complete";
+  status: "open" | "pending_review" | "failed_review" | "complete";
   has_concerns: boolean;
   concerns: string | null;
   checks: { checks: Check[]; overall: CheckStatus } | null;
@@ -403,6 +403,29 @@ export function ClientRecCard({
     }
   }
 
+  // Manager Reject — bounce the close to Failed Review with a required note; the
+  // bookkeeper sees it on Today. Distinct from "reopen" (silent → open).
+  async function reject() {
+    const note = window.prompt(
+      "Reject this close — what does the bookkeeper need to fix?\n(They'll see this note on their Today.)"
+    );
+    if (note === null) return;
+    if (!note.trim()) {
+      setError("A note is required to reject.");
+      return;
+    }
+    setCompleting(true);
+    setError("");
+    try {
+      await act({ action: "reject", notes: note.trim() });
+      onChanged();
+    } catch (e: any) {
+      setError(e?.message || "Couldn't reject");
+    } finally {
+      setCompleting(false);
+    }
+  }
+
   return (
     <div
       className={`bg-white rounded-2xl border overflow-hidden ${
@@ -434,7 +457,7 @@ export function ClientRecCard({
               </span>
             )}
             {isCleanupKind && (
-              <span className="text-[10px] font-bold bg-violet-100 text-violet-800 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-bold bg-teal-light text-teal-dark px-1.5 py-0.5 rounded">
                 CLEANUP SIGN-OFF
               </span>
             )}
@@ -444,7 +467,7 @@ export function ClientRecCard({
               </span>
             )}
             {isPending && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-teal-light text-teal-dark px-2 py-0.5 rounded">
                 Awaiting senior approval
               </span>
             )}
@@ -489,7 +512,7 @@ export function ClientRecCard({
               loadStatements();
             }}
             disabled={loadingStatements}
-            className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-2 rounded-lg disabled:opacity-50 flex-shrink-0"
+            className="inline-flex items-center gap-1.5 bg-navy hover:bg-navy-deep text-white text-xs font-bold px-3 py-2 rounded-lg disabled:opacity-50 flex-shrink-0"
           >
             {loadingStatements ? (
               <Loader2 size={12} className="animate-spin" />
@@ -499,15 +522,26 @@ export function ClientRecCard({
             Review &amp; approve
           </button>
         )}
+        {isPending && isSenior && (
+          <button
+            onClick={reject}
+            disabled={completing}
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 border border-red-200 rounded-lg px-2 py-1.5 disabled:opacity-50 flex-shrink-0"
+            title="Reject — bounce back to the bookkeeper (Failed Review) with a note; no client email"
+          >
+            <XCircle size={11} />
+            Reject
+          </button>
+        )}
         {isPending && (
           <button
             onClick={reopen}
             disabled={completing}
             className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-slate hover:text-navy px-2 py-1.5 disabled:opacity-50 flex-shrink-0"
-            title={isSenior ? "Send back to the bookkeeper" : "Withdraw and keep working"}
+            title={isSenior ? "Withdraw silently (no note)" : "Withdraw and keep working"}
           >
             <RotateCcw size={11} />
-            {isSenior ? "Send back to bookkeeper" : "Withdraw"}
+            {isSenior ? "Withdraw" : "Withdraw"}
           </button>
         )}
         {isComplete && (
@@ -787,7 +821,7 @@ export function ClientRecCard({
                     onClick={submitForReview}
                     disabled={completing || !attested}
                     title={!attested ? "Tick the attestation first" : undefined}
-                    className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold px-4 py-2 rounded-lg disabled:opacity-50"
+                    className="inline-flex items-center gap-2 bg-navy hover:bg-navy-deep text-white text-sm font-bold px-4 py-2 rounded-lg disabled:opacity-50"
                   >
                     {completing ? (
                       <Loader2 size={13} className="animate-spin" />
@@ -1398,8 +1432,8 @@ export function StatementsReview({
 function SpotCheckPanel({ spot, loading }: { spot: SpotCheck | null; loading: boolean }) {
   if (loading && !spot) {
     return (
-      <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 flex items-center gap-2.5 text-sm text-violet-900">
-        <Loader2 size={14} className="animate-spin text-violet-600" />
+      <div className="bg-teal-light border border-teal-border rounded-xl px-4 py-3 flex items-center gap-2.5 text-sm text-teal-dark">
+        <Loader2 size={14} className="animate-spin text-teal-dark" />
         AI is spot-checking these statements against painting-industry standards…
       </div>
     );

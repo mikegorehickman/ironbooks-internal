@@ -333,14 +333,14 @@ function UpgradeToStripeApiBanner({
   dateRangeEnd: string | null;
 }) {
   return (
-    <div className="rounded-xl bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 p-5">
+    <div className="rounded-xl bg-teal-light border border-teal-border p-5">
       <div className="flex items-start gap-3">
-        <div className="p-2 rounded-lg bg-purple-100 flex-shrink-0">
-          <Sparkles size={18} className="text-purple-700" />
+        <div className="p-2 rounded-lg bg-teal-light flex-shrink-0">
+          <Sparkles size={18} className="text-teal-dark" />
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-bold text-navy">
-            <strong className="text-purple-900">{clientName}</strong> has
+            <strong className="text-teal-dark">{clientName}</strong> has
             connected Stripe — upgrade this recon to the deterministic path
           </h3>
           <p className="text-xs text-ink-slate mt-1 leading-relaxed mb-3">

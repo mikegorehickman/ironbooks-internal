@@ -1739,7 +1739,7 @@ function StatementCoveragePanel({ clientLinkId }: { clientLinkId: string }) {
                         className="inline-flex items-center gap-1.5 text-left text-navy hover:text-teal-dark hover:underline"
                         title="Click to preview"
                       >
-                        <FileText size={14} className="text-indigo-500 flex-shrink-0" />
+                        <FileText size={14} className="text-teal-dark flex-shrink-0" />
                         <span className="truncate max-w-[240px]">{s.display_name}</span>
                       </button>
                     </td>

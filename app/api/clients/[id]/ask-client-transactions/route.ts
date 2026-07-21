@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { resolveClientContactEmails, sendResendEmailTracked } from "@/lib/client-comms";
+import { deliverClientEmail } from "@/lib/ask-client-email";
 
 export const dynamic = "force-dynamic";
 
@@ -52,71 +52,23 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const subject = (body.subject || "").trim().slice(0, 300);
-  const html = (body.html || "").trim();
-  const text = (body.text || "").trim();
-  if (!subject || (!html && !text)) {
-    return NextResponse.json({ error: "Subject and email body are required" }, { status: 400 });
-  }
-
-  const recipients = await resolveClientContactEmails(service, clientLinkId);
-  if (recipients.length === 0) {
-    return NextResponse.json(
-      {
-        error: "No email on file for this client — add a portal user or a contact email first, or copy the draft and send it manually.",
-        reason: "no_recipient",
-      },
-      { status: 422 }
-    );
-  }
-
-  const replyTo = (actor as any)?.email || "admin@ironbooks.com";
-  const result = await sendResendEmailTracked({ to: recipients, subject, html, text, replyTo });
-
-  const nowIso = new Date().toISOString();
-  try {
-    await (service as any).from("client_email_log").insert(
-      recipients.map((addr) => ({
-        client_link_id: clientLinkId,
-        to_address: addr,
-        subject,
-        email_type: "ask_client_txns",
-        status: result.ok ? "sent" : "failed",
-        provider_message_id: result.messageId || null,
-        error: result.ok ? null : result.error || "unknown",
-        created_by: user.id,
-        ts: nowIso,
-      }))
-    );
-  } catch (e: any) {
-    console.warn(`[ask-client-transactions] client_email_log insert failed: ${e?.message}`);
-  }
-
-  if (!result.ok) {
-    return NextResponse.json(
-      {
-        error: `Email didn't send — ${result.error || "Resend rejected the request"}. Fix the issue or copy the draft and send it manually.`,
-        reason: "send_failed",
-      },
-      { status: 502 }
-    );
-  }
-
-  await service.from("audit_log").insert({
-    event_type: "ask_client_transactions_email_sent",
-    user_id: user.id,
-    request_payload: {
-      client_link_id: clientLinkId,
-      client_name: (client as any).client_name,
+  // One shared delivery path (resolve → send → log → audit). See
+  // lib/ask-client-email.ts.
+  const r = await deliverClientEmail({
+    service,
+    clientLinkId,
+    clientName: (client as any).client_name,
+    userId: user.id,
+    actor: actor as any,
+    subject: body.subject || "",
+    html: body.html || "",
+    text: body.text || "",
+    emailType: "ask_client_txns",
+    auditEventType: "ask_client_transactions_email_sent",
+    auditExtra: {
       account_name: body.account_name || null,
       transaction_count: body.transaction_count || null,
-      sent_by: (actor as any)?.full_name || (actor as any)?.email || user.id,
-      recipients,
-      subject,
-      provider_message_id: result.messageId || null,
-      sent_at: nowIso,
-    } as any,
+    },
   });
-
-  return NextResponse.json({ ok: true, sent: true, recipients, message_id: result.messageId || null });
+  return NextResponse.json(r.body, { status: r.status });
 }

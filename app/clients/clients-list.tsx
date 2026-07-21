@@ -4,7 +4,11 @@ import { useState, useMemo, Component, useEffect, useRef, type ReactNode } from 
 import { CommsTracker } from "./comms-tracker";
 import { PyTaxesWidget } from "./py-taxes-widget";
 import { LIFECYCLE_META, type LifecycleStatus } from "@/lib/client-lifecycle";
+import { InReviewAccounts, type InReviewClient } from "./in-review-accounts";
+import { StripeInviteSuggestions, type StripeInviteSuggestion } from "./stripe-invite-suggestions";
 import { LifecyclePill } from "@/components/LifecyclePill";
+import { ClientBadges } from "@/components/ClientBadges";
+import type { AttentionState } from "@/lib/client-attention-state";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -92,6 +96,11 @@ interface ClientRow {
   // Prior-year taxes filing status (migration 32)
   py_taxes_filed?: boolean;
   py_taxes_filed_through_year?: number | null;
+  /** Macro-stage (lifecycle spine): onboarding | cleanup | production. */
+  macroStage?: "onboarding" | "cleanup" | "production" | null;
+  /** Folded-in filter flags (from the retired strips). */
+  needs_review?: boolean;
+  stripe_pending?: boolean;
   // Clients-table revamp columns
   qbo_connected?: boolean;
   daily_recon_enabled?: boolean;
@@ -126,27 +135,49 @@ const STATUS_CONFIG: Record<string, { icon: any; color: string; bg: string; labe
 
 export function ClientsList({
   initialClients,
+  initialStage = "all",
   bookkeepers,
   currentUserId,
   canEdit,
+  inReviewClients = [],
+  stripeSuggestions = [],
 }: {
   initialClients: ClientRow[];
+  initialStage?: "all" | "onboarding" | "cleanup" | "production";
   bookkeepers: Bookkeeper[];
   currentUserId: string;
   canEdit: boolean;
+  /** Folded-in action panels — shown only when their filter pill is active. */
+  inReviewClients?: InReviewClient[];
+  stripeSuggestions?: StripeInviteSuggestion[];
 }) {
   const router = useRouter();
   const [clients, setClients] = useState(initialClients);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all_active");
+  const [stageFilter, setStageFilter] = useState<"all" | "onboarding" | "cleanup" | "production">(initialStage);
   const [assignmentFilter, setAssignmentFilter] = useState<string>("all");
   const [jurisdictionFilter, setJurisdictionFilter] = useState<string>("all");
   const [view, setView] = useState<"grid" | "table">("table");
   const [deleteTarget, setDeleteTarget] = useState<ClientRow | null>(null);
+  // Attention feed (escalations / billing / BS owed / disconnected / stuck job)
+  // — the fleet-scan + risk signals surfaced as row badges, replacing the
+  // separate ManagerDashboard that used to carry them.
+  const [attention, setAttention] = useState<Record<string, AttentionState>>({});
+  useEffect(() => {
+    fetch("/api/attention")
+      .then((r) => (r.ok ? r.json() : { clients: {} }))
+      .then((j) => setAttention(j.clients || {}))
+      .catch(() => {});
+  }, []);
 
   // Filters
   const filtered = useMemo(() => {
     let r = clients;
+
+    if (stageFilter !== "all") {
+      r = r.filter((c) => c.macroStage === stageFilter);
+    }
 
     if (statusFilter === "all_active") {
       r = r.filter((c) => c.is_active && c.status !== "churned");
@@ -154,6 +185,10 @@ export function ClientsList({
       // no filter
     } else if (statusFilter === "inactive") {
       r = r.filter((c) => !c.is_active || c.status === "churned");
+    } else if (statusFilter === "in_review") {
+      r = r.filter((c) => c.needs_review);
+    } else if (statusFilter === "stripe") {
+      r = r.filter((c) => c.stripe_pending);
     } else {
       r = r.filter((c) => c.status === statusFilter && c.is_active);
     }
@@ -181,7 +216,18 @@ export function ClientsList({
     }
 
     return r;
-  }, [clients, search, statusFilter, assignmentFilter, jurisdictionFilter, currentUserId]);
+  }, [clients, search, statusFilter, stageFilter, assignmentFilter, jurisdictionFilter, currentUserId]);
+
+  // Stage pill counts (macro-stage spine).
+  const stageCounts = useMemo(() => {
+    const a = clients.filter((c) => c.is_active && c.status !== "churned");
+    return {
+      all: a.length,
+      onboarding: a.filter((c) => c.macroStage === "onboarding").length,
+      cleanup: a.filter((c) => c.macroStage === "cleanup").length,
+      production: a.filter((c) => c.macroStage === "production").length,
+    };
+  }, [clients]);
 
   // Counts for filter pills
   const statusCounts = useMemo(() => {
@@ -194,6 +240,8 @@ export function ClientsList({
       paused: active.filter((c) => c.status === "paused").length,
       flagged: clients.filter((c) => c.flagged_cleanups > 0).length,
       archived: clients.filter((c) => !c.is_active || c.status === "churned").length,
+      in_review: clients.filter((c) => c.needs_review).length,
+      stripe: clients.filter((c) => c.stripe_pending).length,
     };
   }, [clients]);
 
@@ -242,6 +290,27 @@ export function ClientsList({
 
   return (
     <div>
+      {/* Stage pills — the lifecycle spine (primary organizing dimension). */}
+      <div className="flex items-center gap-2 mb-3 overflow-x-auto pb-1">
+        {([
+          ["all", "All stages", stageCounts.all],
+          ["onboarding", "Onboarding", stageCounts.onboarding],
+          ["cleanup", "Cleanup", stageCounts.cleanup],
+          ["production", "Production", stageCounts.production],
+        ] as const).map(([key, label, count]) => (
+          <button
+            key={key}
+            onClick={() => setStageFilter(key as any)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-bold whitespace-nowrap transition-colors ${
+              stageFilter === key ? "bg-navy text-white" : "bg-white text-ink-slate border border-gray-200 hover:border-gray-300"
+            }`}
+          >
+            {label}
+            <span className={`text-xs ${stageFilter === key ? "text-white/70" : "text-ink-light"}`}>{count}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Status filter pills */}
       <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
         <FilterPill
@@ -297,6 +366,29 @@ export function ClientsList({
               icon={Flag}
             />
           </>
+        )}
+        {/* Folded-in strips: In Review + Stripe pending are now filter pills;
+            their action panels render above the table only when active. */}
+        {(statusCounts.in_review > 0 || statusCounts.stripe > 0) && (
+          <div className="w-px h-6 bg-gray-200 mx-1" />
+        )}
+        {statusCounts.in_review > 0 && (
+          <StatusPill
+            label="In Review"
+            count={statusCounts.in_review}
+            active={statusFilter === "in_review"}
+            onClick={() => setStatusFilter(statusFilter === "in_review" ? "all_active" : "in_review")}
+            color="#7C3AED"
+          />
+        )}
+        {statusCounts.stripe > 0 && (
+          <StatusPill
+            label="Stripe"
+            count={statusCounts.stripe}
+            active={statusFilter === "stripe"}
+            onClick={() => setStatusFilter(statusFilter === "stripe" ? "all_active" : "stripe")}
+            color="#635BFF"
+          />
         )}
         {/* Archived — the dedicated store for inactivated clients. They're
             excluded from every other view; this is the only place they
@@ -371,6 +463,19 @@ export function ClientsList({
         </div>
       </div>
 
+      {/* Folded-in action panels — the old always-on strips, now shown only
+          when their filter pill is active. */}
+      {statusFilter === "in_review" && inReviewClients.length > 0 && (
+        <div className="mb-4">
+          <InReviewAccounts clients={inReviewClients} canApprove={canEdit} />
+        </div>
+      )}
+      {statusFilter === "stripe" && stripeSuggestions.length > 0 && (
+        <div className="mb-4">
+          <StripeInviteSuggestions suggestions={stripeSuggestions} />
+        </div>
+      )}
+
       <div className="text-xs text-ink-slate mb-3">
         {filtered.length} of {clients.length} clients
       </div>
@@ -389,11 +494,10 @@ export function ClientsList({
         <div className="rounded-xl overflow-hidden bg-white border border-gray-200">
           <div
             className="grid items-center px-5 py-3 text-xs font-bold uppercase tracking-wider bg-gray-50 text-ink-slate border-b border-gray-200"
-            style={{ gridTemplateColumns: "1.7fr 1fr 0.9fr 1fr 0.9fr 0.9fr 1fr 0.7fr" }}
+            style={{ gridTemplateColumns: "1.7fr 1fr 1fr 0.9fr 0.9fr 1fr 0.7fr" }}
           >
             <div>Client</div>
             <div>Status</div>
-            <div>Double</div>
             <div>Assigned</div>
             <div>Portal</div>
             <div>Stripe</div>
@@ -407,6 +511,7 @@ export function ClientsList({
                 client={client}
                 bookkeepers={bookkeepers}
                 canEdit={canEdit}
+                attention={attention[client.id] ?? null}
                 onUpdate={(updates) => updateClient(client.id, updates)}
                 onDelete={canEdit ? () => setDeleteTarget(client) : undefined}
               />
@@ -424,6 +529,7 @@ export function ClientsList({
                 client={client}
                 bookkeepers={bookkeepers}
                 canEdit={canEdit}
+                attention={attention[client.id] ?? null}
                 onUpdate={(updates) => updateClient(client.id, updates)}
                 onDelete={canEdit ? () => setDeleteTarget(client) : undefined}
               />
@@ -510,12 +616,14 @@ function ClientRow({
   client,
   bookkeepers,
   canEdit,
+  attention,
   onUpdate,
   onDelete,
 }: {
   client: ClientRow;
   bookkeepers: Bookkeeper[];
   canEdit: boolean;
+  attention?: AttentionState | null;
   onUpdate: (updates: Partial<ClientRow>) => void;
   onDelete?: () => void;
 }) {
@@ -619,7 +727,7 @@ function ClientRow({
       className={`grid items-center px-5 py-3 border-b border-gray-100 hover:bg-teal-lighter transition-colors ${
         !client.is_active ? "opacity-50" : ""
       }`}
-      style={{ gridTemplateColumns: "1.7fr 1fr 0.9fr 1fr 0.9fr 0.9fr 1fr 0.7fr" }}
+      style={{ gridTemplateColumns: "1.7fr 1fr 1fr 0.9fr 0.9fr 1fr 0.7fr" }}
     >
       <Link
         href={`/clients/${client.id}`}
@@ -644,6 +752,11 @@ function ClientRow({
               </span>
             )}
           </div>
+          {attention && (
+            <div className="mt-1">
+              <ClientBadges attention={attention} stage={client.macroStage || "dashboard"} max={3} />
+            </div>
+          )}
         </div>
       </Link>
 
@@ -666,22 +779,6 @@ function ClientRow({
             </span>
           );
         })()}
-      </div>
-
-      {/* Double column */}
-      <div className="min-w-0">
-        {client.double_client_id?.startsWith("pending_") ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200">
-            Not matched
-          </span>
-        ) : (
-          <div className="min-w-0">
-            <div className="text-xs font-semibold text-navy truncate" title={client.double_client_name || ""}>
-              {client.double_client_name || `ID ${client.double_client_id}`}
-            </div>
-            <div className="text-[10px] text-ink-slate">Linked</div>
-          </div>
-        )}
       </div>
 
       <div className="relative">
@@ -907,15 +1004,6 @@ function ClientRow({
       </div>
 
       <div className="flex items-center gap-1 flex-wrap">
-        {client.double_client_id?.startsWith("pending_") ? (
-          <Link
-            href={`/clients/${client.id}/match-double`}
-            className="px-2 py-1 rounded text-[10px] font-semibold bg-red-600 hover:bg-red-700 text-white"
-            title="Match this client to a Double HQ record"
-          >
-            Match
-          </Link>
-        ) : (
           <>
             {/* Continue an in-flight / errored cleanup. Shown only when the
                 client has a resumable COA job (executing, in_review, failed). */}
@@ -934,7 +1022,7 @@ function ClientRow({
                       ? "bg-red-100 text-red-700 hover:bg-red-200"
                       : client.resumable_job.status === "executing"
                       ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
-                      : "bg-purple-100 text-purple-700 hover:bg-purple-200"
+                      : "bg-teal-light text-teal-dark hover:bg-teal-light"
                   }`}
                   title={
                     client.resumable_job.status === "failed"
@@ -956,7 +1044,6 @@ function ClientRow({
               onEmail={() => setEmailOpen(true)}
             />
           </>
-        )}
       </div>
 
       <div className="flex justify-end items-center gap-1">
@@ -1024,12 +1111,14 @@ function ClientCard({
   canEdit,
   onUpdate,
   onDelete,
+  attention,
 }: {
   client: ClientRow;
   bookkeepers: Bookkeeper[];
   canEdit: boolean;
   onUpdate: (updates: Partial<ClientRow>) => void;
   onDelete?: () => void;
+  attention?: AttentionState | null;
 }) {
   const statusCfg = STATUS_CONFIG[client.status];
   const StatusIcon = statusCfg.icon;
@@ -1054,6 +1143,11 @@ function ClientCard({
               <MapPin size={10} />
               {client.jurisdiction}{client.state_province ? ` · ${client.state_province}` : ""}
             </div>
+            {attention && (
+              <div className="mt-1">
+                <ClientBadges attention={attention} stage={client.macroStage || "dashboard"} max={3} />
+              </div>
+            )}
           </div>
         </Link>
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -1122,16 +1216,6 @@ function ClientCard({
         ) : (
           <span className="italic">Unassigned</span>
         )}
-        <div className="flex items-center gap-1 mt-1">
-          <span className="text-ink-light">Double:</span>
-          {client.double_client_id?.startsWith("pending_") ? (
-            <span className="font-semibold text-red-700">Not matched</span>
-          ) : (
-            <span className="font-semibold text-navy truncate" title={client.double_client_name || ""}>
-              {client.double_client_name || `ID ${client.double_client_id}`}
-            </span>
-          )}
-        </div>
         {client.last_cleanup_at && (
           <div className="flex items-center gap-1 mt-1">
             <Clock size={10} />
@@ -1175,21 +1259,12 @@ function ClientCard({
       </div>
 
       <div className="flex gap-2">
-        {client.double_client_id?.startsWith("pending_") ? (
-          <Link
-            href={`/clients/${client.id}/match-double`}
-            className="flex-1 text-center px-3 py-1.5 rounded-md text-xs font-semibold bg-red-600 hover:bg-red-700 text-white"
-          >
-            Match Double →
-          </Link>
-        ) : (
-          <Link
-            href={`/clients/${client.id}`}
-            className="flex-1 text-center px-3 py-1.5 rounded-md text-xs font-semibold bg-teal hover:bg-teal-dark text-white"
-          >
-            Open client
-          </Link>
-        )}
+        <Link
+          href={`/clients/${client.id}`}
+          className="flex-1 text-center px-3 py-1.5 rounded-md text-xs font-semibold bg-teal hover:bg-teal-dark text-white"
+        >
+          Open client
+        </Link>
       </div>
       {emailOpen && (
         <EmailClientModal

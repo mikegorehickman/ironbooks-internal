@@ -406,9 +406,9 @@ function MergeCandidatesPanel({
   const done = merges.filter((m) => m.status === "complete" || m.status === "ignored");
 
   return (
-    <div className="bg-white border border-purple-200 rounded-xl p-5 mb-6">
+    <div className="bg-white border border-teal-border rounded-xl p-5 mb-6">
       <div className="flex items-start gap-3 mb-4">
-        <GitMerge size={20} className="text-purple-600 mt-0.5 flex-shrink-0" />
+        <GitMerge size={20} className="text-teal-dark mt-0.5 flex-shrink-0" />
         <div>
           <h3 className="font-bold text-sm text-navy">
             Account Merges Needed ({merges.length} total · {pending.length} pending · {done.length} done)
@@ -492,7 +492,7 @@ function MergeCard({
       isIgnored ? "bg-gray-50 border-gray-200 opacity-70" :
       isFailed ? "bg-red-50 border-red-200" :
       isInProgress ? "bg-blue-50 border-blue-200" :
-      "bg-purple-50 border-purple-200"
+      "bg-teal-light border-teal-border"
     }`}>
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
@@ -514,11 +514,11 @@ function MergeCard({
       {/* Winner row */}
       {winnerInfo && !isIgnored && (
         <div className={`rounded-md px-3 py-2 mb-2 border ${
-          isDone ? "bg-white border-green-300" : "bg-white border-purple-300"
+          isDone ? "bg-white border-green-300" : "bg-white border-teal-border"
         }`}>
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-wide font-bold text-purple-700">
+              <p className="text-[10px] uppercase tracking-wide font-bold text-teal-dark">
                 {merge.type === "existing_target" ? "Existing target (keeps)" : "Winner (gets the name)"}
               </p>
               <p className="text-sm font-semibold text-navy truncate">
@@ -529,7 +529,7 @@ function MergeCard({
             {merge.type === "new_consolidation" && !isDone && !isInProgress && (
               <button
                 onClick={() => setPickerOpen(!pickerOpen)}
-                className="text-[11px] text-purple-700 hover:text-purple-900 font-semibold whitespace-nowrap"
+                className="text-[11px] text-teal-dark hover:text-teal-dark font-semibold whitespace-nowrap"
               >
                 {pickerOpen ? "Close" : "Change winner"}
               </button>
@@ -537,10 +537,10 @@ function MergeCard({
           </div>
 
           {pickerOpen && merge.type === "new_consolidation" && (
-            <div className="mt-2 pt-2 border-t border-purple-200 space-y-1">
-              <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wide">Pick which account wins:</p>
+            <div className="mt-2 pt-2 border-t border-teal-border space-y-1">
+              <p className="text-[10px] font-bold text-teal-dark uppercase tracking-wide">Pick which account wins:</p>
               {merge.source_accounts.map((s) => (
-                <label key={s.id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-purple-100 rounded px-1 py-0.5">
+                <label key={s.id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-teal-light rounded px-1 py-0.5">
                   <input
                     type="radio"
                     name={`winner-${merge.id}`}

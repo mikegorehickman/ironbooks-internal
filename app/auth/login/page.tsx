@@ -193,7 +193,7 @@ function LoginInner() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-teal to-teal-dark hover:from-teal-dark hover:to-teal-dark text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-50 shadow-sm shadow-teal/30"
+              className="w-full bg-teal-lighter-dark hover:from-teal-dark hover:to-teal-dark text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-50 shadow-sm shadow-teal/30"
             >
               {loading ? "Sending…" : "Send my sign-in link"}
             </button>

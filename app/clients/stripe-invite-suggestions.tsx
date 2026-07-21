@@ -82,11 +82,11 @@ export function StripeInviteSuggestions({
   return (
     <>
       <div className="rounded-xl bg-white border border-gray-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-white">
+        <div className="px-5 py-4 border-b border-gray-200 bg-teal-lighter">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-lg bg-purple-100">
-                <CreditCard size={16} className="text-purple-700" />
+              <div className="p-2 rounded-lg bg-teal-light">
+                <CreditCard size={16} className="text-teal-dark" />
               </div>
               <div>
                 <h2 className="text-base font-bold text-navy">Pending Stripe Invites Detected</h2>
@@ -96,7 +96,7 @@ export function StripeInviteSuggestions({
                 </p>
               </div>
             </div>
-            <span className="rounded-full bg-purple-600 text-white text-xs font-bold px-2.5 py-1">
+            <span className="rounded-full bg-navy text-white text-xs font-bold px-2.5 py-1">
               {suggestions.length}
             </span>
           </div>
@@ -111,7 +111,7 @@ export function StripeInviteSuggestions({
         {/* Not yet invited — the action list */}
         <div className="divide-y divide-gray-100">
           {pending.map((s) => (
-            <div key={s.client_link_id} className="flex items-center gap-4 px-5 py-3 hover:bg-purple-50/30 transition-colors">
+            <div key={s.client_link_id} className="flex items-center gap-4 px-5 py-3 hover:bg-teal-light/30 transition-colors">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-sm text-navy">{s.client_name}</span>
@@ -133,7 +133,7 @@ export function StripeInviteSuggestions({
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
                   onClick={() => setOpenModalForClient(s.client_link_id)}
-                  className="inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md"
+                  className="inline-flex items-center gap-1.5 bg-navy hover:bg-navy-deep text-white text-xs font-semibold px-3 py-1.5 rounded-md"
                   title="Open the Stripe Connect modal pre-selected for this client"
                 >
                   <Send size={12} /> Send invite
@@ -233,7 +233,7 @@ function RequestedRow({
         <button
           onClick={onResend}
           className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-md ${
-            needsResend ? "bg-purple-600 hover:bg-purple-700 text-white" : "border border-gray-200 text-ink-slate hover:bg-gray-50"
+            needsResend ? "bg-navy hover:bg-navy-deep text-white" : "border border-gray-200 text-ink-slate hover:bg-gray-50"
           }`}
           title="Generate a fresh link and resend the connect email"
         >

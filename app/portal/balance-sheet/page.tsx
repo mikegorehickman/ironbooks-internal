@@ -4,6 +4,7 @@ import { fetchBalanceSheetSummary } from "@/lib/portal-data";
 import { PortalErrorState } from "../error-state";
 import { AskAboutButton } from "../ask-about";
 import { StatementSwitcher } from "../financial-statements/statement-switcher";
+import { StatementReviewNotes } from "../statement-review-notes";
 import { Sparkles, MessageSquare, Wallet, CreditCard, PiggyBank } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -92,6 +93,9 @@ export default async function BalanceSheetPage() {
   return (
     <div className="space-y-6">
       <StatementSwitcher active="bs" />
+      {ctx.impersonating && (
+        <StatementReviewNotes clientLinkId={ctx.clientLinkId} kind="bs" statementLabel="Balance Sheet" />
+      )}
 
       {/* ── Gradient hero ───────────────────────────────────────────── */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">

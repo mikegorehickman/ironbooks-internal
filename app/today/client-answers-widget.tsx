@@ -29,6 +29,8 @@ type CoaAccount = { id: string; name: string; type: string; section: string };
 
 export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[] }) {
   const [rows, setRows] = useState(initial);
+  // Home shows the first 5 client groups; toggle for the rest.
+  const [showAll, setShowAll] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<{ label: string; done: number; total: number } | null>(null);
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
@@ -164,7 +166,7 @@ export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[]
             {bulkErrors.length > 3 ? "…" : ""}
           </div>
         )}
-        {[...byClient.entries()].map(([client, list]) => {
+        {(showAll ? [...byClient.entries()] : [...byClient.entries()].slice(0, 5)).map(([client, list]) => {
           const selectedRows = list.filter((r) => selected.has(r.id));
           return (
             <ClientGroup
@@ -191,6 +193,14 @@ export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[]
           );
         })}
       </div>
+      {byClient.size > 5 && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="w-full px-5 py-2.5 text-left text-xs font-semibold text-teal-dark hover:text-navy border-t border-hairline transition-colors"
+        >
+          {showAll ? "Show top 5 clients" : `Show all ${byClient.size} clients (${rows.length} answers)`}
+        </button>
+      )}
     </div>
   );
 }

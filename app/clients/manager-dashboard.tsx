@@ -50,7 +50,7 @@ const STATUS_ORDER = (Object.keys(LIFECYCLE_META) as LifecycleStatus[]).sort(
 /** Month-end close status → badge label + tone. */
 const ME_META: Record<NonNullable<ManagerRow["current_month_end"]>, { label: string; tone: string }> = {
   done:        { label: "Done",            tone: "bg-emerald-50 text-emerald-700" },
-  in_review:   { label: "In review",      tone: "bg-violet-50 text-violet-700" },
+  in_review:   { label: "In review",      tone: "bg-teal-light text-teal-dark" },
   waiting:     { label: "Waiting on client", tone: "bg-amber-50 text-amber-700" },
   in_progress: { label: "In progress",    tone: "bg-blue-50 text-blue-700" },
   not_started: { label: "Not started",    tone: "bg-slate-100 text-slate-600" },
@@ -337,7 +337,7 @@ export function ManagerDashboard({
                         <button
                           onClick={() => selfFix(r.id, r.paused_job_id!)}
                           disabled={busy === r.id}
-                          className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
+                          className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-teal-light text-teal-dark hover:bg-teal-light disabled:opacity-50"
                           title="This client has a stuck reclass job — click to auto-resume it"
                         >
                           {busy === r.id ? <Loader2 size={9} className="animate-spin" /> : <PlayCircle size={9} />} Get unstuck
