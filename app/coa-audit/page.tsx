@@ -4,6 +4,7 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { deriveLifecycleStatus, ACTIVE_JOB_STATUSES, type LifecycleStatus } from "@/lib/client-lifecycle";
 import { CoaAuditClient } from "./audit-client";
+import { ParentPostingsSweep } from "./parent-postings-sweep";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,8 @@ export default async function CoaAuditPage() {
   if (["client", "billing_admin"].includes(role)) redirect("/");
   // Who can actually run fixes/merges (viewers are read-only).
   const canFix = ["admin", "lead", "bookkeeper"].includes(role);
+  // The fleet parent-postings sweep is admin/lead (matches its API routes).
+  const canSweep = ["admin", "lead"].includes(role);
 
   // Owner-only (Mike): the multi-select batch Fix-all runner. Gated by email —
   // there's no dedicated owner role, and this is the one control that writes to
@@ -108,6 +111,9 @@ export default async function CoaAuditPage() {
         subtitle="Where each client's QuickBooks chart stands against the master COA — and where they sit in cleanup"
       />
       <div className="px-8 py-6 max-w-6xl">
+        {canSweep && (
+          <ParentPostingsSweep clients={clientList.map((c) => ({ id: c.id, client_name: c.client_name }))} />
+        )}
         <CoaAuditClient
           clients={clientList.map((c) => ({ id: c.id, client_name: c.client_name, jurisdiction: c.jurisdiction ?? null }))}
           initialScans={initialScans}
