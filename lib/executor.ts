@@ -24,6 +24,7 @@ import {
   retypeAccountViaRebuild,
   setAccountParent,
   ensureAccountExists,
+  detachSubAccounts,
 } from "./coa-reclass-je";
 import { getClientEndCloses, type DoubleEndCloseSummary } from "./double";
 
@@ -130,7 +131,11 @@ function isQboLimitationError(err: any): boolean {
        msg.includes("used by a product or service") ||
        msg.includes("default account") ||
        msg.includes("used by") ||
-       msg.includes("is the default")))
+       msg.includes("is the default") ||
+       // "You cannot change the type of an account with subaccounts." — the
+       // retype stage detaches children first, but if any linger this routes
+       // the retype to the rebuild path instead of hard-failing (Wombacher).
+       msg.includes("subaccount")))
   );
 }
 
@@ -692,6 +697,28 @@ export async function executeJob(jobId: string): Promise<{
           const parent: any = current.ParentRef?.value ? retypeById.get(current.ParentRef.value) : null;
           const detachFromParent =
             !!current.SubAccount && !!parent && parent.AccountType !== action.new_type;
+
+          // QBO refuses to change the type of an account that HAS sub-accounts
+          // (error 6000 — Wombacher: "Vehicle expenses"). It likewise blocks
+          // retiring such an account, so the rebuild fallback would fail too.
+          // Detach the children to top level FIRST; stage 3.8 re-nests them
+          // under the correct heading afterwards. (SyncToken on the parent is
+          // unchanged — detaching updates the children, not the parent.)
+          const kids = retypeAccounts.filter(
+            (a) => a.ParentRef?.value === action.qbo_account_id && a.Active !== false
+          );
+          if (kids.length > 0) {
+            const det = await detachSubAccounts({
+              realmId: ctx.realmId,
+              accessToken: ctx.accessToken,
+              parentId: action.qbo_account_id!,
+              accounts: retypeAccounts,
+            });
+            await logProgress(ctx, "retype_detach_children",
+              `Detached ${det.detached}/${kids.length} sub-account(s) from "${action.current_name}" so its type can be changed`,
+              { account: action.current_name, detached: det.detached, failures: det.failures });
+          }
+
           const updated = await qbo.updateAccountType(
             ctx.realmId, ctx.accessToken,
             action.qbo_account_id!, current.SyncToken,
