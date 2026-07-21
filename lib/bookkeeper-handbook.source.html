@@ -6,17 +6,17 @@
 <title>Ironbooks · SNAP Bookkeeper Handbook</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=Oswald:wght@500;600&display=swap" rel="stylesheet" />
 <style>
-  :root{--teal:#2D7A75;--teal-dark:#1F5D58;--teal-light:#E8F2F0;--teal-lighter:#F4F9F8;--navy:#0F1F2E;--navy-light:#1A2B3D;--ink-slate:#475569;--ink-light:#94A3B8;--line:#E2E8F0;}
+  :root{--teal:#3E908D;--teal-dark:#2A6E6B;--teal-light:#EDF5F4;--teal-lighter:#F4F9F8;--navy:#152F46;--navy-light:#1E3D5C;--ink-slate:#5B6672;--ink-light:#8A96A1;--line:#E7EBEE;--gold:#B08D45;--gold-tint:#FBF6EE;--rust:#954E44;--rust-tint:#FAF1EF;}
   *{margin:0;padding:0;box-sizing:border-box;}
   body{font-family:"Figtree",system-ui,-apple-system,sans-serif;color:var(--navy);background:var(--teal-lighter);line-height:1.6;-webkit-font-smoothing:antialiased;}
   .wrap{max-width:840px;margin:0 auto;padding:0 24px 72px;}
   a{color:var(--teal-dark);}
-  .cover{background:linear-gradient(160deg,var(--navy) 0%,var(--navy-light) 100%);color:#fff;border-radius:0 0 28px 28px;padding:54px 40px 48px;text-align:center;box-shadow:0 24px 60px -34px rgba(15,31,46,.55);}
+  .cover{background:linear-gradient(160deg,var(--navy) 0%,var(--navy-light) 100%);color:#fff;border-radius:0 0 28px 28px;padding:54px 40px 48px;text-align:center;box-shadow:0 24px 60px -34px rgba(21,47,70,.55);}
   .cover .brand{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:24px;}
-  .cover .brand .name{font-size:22px;font-weight:800;letter-spacing:-.02em;}
-  .cover .eyebrow{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#8FD3CC;background:rgba(45,122,117,.25);border:1px solid rgba(143,211,204,.35);padding:6px 14px;border-radius:999px;margin-bottom:18px;}
+  .cover .brand .name{font-family:"Oswald",sans-serif;font-size:22px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;}
+  .cover .eyebrow{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#8FD3CC;background:rgba(62,144,141,.25);border:1px solid rgba(143,211,204,.35);padding:6px 14px;border-radius:999px;margin-bottom:18px;}
   .cover h1{font-size:38px;font-weight:800;letter-spacing:-.025em;line-height:1.1;}
   .cover p{color:#C7D2DC;font-size:16px;margin-top:12px;}
   .toc{background:#fff;border:1px solid var(--line);border-radius:18px;padding:24px 28px;margin-top:28px;}
@@ -46,21 +46,21 @@
   ol.steps>li:last-child{border-bottom:0;}
   ol.steps>li::before{content:counter(s);position:absolute;left:0;top:7px;width:26px;height:26px;border-radius:8px;background:var(--teal-light);color:var(--teal-dark);font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;}
   ol.steps strong{color:var(--navy);} code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#F1F5F9;border:1px solid var(--line);border-radius:5px;padding:1px 6px;}
-  .shot{margin:14px 0 6px;border:2px dashed #9DC4BF;background:repeating-linear-gradient(45deg,#F4F9F8,#F4F9F8 12px,#ECF5F3 12px,#ECF5F3 24px);border-radius:14px;padding:22px;text-align:center;}
-  .shot .cam{font-size:24px;}
-  .shot .t{font-weight:800;color:var(--teal-dark);font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-top:4px;}
-  .shot .d{font-size:13px;color:var(--ink-slate);margin-top:3px;max-width:560px;margin-left:auto;margin-right:auto;}
-  .shot .path{display:inline-block;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--navy);background:#fff;border:1px solid var(--line);border-radius:6px;padding:2px 8px;margin-top:8px;}
   .note{border-radius:12px;padding:12px 16px;margin:14px 0;font-size:14px;display:flex;gap:10px;}
   .note .ic{flex:0 0 auto;font-size:15px;}
   .tip{background:var(--teal-light);border:1px solid #CFE6E2;color:#14443f;}
-  .warn{background:#FEF3C7;border:1px solid #FCD9A0;color:#7c5210;}
+  .warn{background:var(--gold-tint);border:1px solid #EAD9C4;color:#7c5210;}
+  .stop{background:var(--rust-tint);border:1px solid #E8CFC9;color:#7a352c;}
   table.t{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;}
   table.t th{background:var(--navy);color:#fff;text-align:left;padding:9px 14px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;}
   table.t th:first-child{border-radius:10px 0 0 0;}table.t th:last-child{border-radius:0 10px 0 0;}
   table.t td{padding:9px 14px;border-bottom:1px solid var(--line);vertical-align:top;}
   table.t tr:nth-child(even) td{background:var(--teal-lighter);}
   .chip{display:inline-block;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;}
+  .chip.teal{background:var(--teal-light);color:var(--teal-dark);}
+  .chip.gold{background:var(--gold-tint);color:var(--gold);}
+  .chip.rust{background:var(--rust-tint);color:var(--rust);}
+  .chip.grey{background:#F2F4F6;color:var(--ink-slate);}
   footer{text-align:center;color:var(--ink-light);font-size:12px;padding:40px 0 0;}
   footer b{color:var(--navy);}
   @media print{body{background:#fff;}.sop,.toc{box-shadow:none;}.sop{page-break-inside:avoid;}.cover{border-radius:0;}}
@@ -84,7 +84,7 @@
       <h2>Contents</h2>
       <div class="phase">Foundations</div>
       <ol>
-        <li><span class="n">01</span><a href="#s1">SNAP Basics</a></li>
+        <li><span class="n">01</span><a href="#s1">SNAP Basics — nav, lifecycle, roles</a></li>
       </ol>
       <div class="phase">Onboarding</div>
       <ol>
@@ -93,29 +93,31 @@
       </ol>
       <div class="phase">Cleanup</div>
       <ol>
-        <li><span class="n">04</span><a href="#s4">Chart of Accounts Cleanup</a></li>
-        <li><span class="n">05</span><a href="#s5">Categorizing Transactions (Reclassify)</a></li>
-        <li><span class="n">06</span><a href="#s6">Bank Rules</a></li>
-        <li><span class="n">07</span><a href="#s7">Balance Sheet Cleanup</a></li>
+        <li><span class="n">04</span><a href="#s4">The Cleanup Sequence (the 8 steps)</a></li>
+        <li><span class="n">05</span><a href="#s5">Chart of Accounts Cleanup</a></li>
+        <li><span class="n">06</span><a href="#s6">Categorizing Transactions (Reclassify)</a></li>
+        <li><span class="n">07</span><a href="#s7">Bank Rules</a></li>
         <li><span class="n">08</span><a href="#s8">Stripe Reconciliation</a></li>
-        <li><span class="n">09</span><a href="#s9">Sales Tax (GST/HST)</a></li>
-        <li><span class="n">10</span><a href="#s10">Completing &amp; Submitting Cleanup</a></li>
+        <li><span class="n">09</span><a href="#s9">Balance Sheet Cleanup</a></li>
+        <li><span class="n">10</span><a href="#s10">Sales Tax (GST/HST)</a></li>
+        <li><span class="n">11</span><a href="#s11">Revenue &amp; Expense Integrity</a></li>
+        <li><span class="n">12</span><a href="#s12">Submit for Review &amp; Failed Review</a></li>
       </ol>
       <div class="phase">Production</div>
       <ol>
-        <li><span class="n">11</span><a href="#s11">Production &amp; Daily Reconciliation</a></li>
-        <li><span class="n">12</span><a href="#s12">Month-End Close</a></li>
+        <li><span class="n">13</span><a href="#s13">Production &amp; Daily Reconciliation</a></li>
+        <li><span class="n">14</span><a href="#s14">Month-End Close</a></li>
       </ol>
       <div class="phase">Ongoing</div>
       <ol>
-        <li><span class="n">13</span><a href="#s13">Client Service (Reporting, Messaging, Calls, Billing)</a></li>
-        <li><span class="n">14</span><a href="#s14">Oversight — Lead &amp; Admin</a></li>
+        <li><span class="n">15</span><a href="#s15">Client Service (Reporting, Messaging, Calls, Billing)</a></li>
+        <li><span class="n">16</span><a href="#s16">Oversight — Lead &amp; Admin</a></li>
+        <li><span class="n">17</span><a href="#s17">Admin — the Control Room</a></li>
       </ol>
       <div class="phase">Playbooks</div>
       <ol>
-        <li><span class="n">15</span><a href="#s15">Daily Recon — Cleanup → Monthly Statements</a></li>
-        <li><span class="n">16</span><a href="#s16">Escalating a Client (and Getting Your Answer)</a></li>
-        <li><span class="n">17</span><a href="#s17">Board Badges — What They Mean</a></li>
+        <li><span class="n">18</span><a href="#s18">Escalating a Client (and Getting Your Answer)</a></li>
+        <li><span class="n">19</span><a href="#s19">Attention Badges — What They Mean</a></li>
       </ol>
     </div>
 
@@ -131,36 +133,41 @@
 
       <h3 class="step-h">Logging in</h3>
       <ol class="steps">
-        <li>Go to <strong>app.ironbooks.com</strong> and enter your <strong>@ironbooks.com</strong> email.</li>
+        <li>Go to <strong>snap.ironbooks.com</strong> and enter your <strong>@ironbooks.com</strong> email.</li>
         <li>SNAP is passwordless — you'll get a <strong>magic link</strong> by email. Click it to sign in.</li>
         <li>If a link expires, just request a new one from the login screen.</li>
       </ol>
 
-      <h3 class="step-h">Navigating</h3>
-      <ol class="steps">
-        <li>The sidebar groups everything into <strong>Work</strong> (Today, Cleanup, Production, Clients, History), plus <strong>Tools</strong> and <strong>Admin</strong> for seniors.</li>
-        <li><strong>Today</strong> = daily transactions to clear · <strong>Clients</strong> = the full client list &amp; status · <strong>History</strong> = past jobs.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Login + sidebar</div><div class="d">The sign-in screen, and the sidebar after login.</div><div class="path">app.ironbooks.com</div></div>
-
-      <h3 class="step-h">The client lifecycle</h3>
-      <p class="lead">Every client's status is derived automatically from the work done — you don't set it by hand.</p>
+      <h3 class="step-h">Navigating — the four spines</h3>
+      <p class="lead">The sidebar is deliberately short. Collapse it to icons anytime with the toggle at the top.</p>
       <table class="t">
-        <tr><th>Phase</th><th>Stages</th></tr>
-        <tr><td><span class="chip" style="background:#F1F5F9;color:#475569;">Pipeline</span></td><td>Onboarding → Needs cleanup → COA cleanup → Reclassify → BS cleanup</td></tr>
-        <tr><td><span class="chip" style="background:#F5F3FF;color:#6d28d9;">Review</span></td><td>Ready to close → Waiting on client → Ready for review</td></tr>
-        <tr><td><span class="chip" style="background:#ECFDF5;color:#047857;">Live</span></td><td>Completed → In production → Done</td></tr>
+        <tr><th>Nav</th><th>What's there</th></tr>
+        <tr><td><strong>Home</strong></td><td>Your day. A greeting, a one-line summary, this week's wins, then three tabs: <strong>Today</strong> (daily review), <strong>Inbox</strong> (client messages), <strong>Tasks</strong>.</td></tr>
+        <tr><td><strong>Clients</strong></td><td>The whole fleet in one filterable table — stage, status, assignee, attention badges. Filter to <strong>My clients</strong>.</td></tr>
+        <tr><td><strong>Pipelines</strong></td><td>The Onboarding / Cleanup / Production boards on one screen with a toggle.</td></tr>
+        <tr><td><strong>Oversight</strong> <span class="chip teal">senior</span></td><td>Approvals + Advisor + Fleet Health (SOP 16).</td></tr>
+        <tr><td><strong>Admin</strong> <span class="chip teal">admin</span></td><td>The control room + every fleet tool (SOP 17).</td></tr>
       </table>
+
+      <h3 class="step-h">The client lifecycle — three stages</h3>
+      <p class="lead">Every client's stage is derived automatically from the work done — you don't set it by hand.</p>
+      <table class="t">
+        <tr><th>Stage</th><th>What it means</th></tr>
+        <tr><td><span class="chip grey">Onboarding</span></td><td>New client — connect QuickBooks, capture the foundation, gather documents.</td></tr>
+        <tr><td><span class="chip teal">Cleanup</span></td><td>Bring the books to correct — the 8-step sequence (SOP 4), then submit for review.</td></tr>
+        <tr><td><span class="chip teal">Production</span></td><td>Live — daily reconciliation and monthly close.</td></tr>
+      </table>
+      <p class="lead">Within Cleanup and Production, a client can also be <span class="chip gold">Ready for review</span> / <span class="chip gold">Waiting on client</span> (needs a human) or <span class="chip rust">Failed review</span> (bounced back to rework — SOP 12).</p>
 
       <h3 class="step-h">Roles</h3>
       <table class="t">
         <tr><th>Role</th><th>Can do</th></tr>
         <tr><td><strong>Viewer</strong></td><td>Read-only.</td></tr>
-        <tr><td><strong>Bookkeeper</strong></td><td>Day-to-day work on assigned clients.</td></tr>
-        <tr><td><strong>Lead</strong> <span class="chip" style="background:#E8F2F0;color:#1F5D58;">senior</span></td><td>+ Review/approve cleanups, Tools menu, reassign clients, Onboarding.</td></tr>
-        <tr><td><strong>Admin</strong> <span class="chip" style="background:#E8F2F0;color:#1F5D58;">senior</span></td><td>Full access + user management, Audit Log, Call Matching, global settings.</td></tr>
+        <tr><td><strong>Bookkeeper</strong></td><td>Day-to-day work on any client (cleanup, reclass, BS, close).</td></tr>
+        <tr><td><strong>Lead</strong> <span class="chip teal">senior</span></td><td>+ Oversight hub: review/approve cleanups &amp; closes, reassign clients.</td></tr>
+        <tr><td><strong>Admin</strong> <span class="chip teal">senior</span></td><td>Full access + the Admin control room, user management, audit log, fleet tools.</td></tr>
       </table>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Daily rhythm:</strong> start in <strong>Today</strong> (clear the recon queue), then check <strong>Clients/Dashboard</strong> for anything waiting on you.</div></div>
+      <div class="note tip"><span class="ic">💡</span><div><strong>Daily rhythm:</strong> start on <strong>Home → Today</strong> — clear anything sent back to you and the daily review queue — then pick up cleanup work from <strong>Pipelines</strong> or <strong>Clients</strong>.</div></div>
     </section>
 
     <div class="phase-divider">Onboarding</div>
@@ -169,38 +176,26 @@
     <section class="sop" id="s2">
       <div class="sop-head"><div class="sop-num">2</div><div><div class="sub">Onboarding</div><h2>Onboarding a New Client</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Take a newly-won sale all the way to "ready for cleanup."</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Lead/Admin runs the board; assigned bookkeeper does setup.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Take a newly-won sale to "ready for cleanup" — mostly client self-serve.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · when a new client lands.</div></div>
       </div>
 
-      <h3 class="step-h">From GHL "Won" to the board</h3>
+      <h3 class="step-h">How it works now — the client onboards themselves</h3>
+      <p class="lead">New clients get a guided <strong>portal onboarding wizard</strong>. They watch a short video, complete the foundation intake, and mark their documents as sent. Their progress shows on the client's card so you can see where they are.</p>
       <ol class="steps">
-        <li>When a deal is marked <strong>Won</strong> in GHL, a webhook creates a lead on the <strong>Onboarding</strong> board (New sale → In onboarding → Ready to onboard).</li>
-        <li>If a sale is missing, click <strong>Sync</strong> to backfill from GHL (no duplicates).</li>
-        <li><strong>Assign an owner</strong> (bookkeeper) to the new client.</li>
+        <li>A won sale creates the client automatically. Find them under <strong>Pipelines → Onboarding</strong> or in the <strong>Clients</strong> table (stage = Onboarding).</li>
+        <li><strong>Assign yourself</strong> (or a bookkeeper) as the owner from the card or the Clients table.</li>
+        <li>Send the <strong>portal invite</strong> (Admin → Invite client, or the client card) so they can log in and run the wizard. Until they have a login they can't complete onboarding or receive statements.</li>
       </ol>
 
-      <h3 class="step-h">Setup checklist (the three pieces)</h3>
+      <h3 class="step-h">Your setup pieces</h3>
       <ol class="steps">
-        <li><strong>Connect QuickBooks</strong> (see SOP 3) — nothing else can start without it.</li>
-        <li><strong>Onboarding form</strong> — when the client submits it, answers auto-populate their profile. Review them on the <strong>Profile</strong> tab.</li>
-        <li><strong>Onboarding call</strong> — get it booked; the card shows "Call not booked / attended." The recorded call later appears under Call recordings (SOP 13).</li>
+        <li><strong>Connect QuickBooks</strong> (SOP 3) — nothing else can start without it.</li>
+        <li><strong>Review the foundation intake</strong> — the client's wizard answers auto-populate the profile (contact, legal name, corporate type, fiscal year-end, jurisdiction). Confirm them on the <strong>Profile</strong> tab; set <strong>jurisdiction</strong> correctly — it drives GST/HST and the CAD-vs-US payment link.</li>
+        <li>Confirm the <strong>accounts &amp; loans attestation</strong> ("these are all my accounts") came through — it's the basis for the cleanup scope.</li>
       </ol>
-
-      <h3 class="step-h">Complete the profile</h3>
-      <ol class="steps">
-        <li>On the <strong>Profile</strong> tab, fill the editable <strong>Client details</strong> card: contact, legal/business name, corporate type, fiscal year-end.</li>
-        <li>Set <strong>jurisdiction</strong> (country/province) — drives tax handling and the US-vs-CAD payment link.</li>
-        <li>Complete operational fields (revenue range, payroll provider, prior bookkeeper, etc.) and Save.</li>
-      </ol>
-
-      <h3 class="step-h">Match to Double &amp; invite to the portal</h3>
-      <ol class="steps">
-        <li>Use <strong>Match Client to Double</strong> to link the QBO client to its Double HQ record (clear any <code>pending_</code> placeholder).</li>
-        <li>From <strong>Admin → Invite client</strong>, send the portal <strong>magic-link invite</strong>; use Resend/Revoke as needed.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Onboarding board + Profile tab</div><div class="d">The onboarding kanban, and a client's Profile tab with the details card + onboarding answers.</div><div class="path">/onboarding · /clients/[id]</div></div>
-      <div class="note warn"><span class="ic">⚠️</span><div>A client with no portal login can't receive messages or "your P&amp;L is ready" notifications — invite them early. And set jurisdiction correctly: it controls GST/HST and the payment link.</div></div>
+      <div class="note tip"><span class="ic">💡</span><div><strong>Stranded lead?</strong> If a client stalls in onboarding but you're ready to work, use <strong>Force to cleanup</strong> on their card to move them into the Cleanup stage manually.</div></div>
+      <div class="note warn"><span class="ic">⚠️</span><div>Set jurisdiction before cleanup — it controls sales-tax handling and which tax export applies. A client with no portal login can't receive messages, statements, or "your P&amp;L is ready" alerts.</div></div>
     </section>
 
     <!-- 3 -->
@@ -213,112 +208,95 @@
 
       <h3 class="step-h">Connect</h3>
       <ol class="steps">
-        <li>On the client's <strong>Overview</strong>, the QBO banner shows connection health. If amber ("not connected"), click <strong>Connect QuickBooks</strong>.</li>
-        <li>Sign in to Intuit with the bookkeeper QBO account, choose the right company file, and click <strong>Connect</strong>.</li>
-        <li>You'll land back in SNAP — refresh once if the banner doesn't turn green.</li>
+        <li>On the client's profile, the QBO banner shows connection health. If amber ("not connected"), click <strong>Connect QuickBooks</strong>.</li>
+        <li>Sign in to Intuit, choose the right company file, and click <strong>Connect</strong>. You'll land back in SNAP — refresh once if the banner doesn't turn green.</li>
       </ol>
 
       <h3 class="step-h">Reconnect &amp; diagnose</h3>
       <ol class="steps">
-        <li>A <strong>red</strong> banner ("expired") means the refresh token aged out (~100 days) or the client revoked SNAP — click <strong>Reconnect</strong> and redo the flow.</li>
-        <li>Empty P&amp;L? Check the banner first: <strong>green</strong>=connected, <strong>red</strong>=reconnect, <strong>amber</strong>=connect. It's the single source of truth.</li>
+        <li>A <strong>red</strong> banner ("expired") means the token aged out (~100 days) or the client revoked SNAP — click <strong>Reconnect</strong> and redo the flow. A <strong>QBO DISCONNECTED</strong> badge appears on the Clients table until it's fixed.</li>
+        <li>Empty P&amp;L? Check the banner first: <strong>green</strong>=connected, <strong>red</strong>=reconnect, <strong>amber</strong>=connect. It's the single source of truth — don't mistake an expired token for "no data."</li>
       </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — QBO connection banner</div><div class="d">The banner in its connected (green) and expired (red) states.</div><div class="path">/clients/[id] · Overview</div></div>
-      <div class="note warn"><span class="ic">⚠️</span><div>Until QBO is connected/reconnected, all financial tabs are empty — don't mistake an expired token for "no data."</div></div>
     </section>
 
     <div class="phase-divider">Cleanup</div>
 
     <!-- 4 -->
     <section class="sop" id="s4">
-      <div class="sop-head"><div class="sop-num">4</div><div><div class="sub">Cleanup</div><h2>Chart of Accounts Cleanup</h2></div></div>
+      <div class="sop-head"><div class="sop-num">4</div><div><div class="sub">Cleanup</div><h2>The Cleanup Sequence</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Standardize the client's chart of accounts before categorizing anything.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · first cleanup step after QBO connect.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">One ordered checklist that takes a client from connected to clean books — no guessing what's next.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · the whole Cleanup stage.</div></div>
       </div>
-      <h3 class="step-h">Your options</h3>
+      <p class="lead">Open the client → <strong>Cleanup tab</strong>. Instead of hunting for tools, you get one ordered sequence. Each step deep-links the tool it needs, shows its status, and can be marked <strong>done</strong> or <strong>skipped</strong>. Work top to bottom; the checklist remembers where you left off.</p>
       <table class="t">
-        <tr><th>Tool</th><th>Use it for</th></tr>
-        <tr><td><strong>Cleanup workflow</strong></td><td>The step-by-step path from new client to clean books.</td></tr>
-        <tr><td><strong>AI COA Fix</strong></td><td>Snapshot → AI analysis → review → finalize. Pre-accepts ≥95%-confidence, low-risk changes; you review the rest.</td></tr>
-        <tr><td><strong>COA Editor</strong></td><td>One-off manual fixes — add/rename/inactivate accounts, drill into transactions.</td></tr>
-        <tr><td><strong>Master COA</strong></td><td>The standard chart of accounts to align every client toward.</td></tr>
+        <tr><th>#</th><th>Step</th><th>What you do</th></tr>
+        <tr><td>1</td><td><strong>Foundation &amp; documents</strong></td><td>Statements/docs on file, open the Balance Sheet — know what you're working with.</td></tr>
+        <tr><td>2</td><td><strong>Chart of accounts</strong></td><td>Conform the chart to the master COA (SOP 5).</td></tr>
+        <tr><td>3</td><td><strong>Categorize transactions</strong></td><td>AI reclassify, you review &amp; approve (SOP 6).</td></tr>
+        <tr><td>4</td><td><strong>Revenue integrity</strong></td><td>Catch double-counted revenue (SOP 11).</td></tr>
+        <tr><td>5</td><td><strong>Expenses &amp; duplicates</strong></td><td>Duplicate-expense + payroll double-count scans (SOP 11).</td></tr>
+        <tr><td>6</td><td><strong>Balance sheet</strong></td><td>A/R, A/P, undeposited funds, loans, draws, bank rec (SOP 9).</td></tr>
+        <tr><td>7</td><td><strong>Bank rules</strong></td><td>Save rules so it stays clean next month (SOP 7).</td></tr>
+        <tr><td>8</td><td><strong>Verify &amp; first statements</strong></td><td>Run verification, clear red flags, sign off (SOP 12).</td></tr>
       </table>
-      <h3 class="step-h">Steps</h3>
-      <ol class="steps">
-        <li>Open the client's COA and compare it to the <strong>Master COA</strong>.</li>
-        <li>Run <strong>AI COA Fix</strong> to handle the obvious standardizations; review anything below 95% confidence.</li>
-        <li>Use the <strong>COA Editor</strong> for any remaining one-off fixes.</li>
-        <li>Goal: a clean, standardized COA you can categorize against.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — AI COA Fix + COA Editor</div><div class="d">The AI Fix review stage and the COA editor account list.</div><div class="path">/balance-sheet/[client_id]/coa</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Clean the COA first.</strong> Categorizing against a messy chart just moves the mess around.</div></div>
+      <div class="note tip"><span class="ic">💡</span><div>Steps 2–7 map to the SOPs that follow. Do them in order — categorizing against a messy chart just moves the mess around.</div></div>
     </section>
 
     <!-- 5 -->
     <section class="sop" id="s5">
-      <div class="sop-head"><div class="sop-num">5</div><div><div class="sub">Cleanup</div><h2>Categorizing Transactions (Reclassify)</h2></div></div>
+      <div class="sop-head"><div class="sop-num">5</div><div><div class="sub">Cleanup · Step 2</div><h2>Chart of Accounts Cleanup</h2></div></div>
+      <div class="meta">
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Standardize the client's chart to the master COA before categorizing anything.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · first cleanup step after QBO connect.</div></div>
+      </div>
+      <h3 class="step-h">Two ways in</h3>
+      <table class="t">
+        <tr><th>Tool</th><th>Use it for</th></tr>
+        <tr><td><strong>COA Cleanup</strong> (New Cleanup job)</td><td>The full reviewed per-client pass — retype, create, re-nest, merge duplicates, retire dead accounts. You review the plan, then it executes to QBO.</td></tr>
+        <tr><td><strong>COA Audit</strong> <code>/coa-audit</code></td><td>The fleet view: every client's conformance % vs the master, cleanup stage, and <strong>stranded $</strong>. One-click <strong>Fix all</strong> applies the standard chart. Scans are saved — "Scan new &amp; stale" only re-checks what changed.</td></tr>
+        <tr><td><strong>Master COA</strong></td><td>The standard chart every client aligns toward.</td></tr>
+      </table>
+      <h3 class="step-h">What a merge does</h3>
+      <ol class="steps">
+        <li>Merging a duplicate <strong>moves the real transactions</strong> onto the correct account (so the drill-down keeps its detail), sweeps anything the API can't line-move via itemized journal entries, re-points any items, and retires the emptied account.</li>
+        <li>Done when <strong>conformance is high</strong> and <strong>stranded $ = 0</strong> (no money left on retired accounts).</li>
+      </ol>
+      <div class="note tip"><span class="ic">💡</span><div><strong>Payroll is special.</strong> QuickBooks locks paycheques away from the API — SNAP (and even QBO's own Reclassify tool) can't move them. For payroll-sourced balances an adjusting JE is the only move; SNAP itemizes those JEs so the detail is preserved.</div></div>
+    </section>
+
+    <!-- 6 -->
+    <section class="sop" id="s6">
+      <div class="sop-head"><div class="sop-num">6</div><div><div class="sub">Cleanup · Step 3</div><h2>Categorizing Transactions (Reclassify)</h2></div></div>
       <div class="meta">
         <div class="box"><div class="lbl">Purpose</div><div class="val">Categorize the client's transactions against the cleaned COA, with AI assistance.</div></div>
         <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · after the COA is in good shape.</div></div>
       </div>
       <h3 class="step-h">Run → review → execute</h3>
       <ol class="steps">
-        <li>Open <strong>Reclassify → New Reclassification Job</strong>; pick the client and scope.</li>
+        <li>Start a <strong>reclassification</strong> from the client's Cleanup tab; pick the scope.</li>
         <li>On the <strong>Review</strong> screen, accept good AI proposals and correct the rest. Nothing posts yet.</li>
         <li>For big jobs, categorization runs in <strong>chunks</strong> — use the <strong>Continue</strong> gate to resume; progress is saved.</li>
-        <li>Resolve <strong>uncategorized / low-confidence</strong> items; when you genuinely can't tell, use <strong>Ask Client</strong> rather than guessing.</li>
+        <li>Low-confidence items are held for review (they won't auto-approve). When you genuinely can't tell, use <strong>Ask Client</strong> rather than guessing.</li>
         <li><strong>Execute</strong> to write the approved categorizations to QBO. Failed items surface for retry.</li>
       </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Reclass review</div><div class="d">The review screen with proposed categories, confidence, and the Continue gate.</div><div class="path">/reclass/[id]/review</div></div>
-      <div class="note warn"><span class="ic">⚠️</span><div>Execute writes to live books — finish the review before running it. A clean book has no "Uncategorized" bucket left.</div></div>
+      <div class="note warn"><span class="ic">⚠️</span><div>Execute writes to live books — finish the review before running it. A few things can't be moved via the API (item-based lines, bank-matched, un-Added "For Review" items) — SNAP tells you which to handle in QuickBooks. A clean book has no "Uncategorized" bucket left.</div></div>
     </section>
 
-    <!-- 6 -->
-    <section class="sop" id="s6">
-      <div class="sop-head"><div class="sop-num">6</div><div><div class="sub">Cleanup</div><h2>Bank Rules</h2></div></div>
+    <!-- 7 -->
+    <section class="sop" id="s7">
+      <div class="sop-head"><div class="sop-num">7</div><div><div class="sub">Cleanup · Step 7</div><h2>Bank Rules</h2></div></div>
       <div class="meta">
         <div class="box"><div class="lbl">Purpose</div><div class="val">Turn categorization decisions into reusable QBO bank-feed rules so future months auto-categorize.</div></div>
         <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · after a reclass job, or as a standalone pass.</div></div>
       </div>
       <h3 class="step-h">Steps</h3>
       <ol class="steps">
-        <li>Build rules <strong>from a reclass job</strong> ("From Reclassification") or via <strong>New Bank Rules Discovery</strong>, which groups history by vendor.</li>
+        <li>Build rules <strong>from a reclass job</strong> or via <strong>Bank Rules Discovery</strong>, which groups history by vendor.</li>
         <li>Review each proposed <strong>vendor → category</strong> rule; keep recurring vendors, skip one-offs.</li>
-        <li><strong>Export to QuickBooks</strong> — rules write into the client's bank feed. The profile tracks active-rule count + last export.</li>
+        <li><strong>Export to QuickBooks</strong> — the .xls imports into the client's bank feed. Delete the client's old rules first so they don't conflict. The Admin <strong>Bank rules — fleet</strong> view tracks who's had rules applied.</li>
       </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Bank rules review/export</div><div class="d">The rules discovery review with vendor groupings and the export step.</div><div class="path">/rules/[id]/review</div></div>
       <div class="note warn"><span class="ic">⚠️</span><div>Exported rules act on the live feed — an over-broad rule miscategorizes future transactions automatically.</div></div>
-    </section>
-
-    <!-- 7 -->
-    <section class="sop" id="s7">
-      <div class="sop-head"><div class="sop-num">7</div><div><div class="sub">Cleanup</div><h2>Balance Sheet Cleanup</h2></div></div>
-      <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Reconcile the balance sheet account-by-account, using the right tool for each problem.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · the BS phase of cleanup.</div></div>
-      </div>
-      <h3 class="step-h">Home base</h3>
-      <ol class="steps">
-        <li>Work from the <strong>BS Cleanup Wizard</strong> (guided reconciliation), going account-by-account.</li>
-        <li>Reach for a specialized tool when an account is messy (below), then return to the wizard.</li>
-      </ol>
-      <h3 class="step-h">Specialized tools</h3>
-      <table class="t">
-        <tr><th>Tool</th><th>Fixes</th></tr>
-        <tr><td><strong>A/R Recovery</strong></td><td>Money that arrived but was never applied to the right invoice.</td></tr>
-        <tr><td><strong>Uncategorized Income Recovery</strong></td><td>Deposits stuck in Uncategorized Income → match to open A/R → clearing JEs.</td></tr>
-        <tr><td><strong>UF Audit</strong></td><td>Orphan Undeposited Funds, grouped by customer → balanced clearing JEs.</td></tr>
-        <tr><td><strong>UF-AI</strong></td><td>Upload CSVs → AI cleanup plan; set each group's <strong>deposit date</strong> (= the QBO posting date); Ask Client per group.</td></tr>
-        <tr><td><strong>Hardcore Cleanup</strong></td><td>Upload CRM job report → detect duplicate invoices from a CRM migration → JE write-offs/voids.</td></tr>
-      </table>
-      <h3 class="step-h">Posting</h3>
-      <ol class="steps">
-        <li>Each tool ends by <strong>posting JEs to QBO</strong> — review that they're balanced and correctly dated.</li>
-        <li>SNAP guards against closed-period and duplicate posting, but you confirm correctness before posting.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — BS Cleanup Wizard + a tool</div><div class="d">The guided reconciliation and one specialized tool (e.g. UF-AI with deposit-date pickers).</div><div class="path">/balance-sheet/[client_id]/cleanup</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Follow the money:</strong> overstated A/R usually means cash landed in Uncategorized Income or Undeposited Funds. The three recovery tools overlap — use them together.</div></div>
     </section>
 
     <!-- 8 -->
@@ -331,257 +309,229 @@
       <h3 class="step-h">Steps</h3>
       <ol class="steps">
         <li><strong>Connect Stripe:</strong> send the client a Stripe Connect link to authorize. No Stripe? Mark it <strong>not required</strong>.</li>
-        <li>Open <strong>Stripe Recon → Stripe AR Reconciliation</strong>; pick client + date range. SNAP pulls deposits and matches them to invoices, calculating <strong>fees + sales tax</strong>.</li>
-        <li><strong>Review</strong> each deposit-to-invoice match and the fee/tax split, then <strong>Execute</strong> to post to QBO.</li>
+        <li>Start a <strong>Stripe reconciliation</strong>; pick the date range. SNAP pulls deposits, matches them to invoices, and calculates <strong>fees + sales tax</strong>.</li>
+        <li><strong>Review</strong> each match and the fee/tax split, then <strong>Execute</strong> to post to QBO.</li>
       </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Stripe AR Reconciliation</div><div class="d">Deposits matched to invoices with the fee/tax breakdown.</div><div class="path">/stripe-recon/[id]/review</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Tip:</strong> Stripe deposits are net of fees — SNAP splits gross invoice, fee expense, and net deposit so everything reconciles.</div></div>
+      <div class="note tip"><span class="ic">💡</span><div>Stripe deposits are net of fees — SNAP splits gross invoice, fee expense, and net deposit so everything reconciles.</div></div>
     </section>
 
     <!-- 9 -->
     <section class="sop" id="s9">
-      <div class="sop-head"><div class="sop-num">9</div><div><div class="sub">Cleanup</div><h2>Sales Tax (GST/HST)</h2></div></div>
+      <div class="sop-head"><div class="sop-num">9</div><div><div class="sub">Cleanup · Step 6</div><h2>Balance Sheet Cleanup</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Verify GST/HST treatment for Canadian clients.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · clients with a CA jurisdiction only.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Reconcile the balance sheet account-by-account, using the right tool for each problem.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · the BS step of cleanup.</div></div>
       </div>
-      <h3 class="step-h">Steps</h3>
+      <h3 class="step-h">Home base + specialized tools</h3>
       <ol class="steps">
-        <li>Open <strong>GST/HST Audit</strong> and select the client.</li>
-        <li>Review the results and correct any flagged sales-tax issues.</li>
+        <li>Work from the <strong>BS Cleanup Wizard</strong> (guided reconciliation), account by account.</li>
+        <li>Reach for a specialized tool when an account is messy: <strong>A/R Recovery</strong> (unapplied payments), <strong>Uncategorized Income Recovery</strong>, <strong>UF Audit</strong> / <strong>UF-AI</strong> (orphan undeposited funds), <strong>Hardcore Cleanup</strong> (CRM-migration duplicate invoices).</li>
+        <li>Each tool ends by <strong>posting balanced JEs to QBO</strong> — confirm they're balanced and correctly dated. SNAP guards closed periods and duplicate posting, but you confirm correctness.</li>
       </ol>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Tip:</strong> US clients skip this entirely — it keys off the jurisdiction you set on the profile (SOP 2).</div></div>
+      <div class="note tip"><span class="ic">💡</span><div><strong>Follow the money:</strong> overstated A/R usually means cash landed in Uncategorized Income or Undeposited Funds. The recovery tools overlap — use them together.</div></div>
     </section>
 
     <!-- 10 -->
     <section class="sop" id="s10">
-      <div class="sop-head"><div class="sop-num">10</div><div><div class="sub">Cleanup</div><h2>Completing &amp; Submitting Cleanup</h2></div></div>
+      <div class="sop-head"><div class="sop-num">10</div><div><div class="sub">Cleanup</div><h2>Sales Tax (GST/HST)</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Wrap a cleanup, get it approved, and hand the client a report.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Bookkeeper submits; Lead/Admin approves.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Verify GST/HST treatment for Canadian clients.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · CA-jurisdiction clients only.</div></div>
       </div>
       <h3 class="step-h">Steps</h3>
       <ol class="steps">
-        <li>When cleanup is done, <strong>mark it complete</strong> and submit for review — the client moves to <strong>Ready for review</strong>.</li>
-        <li>A <strong>Lead/Admin</strong> approves it (or reopens it with notes if something's off).</li>
-        <li>Generate and send the <strong>cleanup report PDF</strong> to the client.</li>
-        <li>If the balance sheet isn't done but you want to move forward, <strong>defer BS</strong> — the client shows "BS owed" and stays flagged until it's cleaned.</li>
+        <li>Open <strong>GST/HST Audit</strong> from the client's tools and review the flagged items.</li>
+        <li>Correct any sales-tax treatment issues.</li>
       </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Cleanup completion / review</div><div class="d">The mark-complete + submit-for-review controls (and the senior approve/reopen view).</div><div class="path">/clients · In Review</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Tip:</strong> "Defer BS" lets you move a client to production while clearly tracking that the balance sheet cleanup is still owed.</div></div>
+      <div class="note tip"><span class="ic">💡</span><div>US clients skip this — it keys off the jurisdiction you set on the profile (SOP 2).</div></div>
     </section>
-
-    <div class="phase-divider">Production</div>
 
     <!-- 11 -->
     <section class="sop" id="s11">
-      <div class="sop-head"><div class="sop-num">11</div><div><div class="sub">Production</div><h2>Production &amp; Daily Reconciliation</h2></div></div>
+      <div class="sop-head"><div class="sop-num">11</div><div><div class="sub">Cleanup · Steps 4–5</div><h2>Revenue &amp; Expense Integrity</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Promote a clean client to daily recon and work the queue each morning.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · once a client is cleaned up, then daily.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Catch — and fix — money counted twice: duplicated revenue, duplicated expenses, payroll double-counts.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · cleanup steps 4 &amp; 5, and it's re-checked at month-end.</div></div>
       </div>
-      <h3 class="step-h">Promote to production</h3>
+      <h3 class="step-h">What SNAP flags</h3>
+      <table class="t">
+        <tr><th>Check</th><th>The problem</th></tr>
+        <tr><td><strong>Revenue integrity</strong></td><td>A deposit booked as income <em>on top of</em> the invoice — the invoice+deposit double-count.</td></tr>
+        <tr><td><strong>CRM invoice revenue</strong></td><td>CRM-pushed invoices double-counting deposit revenue — set the client to deposits-only, or void the phantom invoices.</td></tr>
+        <tr><td><strong>Duplicate transactions</strong></td><td>The same expense posted twice — void the extra copy.</td></tr>
+        <tr><td><strong>Payroll double-count</strong></td><td>The gross paycheque <em>and</em> the net-pay bank withdrawal both expensed to labor.</td></tr>
+      </table>
+      <h3 class="step-h">Fixing it in QuickBooks</h3>
       <ol class="steps">
-        <li>On the client's Overview, once COA + reclass + bank rules are done, the <strong>"Move to production"</strong> CTA appears.</li>
-        <li>Promoting turns on the <strong>3am daily recon cron</strong>: new transactions auto-categorize at ≥95% confidence; the rest go to Today.</li>
-        <li>You can <strong>Pause / Unpause / Disable</strong> daily recon anytime (with a reason shown to the team).</li>
+        <li>From the client's <strong>Revenue check</strong>, review the flagged pairs. Always run the <strong>Preview / dry-run</strong> first — it shows exactly what will change without touching QBO.</li>
+        <li>Choose per finding: <strong>void</strong> the duplicate (invoice + phantom payment) or <strong>keep the invoice</strong> and apply the matched deposit to it. Then apply.</li>
+        <li>Anything with real cash on a payment is held for a human — it won't auto-void.</li>
       </ol>
-      <h3 class="step-h">Work the Today queue</h3>
-      <ol class="steps">
-        <li>Open <strong>Today</strong> each morning. Items are grouped <strong>anomaly / review / auto</strong>.</li>
-        <li>Confirm or correct categories and clear items.</li>
-        <li>Handle client <strong>reclass requests</strong> (approve/decline) and send <strong>Ask Client</strong> requests for missing info.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Move to production + Today queue</div><div class="d">The production CTA on a client, and the Today daily-recon queue.</div><div class="path">/clients/[id] · /today</div></div>
-      <div class="note warn"><span class="ic">⚠️</span><div>Only promote clients with a working QBO connection and a finished cleanup — daily recon learns from the baseline you leave it.</div></div>
+      <div class="note tip"><span class="ic">💡</span><div>These same checks power the <strong>red-flag gate</strong> at send time (SOP 14) — clearing them now means the month-end close won't get blocked later.</div></div>
     </section>
 
     <!-- 12 -->
     <section class="sop" id="s12">
-      <div class="sop-head"><div class="sop-num">12</div><div><div class="sub">Production</div><h2>Month-End Close</h2></div></div>
+      <div class="sop-head"><div class="sop-num">12</div><div><div class="sub">Cleanup · Step 8</div><h2>Submit for Review &amp; Failed Review</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Close each production client's books every month.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · monthly, per production client.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Wrap a cleanup, get manager sign-off, and hand the client their first statements.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Bookkeeper submits; Lead/Admin approves.</div></div>
       </div>
-      <div class="note warn"><span class="ic">⚠️</span><div><strong>There is exactly ONE way to close a month:</strong> the client's close card on the Production board. Sending statements is client-facing and can't be unsent, so every close goes through the same gates — checks, statement review, attestation. There is no bulk send and no shortcut; picking "✓ Completed" on a board card simply opens the close card.</div></div>
-      <h3 class="step-h">Steps</h3>
+      <h3 class="step-h">Submit</h3>
       <ol class="steps">
-        <li>Sidebar → <strong>Production board</strong> (<code>/production</code>). Pick the close period — each production client is a card. Use the columns to track the month: Not Started → In Progress → Blocked (this month) → Waiting on Client → Completed.</li>
-        <li>Click a client's card to open their <strong>close card</strong>. <strong>Run checks</strong> (uncategorized, undeposited funds, bank tie-outs, A/R…) and fix anything flagged — each failed check links to the right tool.</li>
-        <li><strong>Review the statements</strong> (P&amp;L / BS / CFS preview + AI spot check). If something looks wrong and you can't fix it, use <strong>Escalate</strong> (SOP 16) instead of sending.</li>
-        <li>Submit for review, or (seniors) <strong>close &amp; send</strong>: tick the <strong>attestation box</strong> — "I have reviewed these statements and they're accurate" — and confirm. That publishes to the portal, emails the client, and closes the QuickBooks period.</li>
-        <li>Moving a Completed card to any other column <strong>reopens</strong> the month.</li>
+        <li>When the sequence is done, <strong>Verify</strong> (run the checks) and <strong>submit for review</strong> — the client moves to <strong>Ready for review</strong> and lands in the senior's Oversight → Approvals queue.</li>
+        <li>If the balance sheet isn't done but you want to move forward, <strong>defer BS</strong> — the client shows a <strong>BS OWED</strong> badge and stays flagged until it's cleaned.</li>
       </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Production board + close card</div><div class="d">The period board with a client's close card open: checks, statements review, attestation.</div><div class="path">/production</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Tip:</strong> "Blocked (this month)" is a status for <em>this month's close</em> only (waiting on statements, feed broken…). A client-level problem that needs a senior is an <strong>escalation</strong> — see SOP 16.</div></div>
+      <h3 class="step-h">Approve — or reject</h3>
+      <ol class="steps">
+        <li>A <strong>Lead/Admin</strong> reviews and either <strong>approves</strong> (statements go out, client graduates toward Production) or <strong>rejects</strong> with a note.</li>
+        <li>A rejected client moves to <strong>Failed review</strong> and bounces back onto <strong>your Home → Today</strong> under "Sent back — needs rework," with the manager's reason attached. Fix it and resubmit.</li>
+      </ol>
+      <div class="note tip"><span class="ic">💡</span><div>Check <strong>Home → Today</strong> first thing every morning — a sent-back file is your highest-priority item.</div></div>
     </section>
 
-    <div class="phase-divider">Ongoing</div>
+    <div class="phase-divider">Production</div>
 
     <!-- 13 -->
     <section class="sop" id="s13">
-      <div class="sop-head"><div class="sop-num">13</div><div><div class="sub">Ongoing</div><h2>Client Service</h2></div></div>
+      <div class="sop-head"><div class="sop-num">13</div><div><div class="sub">Production</div><h2>Production &amp; Daily Reconciliation</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Report, communicate, follow up on calls, and manage billing — the ongoing relationship.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · ongoing.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Promote a clean client to daily recon and work the queue each morning.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · once a client is signed off, then daily.</div></div>
       </div>
-      <h3 class="step-h">Reporting &amp; the portal</h3>
+      <h3 class="step-h">Promote to production</h3>
       <ol class="steps">
-        <li>Review the client's <strong>P&amp;L</strong> (date ranges, drill-downs, full COA) and <strong>Balance Sheet / Bank Balances</strong> on their tabs.</li>
-        <li><strong>Publish</strong> the P&amp;L / Balance Sheet to the client portal when ready; SNAP can generate an AI narrative for their dashboard.</li>
+        <li>Approving the cleanup sign-off graduates the client to Production and turns on the <strong>nightly daily-recon run</strong>: confident new transactions auto-categorize; the rest go to Today.</li>
+        <li>Before relying on it, <strong>dry-run</strong> the client on the Admin → Daily recon page — it previews what the engine would categorize without touching QuickBooks. You can Pause / Unpause / Disable recon anytime (with a reason shown to the team).</li>
       </ol>
-      <h3 class="step-h">Communication</h3>
+      <h3 class="step-h">Work the Today queue</h3>
       <ol class="steps">
-        <li>Message the client from the <strong>inline thread</strong> on their profile, or send a one-way <strong>notification</strong> ("Your P&amp;L is ready") that lights up their portal badge.</li>
-        <li>Inbound client messages surface in the Today inbox — reply promptly.</li>
+        <li>Open <strong>Home → Today</strong> each morning. The nightly run has already posted the confident items; you review what it flagged.</li>
+        <li>For each flagged item: accept or correct the account, then <strong>Approve</strong> (leave "Teach rule" on so that vendor auto-categorizes next time). Use <strong>Reject</strong> if it shouldn't post, <strong>Ask Client</strong> if you need info, and <strong>bulk-approve</strong> the obvious batch.</li>
+        <li>Handle <strong>Client answers</strong> — when a client answers a transaction question from their portal, Approve applies their pick to QuickBooks in one click.</li>
       </ol>
-      <h3 class="step-h">Call recordings &amp; to-dos</h3>
-      <ol class="steps">
-        <li>Each client's <strong>Call recordings</strong> show the AI summary, a cross-call overview, and action items.</li>
-        <li>Work open <strong>to-dos</strong> from the Overview panel (they cross off in the call card too). <strong>Unlink</strong> any wrongly-matched call.</li>
-      </ol>
-      <h3 class="step-h">Billing</h3>
-      <ol class="steps">
-        <li>The <strong>Billing</strong> tab shows the client's tier, subscription, and invoice history.</li>
-        <li>Handle tier changes, add-on coaching calls, and cancel requests from here.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Client profile (Overview)</div><div class="d">A client's Overview with the messages panel, call to-dos, and tabs for P&amp;L / Billing.</div><div class="path">/clients/[id]</div></div>
-      <div class="note warn"><span class="ic">⚠️</span><div>A client with no portal login can't see published reports or notifications — make sure they're invited (SOP 2).</div></div>
+      <div class="note warn"><span class="ic">⚠️</span><div>Only production clients need daily attention — but a <strong>QBO disconnect</strong> stops the feed, so clear the reconnect prompt fast when you see it.</div></div>
     </section>
 
     <!-- 14 -->
     <section class="sop" id="s14">
-      <div class="sop-head"><div class="sop-num">14</div><div><div class="sub">Lead / Admin</div><h2>Oversight — Lead &amp; Admin</h2></div></div>
+      <div class="sop-head"><div class="sop-num">14</div><div><div class="sub">Production</div><h2>Month-End Close</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Monitor the whole book of business and manage the team.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Lead / Admin · ongoing.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Close each production client's books every month and send statements.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper closes; Lead/Admin approves the send.</div></div>
       </div>
-      <h3 class="step-h">Monitoring</h3>
+      <div class="note stop"><span class="ic">🚦</span><div><strong>One way to close a month:</strong> the client's close card on the <strong>Pipelines → Production</strong> board. Sending statements is client-facing and can't be unsent, so every close runs the same gates — checks, statement review, attestation. No bulk send, no shortcut.</div></div>
+      <h3 class="step-h">Steps</h3>
       <ol class="steps">
-        <li><strong>Clients</strong> manager dashboard — every client's unified status; reassign clients to bookkeepers (changes flow to their Today tab).</li>
-        <li><strong>Fleet Health</strong> + <strong>QBO Connections</strong> — spot clients with broken connections or problems at a glance.</li>
-        <li><strong>Flagged</strong> — items needing attention across clients.</li>
+        <li><strong>Pipelines → Production</strong> — pick the close period; each client is a card (Not Started → In Progress → Blocked → Waiting on Client → Awaiting Review → Failed Review).</li>
+        <li>Open a card → <strong>Run checks</strong> (uncategorized, undeposited funds, bank tie-outs, A/R…) and fix anything flagged — each failed check links to the right tool.</li>
+        <li><strong>Review the statements</strong> (P&amp;L / BS / Cash Flow). Use <strong>"See client's view"</strong> to check exactly what the client will get, and pin <strong>review notes</strong> for the manager or your future self (internal-only — the client never sees them).</li>
+        <li>Submit for review. A senior does the final <strong>close &amp; send</strong>: the <strong>red-flag gate</strong> runs (duplicate revenue/expenses/payroll, COGS &amp; margin sanity) and <strong>blocks the send</strong> until every flag is fixed or approved with a reason. Then tick the <strong>attestation box</strong> and confirm — that publishes to the portal, emails the client, and closes the QuickBooks period.</li>
       </ol>
-      <h3 class="step-h">Admin (admin only)</h3>
-      <ol class="steps">
-        <li><strong>Users</strong> — manage employees vs clients, roles, and impersonate / "view as client."</li>
-        <li><strong>Call Matching</strong> — match unconfirmed Grain calls to clients; manual matches teach future auto-matching.</li>
-        <li><strong>Audit Log</strong> — full system event trail. <strong>Daily Recon settings</strong> — global recon controls.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Manager dashboard + Fleet Health</div><div class="d">The Clients manager dashboard and the Fleet/QBO health views.</div><div class="path">/clients · /fleet</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Tip:</strong> Reassigning a client updates their assigned bookkeeper everywhere — including that bookkeeper's Today queue.</div></div>
+      <div class="note tip"><span class="ic">💡</span><div>Never approve past a red flag you don't understand. Approve-with-reason only after you've verified it's legitimate — the gate is what lets us move fast without breaking accuracy.</div></div>
     </section>
 
-    <div class="phase-divider">Playbooks</div>
+    <div class="phase-divider">Ongoing</div>
 
     <!-- 15 -->
     <section class="sop" id="s15">
-      <div class="sop-head"><div class="sop-num">15</div><div><div class="sub">Playbook</div><h2>Daily Recon — Cleanup-Done to Monthly Statements</h2></div></div>
+      <div class="sop-head"><div class="sop-num">15</div><div><div class="sub">Ongoing</div><h2>Client Service</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">Keep a client's books current automatically every day, so month-end is verify + send — not "do the books."</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Lisa (manager) · the day cleanup is signed off, then daily + at month-end.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Report, communicate, follow up on calls, and manage billing — the ongoing relationship.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Assigned bookkeeper · ongoing.</div></div>
       </div>
-
-      <div class="note tip"><span class="ic">💡</span><div><strong>The model in one line:</strong> once cleanup is signed off, put the client <strong>in production</strong> → SNAP auto-categorizes their bank activity every morning (7am) → you only review what it <em>flags</em> → at month-end you run checks, approve, and statements go out automatically. <em>(Daily recon currently auto-categorizes incoming bank transactions, mainly expenses. Revenue matching, receipt capture, and Plaid auto-reconciliation are on the roadmap — for now handle those at month-end as usual.)</em></div></div>
-
-      <h3 class="step-h">Step 1 · Put the cleaned-up client into production (one-time, ~5 min)</h3>
+      <h3 class="step-h">Reporting, messaging, calls, billing</h3>
       <ol class="steps">
-        <li>Sidebar → <strong>Production → Daily Recon</strong>. Find the client; if not already enrolled, <strong>enroll</strong> them (turns on daily recon).</li>
-        <li><strong>Dry-run them first</strong> (the per-client Dry-run button) — this previews what the engine <em>would</em> categorize <strong>without touching QuickBooks</strong>. Skim it: do the obvious vendors look right (Sherwin-Williams → Paint &amp; Materials)? Did it correctly hold the big / odd ones?</li>
-        <li>If it looks sane, you're done — they run automatically at 7am nightly. The client's profile pill should read <strong>"In production."</strong></li>
+        <li><strong>Reporting:</strong> review the P&amp;L and Balance Sheet on the client's tabs (date ranges, drill-downs, % of income). <strong>Publish</strong> statements to the portal when ready.</li>
+        <li><strong>Messaging:</strong> one <strong>Ask-Client composer</strong> handles every client question through a single delivery path. Inbound replies surface in <strong>Home → Inbox</strong>.</li>
+        <li><strong>Calls:</strong> each client's call recordings show the AI summary + action items; work the open to-dos.</li>
+        <li><strong>Billing:</strong> the Billing tab shows tier, subscription, and invoice history; handle tier changes and cancels there.</li>
       </ol>
-      <div class="note warn"><span class="ic">⚠️</span><div>If the dry-run miscategorizes a lot, don't enroll yet — flag it; the client's rules / COA likely need attention first.</div></div>
-
-      <h3 class="step-h">Step 2 · Daily review (~5–10 min each morning)</h3>
-      <ol class="steps">
-        <li>The 7am run has already posted the confident transactions. Open <strong>Today</strong> — production clients show "X to review."</li>
-        <li>For each flagged item: accept or correct the account, then <strong>Approve</strong>. Leave <strong>"Teach rule" ON</strong> so that vendor auto-categorizes next time (the queue keeps shrinking). Use <strong>Reject</strong> if it shouldn't post, <strong>Ask Client</strong> if you need info, and <strong>bulk-approve</strong> for the obvious batch.</li>
-        <li>Give <strong>anomalies</strong> (big charges, payroll, unfamiliar vendors) a closer look — they're held on purpose.</li>
-        <li><strong>Client answers:</strong> when a client answers a transaction question from their portal, it shows in the <strong>Client answers</strong> box on Today. <strong>Approve</strong> (the default) applies their pick straight to QuickBooks in one click. Not quite right? The dropdown suggests <em>similar</em> accounts (client picked "Subcontractors" → you'll see the labor options) plus their full chart. <strong>Reject</strong> sends it back to the reclass review with your note. If the client only left a note without picking an account, choose the account yourself via <strong>Pick account</strong>.</li>
-        <li>Target: queue at zero (or only genuinely-blocked items) each day.</li>
-      </ol>
-
-      <h3 class="step-h">Step 3 · Through the month</h3>
-      <ol class="steps">
-        <li>Daily recon handles new activity — you mostly just clear the daily queue.</li>
-        <li>Watch for a <strong>QuickBooks disconnect</strong> (you'll get a reconnect prompt / QBO-health flag) so the feed keeps flowing.</li>
-        <li>Gather anything you'll need for the close (e.g., bank statements) — request via the client profile when relevant.</li>
-      </ol>
-
-      <h3 class="step-h">Step 4 · Month-end: close + send statements</h3>
-      <ol class="steps">
-        <li>Sidebar → <strong>Production → Production board</strong>. Pick the close period; each production client is a card.</li>
-        <li>For each client: <strong>Run checks</strong> (uncategorized, undeposited funds, A/R…) → review the <strong>Statements</strong> preview → fix anything a check flags (it links you to the tool) → submit / complete.</li>
-        <li>Sidebar → <strong>Production → Approvals</strong> — your queue of files awaiting review + statements awaiting approval. Review and <strong>Approve</strong>.</li>
-        <li>The final send always asks for the <strong>attestation checkbox</strong> ("I have reviewed these statements…"). Confirming <strong>publishes the statements to the client portal, emails the PDF statements + login instructions, and closes the QuickBooks period.</strong> The client is done for the month.</li>
-      </ol>
-
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Daily Recon · Today · Approvals</div><div class="d">The Production sidebar group: Daily Recon (enroll / dry-run / run), the Today review queue, and the Approvals page.</div><div class="path">/admin/daily-recon · /today · /production · /approvals</div></div>
-
-      <h3 class="step-h">Where things live</h3>
-      <ol class="steps">
-        <li><strong>Enroll / dry-run / monitor:</strong> Production → Daily Recon (<code>/admin/daily-recon</code>)</li>
-        <li><strong>Daily flag review:</strong> Today (<code>/today</code>)</li>
-        <li><strong>Month-end close board:</strong> Production → Production board (<code>/production</code>)</li>
-        <li><strong>Your approval queue:</strong> Production → Approvals (<code>/approvals</code>)</li>
-      </ol>
-
-      <div class="note tip"><span class="ic">💡</span><div><strong>Troubleshooting.</strong> No daily activity for a production client → confirm they're enrolled and the nightly run fired (if it's empty for everyone, it's the cron — escalate); force a catch-up with <strong>"Run all now"</strong> on the Daily Recon page. Engine miscategorized a vendor → fix the account before approving (it teaches the corrected rule). Too many flags → keep approving with "Teach rule" on; within a couple of weeks the regulars are covered.</div></div>
+      <div class="note warn"><span class="ic">⚠️</span><div>A client with no portal login can't see published reports or notifications — make sure they're invited (SOP 2).</div></div>
     </section>
-
 
     <!-- 16 -->
     <section class="sop" id="s16">
-      <div class="sop-head"><div class="sop-num">16</div><div><div class="sub">Playbook</div><h2>Escalating a Client (and Getting Your Answer)</h2></div></div>
+      <div class="sop-head"><div class="sop-num">16</div><div><div class="sub">Lead / Admin</div><h2>Oversight — Lead &amp; Admin</h2></div></div>
       <div class="meta">
-        <div class="box"><div class="lbl">Purpose</div><div class="val">One way to say "a senior needs to look at this client" — and one place the answer comes back.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Anyone on the team · the moment you're blocked on a judgment call.</div></div>
+        <div class="box"><div class="lbl">Purpose</div><div class="val">Review the team's work and monitor the whole book of business.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Lead / Admin · ongoing.</div></div>
       </div>
-      <h3 class="step-h">Raising one (two clicks)</h3>
+      <h3 class="step-h">The Oversight hub — three tabs</h3>
+      <table class="t">
+        <tr><th>Tab</th><th>What you do</th></tr>
+        <tr><td><strong>Approvals</strong></td><td>Files awaiting review + statements awaiting approval + open escalations. Approve, or <strong>reject with a note</strong> (SOP 12).</td></tr>
+        <tr><td><strong>Advisor</strong></td><td>Health/advisory signals across the book.</td></tr>
+        <tr><td><strong>Fleet Health</strong></td><td>QBO connections, stuck jobs, and clients at risk at a glance.</td></tr>
+      </table>
+      <h3 class="step-h">Managing the team</h3>
       <ol class="steps">
-        <li>On any board card (Cleanup, Production, Clients dashboard), click the <strong>flag</strong> button.</li>
-        <li>Optionally type a line of context, then <strong>pick a reason</strong> — Needs senior review · Billing issue · Client relationship. Picking the reason sends it. Done — keep working.</li>
-        <li>If someone already escalated that client for the same thing, your note is <strong>added to the existing escalation</strong> (you'll see "Already escalated — your note was added"). Nothing is lost.</li>
+        <li><strong>Clients table</strong> — reassign clients to bookkeepers (the change flows to their Home → Today).</li>
+        <li>Reject a review with a clear <strong>note</strong> — it rides back to the bookkeeper's Today so they know exactly what to fix.</li>
       </ol>
-      <h3 class="step-h">Where it goes</h3>
-      <ol class="steps">
-        <li>The client gets a red <strong>ESCALATED</strong> badge on every board, and a red strip appears at the top of the board listing open escalations (oldest first — reds over 3 days old are overdue).</li>
-        <li>Seniors work the full queue on <strong>Approvals</strong> (<code>/approvals</code>): who raised it, why, how old. <strong>Resolve</strong> is one click + an optional note.</li>
-      </ol>
-      <h3 class="step-h">Getting your answer</h3>
-      <ol class="steps">
-        <li>When it's resolved, it doesn't vanish — it stays on the board strip for <strong>7 days</strong>, greyed out, with the <strong>resolution note</strong> ("→ Talked to the client — proceeding as planned") and who resolved it.</li>
-        <li>Flagged statements ("statements look wrong" during review) ride this same queue automatically.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Escalate menu + board strip</div><div class="d">The flag popover on a card, and the red escalation strip with a resolved row showing its answer.</div><div class="path">/cleanup · /production · /approvals</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>When to escalate vs. message:</strong> escalate when work on the client is blocked on a decision or a senior's eyes. Day-to-day questions still go through normal channels — an escalation is a visible, tracked "this client needs intervention."</div></div>
     </section>
 
     <!-- 17 -->
     <section class="sop" id="s17">
-      <div class="sop-head"><div class="sop-num">17</div><div><div class="sub">Playbook</div><h2>Board Badges — What They Mean</h2></div></div>
+      <div class="sop-head"><div class="sop-num">17</div><div><div class="sub">Admin only</div><h2>Admin — the Control Room</h2></div></div>
+      <div class="meta">
+        <div class="box"><div class="lbl">Purpose</div><div class="val">See what needs a decision, watch the money, and reach every fleet tool.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Admin · daily scan + as needed.</div></div>
+      </div>
+      <h3 class="step-h">What's on the Admin page</h3>
+      <ol class="steps">
+        <li><strong>Search</strong> — jump to any client or employee in two keystrokes.</li>
+        <li><strong>Exceptions</strong> — everything needing an admin decision: QBO disconnects, stuck jobs, failed reviews, failed jobs, open escalations, and a <strong>stale daily-recon engine</strong> warning if the nightly run hasn't fired. Each row links to the fix.</li>
+        <li><strong>Money at a glance</strong> — active clients, expected monthly revenue (MRR), and failed payments this month.</li>
+        <li><strong>Upgrade radar</strong> — clients that outgrew their tier · <strong>Bookkeeper scoreboard</strong> — closes &amp; cleanups per person.</li>
+        <li><strong>Tools list</strong> — Billing, Daily recon, Bulk email, Bank rules (fleet), Revenue integrity, CRM invoice revenue, COA audit, Payroll double-count, Duplicate transactions, and more.</li>
+      </ol>
+      <h3 class="step-h">User management</h3>
+      <ol class="steps">
+        <li>Header buttons: <strong>Employees</strong> and <strong>Clients</strong> (one click straight to the clients tab). Manage roles and impersonate / "view as client" from <strong>Users</strong>.</li>
+        <li><strong>Audit log</strong> — the full system event trail.</li>
+      </ol>
+    </section>
+
+    <div class="phase-divider">Playbooks</div>
+
+    <!-- 18 -->
+    <section class="sop" id="s18">
+      <div class="sop-head"><div class="sop-num">18</div><div><div class="sub">Playbook</div><h2>Escalating a Client (and Getting Your Answer)</h2></div></div>
+      <div class="meta">
+        <div class="box"><div class="lbl">Purpose</div><div class="val">One way to say "a senior needs to look at this client" — and one place the answer comes back.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Anyone on the team · the moment you're blocked on a judgment call.</div></div>
+      </div>
+      <h3 class="step-h">Raising one, and where it goes</h3>
+      <ol class="steps">
+        <li>On any board card or Clients row, click the <strong>flag</strong> button, optionally add a line of context, and pick a reason — that sends it. If the client's already escalated for the same thing, your note is added to it (nothing lost).</li>
+        <li>The client gets a red <strong>ESCALATED</strong> badge everywhere, and seniors work the queue on <strong>Oversight → Approvals</strong>: who raised it, why, how old. <strong>Resolve</strong> is one click + an optional note.</li>
+        <li>Resolved escalations stay visible for <strong>7 days</strong> (greyed, with the resolution note) so you get your answer.</li>
+      </ol>
+      <div class="note tip"><span class="ic">💡</span><div>Escalate when work on a client is <em>blocked</em> on a decision or a senior's eyes. Day-to-day questions go through normal messaging.</div></div>
+    </section>
+
+    <!-- 19 -->
+    <section class="sop" id="s19">
+      <div class="sop-head"><div class="sop-num">19</div><div><div class="sub">Playbook</div><h2>Attention Badges — What They Mean</h2></div></div>
       <div class="meta">
         <div class="box"><div class="lbl">Purpose</div><div class="val">Read a client's attention state at a glance. Badges are automatic — nobody maintains them.</div></div>
-        <div class="box"><div class="lbl">Who / When</div><div class="val">Everyone · whenever you look at a board.</div></div>
+        <div class="box"><div class="lbl">Who / When</div><div class="val">Everyone · on the Clients table and the Pipelines boards.</div></div>
       </div>
-      <h3 class="step-h">The badges (worst first — cards show the top 2 + a "+N")</h3>
+      <h3 class="step-h">The badges (worst first)</h3>
       <ol class="steps">
-        <li><strong>ESCALATED</strong> (red) — someone flagged this client for a senior (SOP 16). Darker red = open more than 3 days. Hover for the reason.</li>
-        <li><strong>DISCONNECTED</strong> (red) — the QuickBooks connection is dead; nothing syncs until the client reconnects. Get the reconnect link sent before anything else.</li>
-        <li><strong>BILLING HOLD / PAST DUE / UNBILLED</strong> — billing state (seniors see all of these; bookkeepers only see HOLD). UNBILLED in production = flag to Mike.</li>
-        <li><strong>BS OWED</strong> (amber) — the client is on P&amp;L-only service; the balance-sheet cleanup is still owed. Finish the BS cleanup, then flip BS back on.</li>
-        <li><strong>RECLASS PAUSED</strong> (grey) — an AI categorization job is paused mid-run; use <strong>Get unstuck</strong> on the Clients dashboard.</li>
+        <li><strong>ESCALATED</strong> (red) — someone flagged this client for a senior (SOP 18). Darker red = open &gt;3 days.</li>
+        <li><strong>QBO DISCONNECTED</strong> (red) — the connection is dead; nothing syncs until the client reconnects.</li>
+        <li><strong>FAILED REVIEW</strong> (red) — a manager sent the cleanup/close back to rework.</li>
+        <li><strong>BILLING HOLD / PAST DUE / UNBILLED</strong> — billing state (seniors see all; bookkeepers see HOLD). UNBILLED in production = flag to Mike.</li>
+        <li><strong>BS OWED</strong> (gold) — on P&amp;L-only service; the balance-sheet cleanup is still owed.</li>
+        <li><strong>QUEUE · Nd OLD</strong> (gold) — the daily-review queue is falling behind SLA.</li>
       </ol>
-      <h3 class="step-h">The "⚠ Flagged only" filter</h3>
-      <ol class="steps">
-        <li>Every board has a <strong>Flagged only</strong> chip — it hides everything except clients needing intervention. Use it as your triage view on a fat board.</li>
-      </ol>
-      <div class="shot"><div class="cam">📸</div><div class="t">Screenshot — Badges on cards</div><div class="d">Board cards showing the severity-ordered badge stack and the Flagged-only filter chip.</div><div class="path">/cleanup · /production · /clients</div></div>
-      <div class="note tip"><span class="ic">💡</span><div><strong>Rule of thumb:</strong> a badge is a <em>state</em>, not a task. If a badge needs a decision you can't make, that's exactly what the flag button is for.</div></div>
+      <div class="note tip"><span class="ic">💡</span><div>Every board and the Clients table has a <strong>Flagged only</strong> filter — your triage view on a fat list. A badge is a <em>state</em>, not a task; if it needs a decision you can't make, that's what the flag button is for.</div></div>
     </section>
 
     <footer>
-      <b>Ironbooks</b> · SNAP Bookkeeper Handbook · 17 SOPs across the client lifecycle<br/>
+      <b>Ironbooks</b> · SNAP Bookkeeper Handbook · 19 SOPs across the client lifecycle<br/>
       Questions? <a href="mailto:admin@ironbooks.com">admin@ironbooks.com</a>
     </footer>
 
