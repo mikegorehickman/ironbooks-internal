@@ -88,6 +88,7 @@ export function ClientDetailsCard({
   onboardingAnswers,
   jurisdiction,
   canEditEntity = false,
+  hideEntity = false,
 }: {
   clientLinkId: string;
   initial: ClientProfileFields;
@@ -96,6 +97,9 @@ export function ClientDetailsCard({
   jurisdiction?: string | null;
   /** admin/lead only may change the entity type (manual override). */
   canEditEntity?: boolean;
+  /** Hide the entity selector entirely (the SNAP redesign moves entity-type
+   *  changing to the Overview bottom strip, behind a confirm). */
+  hideEntity?: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -255,13 +259,15 @@ export function ClientDetailsCard({
         <EditGrid form={form} set={set} />
       ) : (
         <>
-          <EntitySelector
-            clientLinkId={clientLinkId}
-            jurisdiction={jurisdiction}
-            entityType={initial.entity_type}
-            corporateType={initial.corporate_type}
-            canEdit={canEditEntity}
-          />
+          {!hideEntity && (
+            <EntitySelector
+              clientLinkId={clientLinkId}
+              jurisdiction={jurisdiction}
+              entityType={initial.entity_type}
+              corporateType={initial.corporate_type}
+              canEdit={canEditEntity}
+            />
+          )}
           <ReadGrid form={initial} />
         </>
       )}

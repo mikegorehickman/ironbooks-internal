@@ -47,7 +47,24 @@ export async function GET(
 
   let customerId = (cl as any).stripe_customer_id as string | null;
 
-  // Auto-link by email if not set yet (then persist).
+  // 2-way sync: if the admin billing table (billing_subscriptions) already has
+  // a Stripe customer for this client, adopt it here too (and persist), so a
+  // connection made on /admin/billing shows as connected on the profile.
+  if (!customerId) {
+    try {
+      const { data: sub } = await (service as any)
+        .from("billing_subscriptions")
+        .select("stripe_customer_id")
+        .eq("client_link_id", id)
+        .maybeSingle();
+      if ((sub as any)?.stripe_customer_id) {
+        customerId = (sub as any).stripe_customer_id;
+        await service.from("client_links").update({ stripe_customer_id: customerId } as any).eq("id", id);
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Auto-link by email if still not set (then persist).
   if (!customerId && (cl as any).client_email) {
     try {
       const found = await findStripeCustomerIdByEmail((cl as any).client_email);
@@ -150,6 +167,21 @@ export async function POST(
       .update({ stripe_customer_id: cusId } as any)
       .eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // 2-way sync — mirror the link into the admin billing table so
+    // /admin/billing shows this client as connected too.
+    try {
+      const { data: existingSub } = await (service as any)
+        .from("billing_subscriptions").select("id").eq("client_link_id", id).maybeSingle();
+      if (existingSub) {
+        await (service as any).from("billing_subscriptions")
+          .update({ stripe_customer_id: cusId }).eq("client_link_id", id);
+      } else {
+        await (service as any).from("billing_subscriptions")
+          .insert({ client_link_id: id, stripe_customer_id: cusId });
+      }
+    } catch (e: any) {
+      console.warn(`[client billing ${id}] billing_subscriptions mirror failed:`, e?.message);
+    }
     await service.from("audit_log").insert({
       event_type: "billing_stripe_linked",
       user_id: user.id,

@@ -36,6 +36,7 @@ const fmtDate = (iso: string | null) =>
  */
 export function BillingTab({ clientLinkId }: { clientLinkId: string }) {
   const [loading, setLoading] = useState(true);
+  const [relink, setRelink] = useState(false);
   const [state, setState] = useState<{ configured: boolean; linked?: boolean; billing: Billing | null; invoices: Invoice[]; error?: string }>(
     { configured: true, billing: null, invoices: [] }
   );
@@ -118,9 +119,25 @@ export function BillingTab({ clientLinkId }: { clientLinkId: string }) {
           {b?.currentPeriodEnd && b.subscriptionStatus === "active" && (
             <div className="text-xs text-ink-slate mt-2">Next billing date: <strong className="text-navy">{fmtDate(b.currentPeriodEnd)}</strong></div>
           )}
-          <button onClick={unlink} className="text-[11px] text-ink-light hover:text-red-600 mt-3">
-            Wrong customer? Unlink
-          </button>
+          <div className="flex items-center gap-3 mt-3">
+            <button
+              onClick={() => setRelink((r) => !r)}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal hover:text-teal-dark"
+            >
+              <Search size={11} /> Find / change payment profile
+            </button>
+            <button onClick={unlink} className="text-[11px] text-ink-light hover:text-red-600">
+              Wrong customer? Unlink
+            </button>
+          </div>
+          {relink && (
+            <div className="mt-3">
+              <p className="text-[11px] text-ink-slate mb-2">
+                Search Stripe by name/email or paste a <code className="text-[10px]">cus_…</code> id to re-point this client.
+              </p>
+              <LinkStripeCustomer clientLinkId={clientLinkId} onLinked={() => { setRelink(false); load(); }} />
+            </div>
+          )}
         </div>
       </div>
 

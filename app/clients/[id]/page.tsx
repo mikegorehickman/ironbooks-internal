@@ -347,65 +347,58 @@ export default async function ClientProfilePage({
     macroStage = lc.stage;
   } catch { /* non-critical */ }
 
+  // Waiting-on-client detail for the header pill (what + how long). Production:
+  // the latest rec run's waiting reasons + when it went into that state.
+  // Cleanup: open ask-client questions.
+  let waitingInfo:
+    | { reasons: string[]; note: string | null; sinceIso: string | null }
+    | null = null;
+  if (lifecycle === "waiting_on_client") {
+    try {
+      const { data: run } = await (service as any)
+        .from("monthly_rec_runs")
+        .select("waiting_reasons, status_note, board_status, updated_at, created_at")
+        .eq("client_link_id", id)
+        .order("period", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const reasons: string[] = Array.isArray(run?.waiting_reasons) ? run.waiting_reasons : [];
+      if (run && (run.board_status === "waiting_client" || reasons.length > 0)) {
+        waitingInfo = {
+          reasons,
+          note: run.status_note || null,
+          sinceIso: run.updated_at || run.created_at || null,
+        };
+      } else {
+        waitingInfo = { reasons: ["open_questions"], note: null, sinceIso: null };
+      }
+    } catch {
+      waitingInfo = { reasons: [], note: null, sinceIso: null };
+    }
+  }
+
+  // Stripe connected — the two-way-synced signal. True if EITHER the client
+  // profile's own link (client_links.stripe_customer_id) OR the admin billing
+  // table (billing_subscriptions) has a Stripe id for this client.
+  let stripeConnected = false;
+  try {
+    const [clRes, subRes] = await Promise.all([
+      (service as any).from("client_links").select("stripe_customer_id").eq("id", id).maybeSingle(),
+      (service as any)
+        .from("billing_subscriptions")
+        .select("stripe_customer_id, stripe_subscription_id")
+        .eq("client_link_id", id)
+        .maybeSingle(),
+    ]);
+    stripeConnected = !!(
+      clRes?.data?.stripe_customer_id ||
+      subRes?.data?.stripe_customer_id ||
+      subRes?.data?.stripe_subscription_id
+    );
+  } catch { /* non-critical */ }
+
   return (
     <AppShell>
-      <TopBar
-        title={clientLink.client_name || "Client"}
-        subtitle={
-          [
-            clientLink.industry,
-            clientLink.state_province || clientLink.jurisdiction,
-          ]
-            .filter(Boolean)
-            .join(" · ") || "Client profile"
-        }
-        actions={
-          <>
-            {(() => {
-              const isCA = String(clientLink.jurisdiction || "").toUpperCase().startsWith("CA");
-              return (
-                <span
-                  title={isCA ? "Canada" : "United States"}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-ink-slate bg-gray-50 border border-gray-200 rounded-full px-2 py-1"
-                >
-                  <span className="text-base leading-none">{isCA ? "🇨🇦" : "🇺🇸"}</span>
-                  {isCA ? "CA" : "US"}
-                </span>
-              );
-            })()}
-            {clientLink.qbo_realm_id && (
-              <Link
-                href={`/clients/${clientLink.id}/tax-export`}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-teal hover:bg-teal-dark rounded-lg px-3 py-2"
-                title={String(clientLink.jurisdiction || "").toUpperCase().startsWith("CA")
-                  ? "Export tax documents (T2 / T2125 / GIFI)"
-                  : "Export tax documents (1120 / 1120-S / 1065 / Sch C)"}
-              >
-                <FileText size={13} /> Export Tax Docs
-              </Link>
-            )}
-            {/* One stage indicator only — the detailed LifecyclePill (e.g. "In
-                production") already implies the macro stage, so the separate
-                macro pill ("Production") next to it was redundant. */}
-            {lifecycle ? (
-              <LifecyclePill status={lifecycle} size="md" />
-            ) : (
-              macroStage && (
-                <span
-                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${MACRO_STAGE_META[macroStage].tone}`}
-                  title={MACRO_STAGE_META[macroStage].description}
-                >
-                  {MACRO_STAGE_META[macroStage].label}
-                </span>
-              )
-            )}
-            <ClientSwitcher
-              currentId={clientLink.id}
-              currentName={clientLink.client_name || "Client"}
-            />
-          </>
-        }
-      />
       <ClientProfileShell
         clientLink={clientLink as any}
         actorRole={role}
@@ -413,6 +406,8 @@ export default async function ClientProfilePage({
         bsCleanupOwed={bsCleanupOwed}
         macroStage={macroStage}
         lifecycleStatus={lifecycle}
+        waitingInfo={waitingInfo}
+        stripeConnected={stripeConnected}
         overview={{
           outstanding,
           activity,

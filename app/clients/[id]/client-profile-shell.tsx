@@ -31,12 +31,17 @@ import {
   Trash2,
   ClipboardCheck,
   StickyNote,
+  MoreHorizontal,
+  MessageSquare,
 } from "lucide-react";
 import { CleanupTab } from "./cleanup-tab";
-import { StageBanner } from "./stage-banner";
 import { AskClientComposer } from "@/components/AskClientComposer";
-import type { MacroStage, LifecycleStatus } from "@/lib/client-lifecycle";
+import { MACRO_STAGE_META, LIFECYCLE_META, type MacroStage, type LifecycleStatus } from "@/lib/client-lifecycle";
+import { LifecyclePill } from "@/components/LifecyclePill";
 import { NotesPanel } from "./notes-panel";
+import { EmailHistoryPanel } from "./email-history-panel";
+import { SendEmailDrawer } from "./send-email-drawer";
+import { EntityChangeStrip } from "./entity-change-strip";
 import { UrgentFlagButton } from "./urgent-flag-button";
 import type {
   OutstandingWork,
@@ -51,6 +56,37 @@ import { ResendLoginLink } from "./resend-login-link";
 import { StatementsCard } from "./statements-card";
 import { MessagesPanel } from "./messages-panel";
 import { BillingTab } from "./billing-tab";
+
+// ─── Waiting-on-client detail (header pill tooltip) ────────────────────────
+export interface WaitingInfo {
+  reasons: string[];
+  note?: string | null;
+  sinceIso?: string | null;
+}
+const WAIT_REASON_LABELS: Record<string, string> = {
+  waiting_reply: "a reply to our questions",
+  waiting_statements: "bank / credit-card statements",
+  disconnected_feed: "a reconnected bank feed",
+  open_questions: "answers to open transaction questions",
+};
+function waitedFor(sinceIso?: string | null): string | null {
+  if (!sinceIso) return null;
+  const then = new Date(sinceIso).getTime();
+  if (!Number.isFinite(then)) return null;
+  const days = Math.floor((Date.now() - then) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day";
+  if (days < 14) return `${days} days`;
+  return `${Math.round(days / 7)} weeks`;
+}
+function waitingTooltip(info: WaitingInfo): string {
+  const reasons = (info.reasons || []).map((r) => WAIT_REASON_LABELS[r] || r.replace(/_/g, " ")).filter(Boolean);
+  const waited = waitedFor(info.sinceIso);
+  const what = reasons.length ? `Waiting for ${reasons.join(" and ")}` : "Waiting on the client";
+  const how = waited ? ` · ${waited === "today" ? "since today" : `for ${waited}`}` : "";
+  const note = info.note ? `\n“${info.note}”` : "";
+  return `${what}${how}${note}`;
+}
 
 type ClientLink = {
   id: string;
@@ -158,24 +194,28 @@ interface Props {
   /** BS cleanup deferred → still owed (amber banner on Overview). */
   bsCleanupOwed?: boolean;
   /** Lifecycle stage + detailed status (computed server-side) — drives the
-   *  in-body StageBanner + the stage-aware default tab. */
+   *  header stage/status pills + the stage-aware default tab. */
   macroStage?: MacroStage | null;
   lifecycleStatus?: LifecycleStatus | null;
+  /** What we're waiting on the client for (header pill tooltip). */
+  waitingInfo?: WaitingInfo | null;
+  /** Stripe connected (either client_links or the admin billing table) —
+   *  the two-way-synced signal shown in the status strip. */
+  stripeConnected?: boolean;
 }
 
-type TabId = "overview" | "cleanup" | "financials" | "profile" | "billing" | "notes";
+type TabId = "overview" | "financials" | "cleanup" | "messages" | "settings";
 type FinView = "pl" | "bs" | "bank";
 
-// Nine tabs was a source of "which do I open?" busy-ness. The three financial
-// views collapse into one Financials tab (sub-toggle inside), and Activity
-// folds into Overview's recent-activity strip.
+// Five tabs (SNAP redesign 2026-07-21). P&L/BS/Bank collapse into Financials
+// (sub-toggle); Profile + Billing + Delete fold into Settings; the message
+// thread, notes and the activity timeline share "Messages & notes".
 const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: "overview", label: "Overview", icon: Activity },
-  { id: "cleanup", label: "Cleanup", icon: ClipboardCheck },
   { id: "financials", label: "Financials", icon: FileText },
-  { id: "profile", label: "Profile", icon: Building2 },
-  { id: "billing", label: "Billing", icon: CreditCard },
-  { id: "notes", label: "Notes", icon: StickyNote },
+  { id: "cleanup", label: "Cleanup", icon: ClipboardCheck },
+  { id: "messages", label: "Messages & notes", icon: MessageSquare },
+  { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
 const FIN_VIEWS: { id: FinView; label: string; icon: any }[] = [
@@ -184,7 +224,7 @@ const FIN_VIEWS: { id: FinView; label: string; icon: any }[] = [
   { id: "bank", label: "Bank Balances", icon: Banknote },
 ];
 
-export function ClientProfileShell({ clientLink, actorRole, overview, financials, onboarding, bsCleanupOwed, macroStage, lifecycleStatus }: Props) {
+export function ClientProfileShell({ clientLink, actorRole, overview, financials, onboarding, bsCleanupOwed, macroStage, lifecycleStatus, waitingInfo, stripeConnected }: Props) {
   // Stage-aware default tab: cleanup-stage clients land on the cleanup sequence
   // (where their work is); everyone else on Overview. Initial only — the user
   // can click anywhere.
@@ -193,16 +233,21 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
   );
   // Which financial view is showing inside the Financials tab.
   const [finView, setFinView] = useState<FinView>("pl");
-  // Nav shim: StageBanner / CleanupTab still ask for the old tab ids
-  // (pl / bs / bank / activity). Map them onto the consolidated tabs so those
-  // links keep working after the merge.
+  // Send-email drawer (header + Email history).
+  const [sendEmailOpen, setSendEmailOpen] = useState(false);
+  // Header "···" overflow (flag urgent / view as client / re-send login / export).
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Nav shim: CleanupTab / cards still ask for the old tab ids (pl / bs / bank
+  // / activity / profile / billing / notes). Map them onto the 5 tabs.
   const navTo = (tab: string) => {
     if (tab === "pl" || tab === "bs" || tab === "bank") {
       setFinView(tab);
       setActiveTab("financials");
-    } else if (tab === "activity") {
-      setActiveTab("overview");
-    } else {
+    } else if (tab === "activity" || tab === "notes") {
+      setActiveTab("messages");
+    } else if (tab === "profile" || tab === "billing") {
+      setActiveTab("settings");
+    } else if (tab === "overview" || tab === "financials" || tab === "cleanup" || tab === "messages" || tab === "settings") {
       setActiveTab(tab as TabId);
     }
   };
@@ -219,83 +264,225 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
     end: string;
   } | null>(null);
 
+  // ── Header-derived values ──
+  const isCA = String(clientLink.jurisdiction || "").toUpperCase().startsWith("CA");
+  const qboConnected = financials.qboStatus === "connected";
+  const isWaiting = lifecycleStatus === "waiting_on_client";
+  const waited = isWaiting && waitingInfo ? waitedFor(waitingInfo.sinceIso) : null;
+  const waitTip = isWaiting && waitingInfo ? waitingTooltip(waitingInfo) : undefined;
+  const syncedLabel = clientLink.last_synced_at
+    ? new Date(clientLink.last_synced_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : null;
+  const reconSince = clientLink.daily_recon_enabled_at
+    ? new Date(clientLink.daily_recon_enabled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : null;
+  // Primary CTA is stage-driven — the one action for this client right now.
+  const primaryCta: { label: string; onClick?: () => void; href?: string } =
+    macroStage === "production"
+      ? { label: "Monthly close", href: "/production" }
+      : macroStage === "cleanup"
+      ? { label: "Open cleanup sequence", onClick: () => setActiveTab("cleanup") }
+      : { label: "Foundation details", onClick: () => setActiveTab("settings") };
+  const breadcrumb = [
+    clientLink.industry,
+    clientLink.state_province,
+    isCA ? "CA" : "US",
+  ].filter(Boolean);
+
   return (
     <div className="px-8 py-6 max-w-7xl mx-auto space-y-6">
-      {/* Top action bar — sits above the tab strip so the actions are visible
-          from every tab without having to scroll back. "View as client" is
-          the most-requested handoff so it gets the most-prominent slot. */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-ink-slate">
-          {clientLink.last_synced_at && (
-            <span className="text-xs">
-              Last QBO sync:{" "}
-              {new Date(clientLink.last_synced_at).toLocaleString()}
+      {/* ── HEADER + status strip + tabs ── the compact identity block on the
+          canvas (SNAP redesign): breadcrumb, name + stage/waiting pills +
+          actions, health dots, a one-line status strip, then the tab rail.
+          Replaces the old action bar + StageBanner. */}
+      <div>
+        <div className="text-[11px] font-bold uppercase tracking-wider text-ink-light">
+          <Link href="/clients" className="hover:text-teal">Clients</Link>
+          {breadcrumb.map((b) => (
+            <span key={b}> · {b}</span>
+          ))}
+        </div>
+
+        <div className="mt-1 flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+            <h1 className="text-2xl font-extrabold tracking-tight text-navy" style={{ letterSpacing: "-0.02em" }}>
+              {clientLink.client_name}
+            </h1>
+            {lifecycleStatus ? (
+              <LifecyclePill status={lifecycleStatus} size="md" />
+            ) : (
+              macroStage && (
+                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${MACRO_STAGE_META[macroStage].tone}`}>
+                  {MACRO_STAGE_META[macroStage].label}
+                </span>
+              )
+            )}
+            {isWaiting && (
+              <span
+                title={waitTip}
+                className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold bg-gold-tint text-gold-deep border border-gold-border cursor-help"
+              >
+                Waiting on client{waited ? ` · ${waited === "today" ? "today" : waited}` : ""}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => setSendEmailOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-navy hover:border-teal hover:text-teal transition-colors"
+            >
+              <Mail size={14} /> Send email
+            </button>
+            {primaryCta.href ? (
+              <Link
+                href={primaryCta.href}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-navy px-3.5 py-2 text-sm font-semibold text-white hover:bg-navy-deep transition-colors"
+              >
+                {primaryCta.label} <ArrowRight size={14} />
+              </Link>
+            ) : (
+              <button
+                onClick={primaryCta.onClick}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-navy px-3.5 py-2 text-sm font-semibold text-white hover:bg-navy-deep transition-colors"
+              >
+                {primaryCta.label} <ArrowRight size={14} />
+              </button>
+            )}
+            {/* ··· overflow — the low-frequency actions live here. */}
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white h-9 w-9 text-ink-slate hover:border-teal hover:text-teal transition-colors"
+                aria-label="More actions"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                  <div className="absolute right-0 mt-1 z-20 w-56 rounded-xl border border-gray-200 bg-white shadow-lg p-2 space-y-1">
+                    <div onClick={() => setMenuOpen(false)}>
+                      <UrgentFlagButton
+                        clientLinkId={clientLink.id}
+                        initialUrgent={!!(clientLink as any).urgent_flag}
+                        initialNote={(clientLink as any).urgent_flag_note || null}
+                      />
+                    </div>
+                    {canImpersonate && (
+                      <div onClick={() => setMenuOpen(false)}>
+                        <ViewAsClientButton clientLinkId={clientLink.id} />
+                      </div>
+                    )}
+                    <div onClick={() => setMenuOpen(false)}>
+                      <ResendLoginLink clientLinkId={clientLink.id} />
+                    </div>
+                    {clientLink.qbo_realm_id && (
+                      <Link
+                        href={`/clients/${clientLink.id}/tax-export`}
+                        className="flex items-center gap-2 w-full rounded-lg px-2.5 py-2 text-sm font-medium text-navy hover:bg-gray-50"
+                      >
+                        <FileText size={14} className="text-ink-slate" /> Export tax docs
+                      </Link>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Health dots */}
+        <div className="mt-2 flex items-center gap-4 text-[13px] flex-wrap">
+          <span className="inline-flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${qboConnected ? "bg-teal" : "bg-[#954E44]"}`} />
+            <span className={qboConnected ? "text-ink-slate" : "text-[#954E44] font-semibold"}>QBO</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${clientLink.daily_recon_enabled && !clientLink.daily_recon_paused ? "bg-teal" : "bg-ink-light"}`} />
+            <span className="text-ink-slate">Recon</span>
+          </span>
+          {bsCleanupOwed && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#954E44]" />
+              <span className="text-[#954E44] font-semibold">BS owed</span>
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {/* Re-run COA Cleanup lives on the Cleanup tab (step 2) — no longer
-              duplicated in this header. */}
-          <UrgentFlagButton
-            clientLinkId={clientLink.id}
-            initialUrgent={!!(clientLink as any).urgent_flag}
-            initialNote={(clientLink as any).urgent_flag_note || null}
-          />
-          {canImpersonate && <ViewAsClientButton clientLinkId={clientLink.id} />}
-          <ResendLoginLink clientLinkId={clientLink.id} />
-          {canImpersonate && (
-            <DeleteClientButton clientLinkId={clientLink.id} clientName={clientLink.client_name} />
+
+        {/* One-line status strip — replaces the stacked banners. */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink-slate">
+          <span>
+            {qboConnected ? "QuickBooks connected" : financials.qboStatus === "token_expired" ? "QuickBooks needs reconnect" : "QuickBooks not connected"}
+            {syncedLabel && qboConnected ? ` · synced ${syncedLabel}` : ""}
+          </span>
+          {clientLink.daily_recon_enabled && reconSince && (
+            <><span className="text-ink-light">·</span><span>daily recon active since {reconSince}</span></>
           )}
+          {bsCleanupOwed && (
+            <><span className="text-ink-light">·</span><span className="text-[#954E44] font-semibold">⚠ Balance-sheet cleanup owed</span></>
+          )}
+          <span className="text-ink-light">·</span>
+          <span>{stripeConnected ? "Stripe billing connected (two-way sync with Admin → Billing)" : "Stripe billing not connected"}</span>
+          <span className="text-ink-light">·</span>
+          <button onClick={() => navTo("billing")} className="font-semibold text-teal hover:text-teal-dark">
+            Find payment profile (Stripe) ↗
+          </button>
+          {clientLink.qbo_realm_id && (
+            <>
+              <span className="text-ink-light">·</span>
+              <a href="https://qbo.intuit.com" target="_blank" rel="noopener noreferrer" className="font-semibold text-teal hover:text-teal-dark">
+                Open in QuickBooks ↗
+              </a>
+            </>
+          )}
+        </div>
+
+        {/* Tab rail */}
+        <div className="mt-4 flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
+          {TABS.map(({ id, label, icon: Icon }) => {
+            const active = activeTab === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                  active
+                    ? "border-teal text-navy"
+                    : "border-transparent text-ink-slate hover:text-navy hover:border-gray-200"
+                }`}
+              >
+                <Icon size={15} />
+                {label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Stage banner — leads the workspace with the client's lifecycle stage
-          and the single next action, so the bookkeeper isn't guessing which of
-          nine tabs to open. */}
-      {macroStage && (
-        <StageBanner
-          stage={macroStage}
-          status={lifecycleStatus}
+      {sendEmailOpen && (
+        <SendEmailDrawer
           clientLinkId={clientLink.id}
-          canReject={canImpersonate}
-          onGoToTab={navTo}
+          clientName={clientLink.client_name}
+          clientEmail={clientLink.client_email ?? null}
+          onClose={() => setSendEmailOpen(false)}
         />
       )}
-
-      {/* Tab strip — top-level navigation between financial views. Tabs are
-          stateful (no URL change) so we keep page state per tab without
-          shuffling the address bar; switch to nested routes later if we
-          want deep-link-per-tab. */}
-      <div className="flex items-center gap-1 border-b border-gray-200">
-        {TABS.map(({ id, label, icon: Icon }) => {
-          const active = activeTab === id;
-          return (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-                active
-                  ? "border-teal text-navy"
-                  : "border-transparent text-ink-slate hover:text-navy hover:border-gray-200"
-              }`}
-            >
-              <Icon size={15} />
-              {label}
-            </button>
-          );
-        })}
-      </div>
 
       {activeTab === "overview" && (
         <OverviewTab
           clientLink={clientLink}
           overview={overview}
+          financials={financials}
           qboStatus={financials.qboStatus}
           onboarding={onboarding}
           bsCleanupOwed={bsCleanupOwed}
           canSendMessages={actorRole !== "viewer"}
+          canEditEntity={canImpersonate}
           macroStage={macroStage ?? null}
           onGoToTab={navTo}
+          onSendEmail={() => setSendEmailOpen(true)}
+          onOpenActivity={() => setActiveTab("messages")}
         />
       )}
       {activeTab === "cleanup" && (
@@ -308,10 +495,21 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           onNavigateTab={navTo}
         />
       )}
-      {activeTab === "profile" && (
-        <ProfileTab clientLink={clientLink} onboarding={onboarding} actorRole={actorRole} />
+      {activeTab === "messages" && (
+        <MessagesAndNotesTab
+          clientLinkId={clientLink.id}
+          activity={overview.activity}
+          canSend={actorRole !== "viewer"}
+        />
       )}
-      {activeTab === "billing" && <BillingTab clientLinkId={clientLink.id} />}
+      {activeTab === "settings" && (
+        <SettingsTab
+          clientLink={clientLink}
+          onboarding={onboarding}
+          actorRole={actorRole}
+          canDelete={canImpersonate}
+        />
+      )}
       {activeTab === "financials" && (
         <div className="space-y-4">
           {/* Sub-toggle — P&L / Balance Sheet / Bank Balances live together
@@ -396,7 +594,6 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
         </div>
       )}
 
-      {activeTab === "notes" && <NotesPanel clientLinkId={clientLink.id} />}
 
       {drill && (
         <DrillDrawer
@@ -879,25 +1076,30 @@ function ProductionStatusCard({
   );
 }
 
-// ─── PROFILE TAB ───────────────────────────────────────────────────────
-// The editable client contact/details card + the read-only onboarding
-// answers table. Lives in its own tab so Overview stays focused on status.
+// ─── SETTINGS TAB ──────────────────────────────────────────────────────
+// Everything administrative for a client: the editable details card, billing
+// (Stripe), the read-only onboarding answers, and — at the very bottom,
+// de-emphasized — the destructive Delete control. Entity-type switching lives
+// on the Overview (bottom strip), so the details card shows it read-only here.
 
-function ProfileTab({
+function SettingsTab({
   clientLink,
   onboarding,
   actorRole,
+  canDelete,
 }: {
   clientLink: ClientLink;
   onboarding?: OnboardingProfile | null;
   actorRole: string;
+  canDelete?: boolean;
 }) {
   return (
     <div className="space-y-6">
       <ClientDetailsCard
         clientLinkId={clientLink.id}
         jurisdiction={clientLink.jurisdiction ?? null}
-        canEditEntity={actorRole === "admin" || actorRole === "lead"}
+        canEditEntity={false}
+        hideEntity
         initial={{
           contact_first_name: clientLink.contact_first_name ?? null,
           contact_last_name: clientLink.contact_last_name ?? null,
@@ -927,7 +1129,52 @@ function ProfileTab({
         }}
         onboardingAnswers={onboarding?.answers}
       />
+
+      {/* Billing (Stripe) — same two-way-synced source as Admin → Billing. */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <h3 className="text-sm font-bold text-navy uppercase tracking-wider flex items-center gap-2 mb-4">
+          <CreditCard size={15} className="text-teal" /> Billing
+        </h3>
+        <BillingTab clientLinkId={clientLink.id} />
+      </div>
+
       {onboarding && <OnboardingDetailsCard onboarding={onboarding} />}
+
+      {/* Danger zone — Delete lives here, at the bottom, out of the header. */}
+      {canDelete && (
+        <div className="rounded-2xl border border-red-100 bg-red-50/40 p-5">
+          <h3 className="text-xs font-bold text-[#954E44] uppercase tracking-wider mb-1">Danger zone</h3>
+          <p className="text-[13px] text-ink-slate mb-3">
+            Delete this client. If it has financial records it's archived (hidden) rather than hard-deleted, to preserve the books.
+          </p>
+          <DeleteClientButton clientLinkId={clientLink.id} clientName={clientLink.client_name} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MESSAGES & NOTES TAB ──────────────────────────────────────────────
+// The client message thread, internal notes, and the SNAP activity timeline
+// (relocated off the Overview — reachable via Email history's "Activity →").
+
+function MessagesAndNotesTab({
+  clientLinkId,
+  activity,
+  canSend,
+}: {
+  clientLinkId: string;
+  activity: ActivityEvent[];
+  canSend: boolean;
+}) {
+  return (
+    <div className="space-y-6">
+      <MessagesPanel clientLinkId={clientLinkId} canSend={canSend} />
+      <NotesPanel clientLinkId={clientLinkId} />
+      <div>
+        <h2 className="text-base font-bold text-navy mb-3">Recent activity</h2>
+        <ActivityTab activity={activity} />
+      </div>
     </div>
   );
 }
@@ -937,59 +1184,64 @@ function ProfileTab({
 function OverviewTab({
   clientLink,
   overview,
+  financials,
   qboStatus,
   onboarding,
   bsCleanupOwed,
   canSendMessages,
+  canEditEntity,
   macroStage,
   onGoToTab,
+  onSendEmail,
+  onOpenActivity,
 }: {
   clientLink: ClientLink;
   overview: OverviewBundle;
+  financials: FinancialsBundle;
   qboStatus: "connected" | "token_expired" | "never_connected";
   onboarding?: OnboardingProfile | null;
   bsCleanupOwed?: boolean;
   canSendMessages?: boolean;
+  canEditEntity?: boolean;
   macroStage?: "onboarding" | "cleanup" | "production" | null;
   onGoToTab?: (tab: string) => void;
+  onSendEmail?: () => void;
+  onOpenActivity?: () => void;
 }) {
-  const { outstanding, summary, activity, progress } = overview;
+  const { outstanding, progress } = overview;
 
-  // "Reached the BS stage" = COA cleanup, reclass, and bank rules are all
-  // complete. The Move-to-production CTA only appears at this point.
   const stageDone = (key: string) =>
     progress?.stages?.find((s) => s.key === key)?.status === "complete";
   const reachedBsStage =
     !!clientLink.daily_recon_enabled ||
     (stageDone("coa") && stageDone("reclass") && stageDone("rules"));
-
   const inProduction = qboStatus === "connected" && !!clientLink.daily_recon_enabled;
+
+  // Month snapshot figures (from the QBO overview bundle).
+  const ov = financials.overview;
+  const fmtMoney = (n: number) => (n < 0 ? "−$" : "$") + Math.abs(Math.round(n || 0)).toLocaleString();
+  const netProfit = ov?.primaryPL.netIncome ?? null;
+  const moneyIn = ov?.primaryPL.totalIncome ?? null;
+  const prevIn = ov?.comparisonPL.totalIncome ?? null;
+  const momPct = moneyIn != null && prevIn ? ((moneyIn - prevIn) / Math.abs(prevIn)) * 100 : null;
+  const cash = ov?.banks.totalCashOnHand ?? null;
+  const monthExpenses = ov?.primaryPL.totalExpenses ?? 0;
+  const weeksRunway = cash != null && monthExpenses > 0 ? cash / (monthExpenses / 4.345) : null;
+  const monthLabel = ov?.primaryMonth.label || "This month";
 
   return (
     <div className="space-y-5">
-      {/* Status line — a quiet strip when healthy; the QBO banner only
-          expands to a full card when connection needs attention. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {/* QBO reconnect prompt — only surfaces when connection needs attention. */}
+      {qboStatus !== "connected" && (
         <QboConnectionBanner
           clientLinkId={clientLink.id}
           clientName={clientLink.client_name}
           qboRealmId={clientLink.qbo_realm_id}
           status={qboStatus}
         />
-      </div>
-
-      {/* Balance-sheet cleanup still owed — a compact line, not a banner. */}
-      {bsCleanupOwed && (
-        <div className="flex items-center gap-2 rounded-lg border border-gold-border bg-gold-tint px-3 py-2 text-[13px] text-[#7c5210]">
-          <AlertTriangle size={14} className="flex-shrink-0" />
-          <span><strong>Balance-sheet cleanup deferred</strong> — still owed. Mark it done from the Clients table once complete.</span>
-        </div>
       )}
 
-      {/* ── STAGE FOCUS ── a per-stage framing card so Overview reads
-          differently for an onboarding vs cleanup vs production client. The
-          thin StageBanner above the tabs carries the one CTA; this gives the
-          supporting "what this stage is about" detail. */}
+      {/* Stage focus — onboarding / cleanup framing (production shows none). */}
       {macroStage === "onboarding" && (
         <div className="rounded-xl border border-teal-border bg-teal-light/50 p-4">
           <div className="text-sm font-bold text-navy">Getting set up</div>
@@ -1000,7 +1252,7 @@ function OverviewTab({
             </li>
             <li className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-ink-light" />
-              Review the client's foundation intake on the <button onClick={() => onGoToTab?.("profile")} className="font-semibold text-teal-dark hover:text-navy underline decoration-dotted">Profile</button> tab
+              Review the client's foundation intake on the <button onClick={() => onGoToTab?.("settings")} className="font-semibold text-teal-dark hover:text-navy underline decoration-dotted">Settings</button> tab
             </li>
             <li className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-ink-light" />
@@ -1024,67 +1276,101 @@ function OverviewTab({
         </div>
       )}
 
-      {/* ── HERO: Outstanding work ── the one question Overview must answer:
-          "what needs doing for this client right now?" Everything else is
-          context below it. Empty = a deliberate all-clear state. */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-bold text-navy">Outstanding work</h2>
+      {/* ── WHAT NEEDS DOING ── the page lead. Hairline rows, no sub-cards. */}
+      <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+          <h2 className="text-sm font-bold text-navy uppercase tracking-wider">What needs doing</h2>
           {outstanding && outstanding.totalCount > 0 && (
-            <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
+            <span className="ml-auto text-xs font-bold text-gold-deep">
               {outstanding.totalCount} item{outstanding.totalCount === 1 ? "" : "s"}
             </span>
           )}
         </div>
         {outstanding && outstanding.items.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <ul className="divide-y divide-gray-100">
             {outstanding.items.map((item, i) => (
-              <Link
-                key={i}
-                href={item.href}
-                className="group flex items-start gap-3 bg-white border border-gray-200 hover:border-amber-300 hover:shadow-sm rounded-xl p-4 transition-all"
-              >
-                <div className="shrink-0 mt-0.5">
-                  <AlertCircle
-                    size={18}
-                    className={
-                      item.category.includes("failed")
-                        ? "text-red-500"
-                        : "text-amber-500"
-                    }
-                  />
-                </div>
+              <li key={i} className="flex items-center gap-3 px-5 py-3">
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-navy group-hover:text-teal">
+                  <div className="text-sm font-semibold text-navy flex items-center gap-2">
+                    {item.category.includes("failed") && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-[#954E44] border border-red-100">FAILED</span>
+                    )}
                     {item.label}
                   </div>
-                  <div className="text-xs text-ink-slate mt-0.5 truncate">
-                    {item.detail}
-                  </div>
-                  {item.occurredAt && (
-                    <div className="text-[10px] text-ink-slate/70 mt-1">
-                      {new Date(item.occurredAt).toLocaleDateString()}
-                    </div>
-                  )}
+                  <div className="text-xs text-ink-slate mt-0.5 truncate">{item.detail}</div>
                 </div>
-                <ChevronRight
-                  size={16}
-                  className="shrink-0 text-ink-slate group-hover:text-teal mt-0.5"
-                />
-              </Link>
+                <Link
+                  href={item.href}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-navy hover:border-teal hover:text-teal transition-colors"
+                >
+                  Open <ArrowRight size={12} />
+                </Link>
+              </li>
             ))}
-          </div>
+          </ul>
         ) : (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800">
+          <div className="px-5 py-6 text-sm text-emerald-800 bg-emerald-50/60">
             ✓ Nothing outstanding — this client is up to date.
           </div>
         )}
       </section>
 
-      {/* Production control — the promote-to-production lever (pre-live) or the
-          daily-recon status + queue + pause (live). One card, the operational
-          control for this client's stage. (Monthly close is the stage banner's
-          job, above the tabs — not duplicated here.) */}
+      {/* ── Month snapshot + Email history ── two reference cards. */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div className="lg:col-span-3">
+          <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden h-full">
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+              <h2 className="text-sm font-bold text-navy uppercase tracking-wider">{monthLabel} snapshot</h2>
+              <button onClick={() => onGoToTab?.("financials")} className="ml-auto text-xs font-semibold text-teal hover:text-teal-dark">
+                Full financials →
+              </button>
+            </div>
+            {ov ? (
+              <div className="grid grid-cols-3 divide-x divide-gray-100">
+                <div className="px-5 py-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light">Net profit</div>
+                  <div className={`text-2xl font-black tabular-nums mt-1 ${netProfit != null && netProfit < 0 ? "text-[#954E44]" : "text-navy"}`}>
+                    {netProfit != null ? fmtMoney(netProfit) : "—"}
+                  </div>
+                  {netProfit != null && netProfit < 0 && (
+                    <div className="text-[11px] font-semibold text-[#954E44] mt-0.5">loss</div>
+                  )}
+                </div>
+                <div className="px-5 py-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light">Money in</div>
+                  <div className="text-2xl font-black tabular-nums text-navy mt-1">{moneyIn != null ? fmtMoney(moneyIn) : "—"}</div>
+                  {momPct != null && (
+                    <div className={`text-[11px] font-semibold mt-0.5 ${momPct < 0 ? "text-[#954E44]" : "text-teal-dark"}`}>
+                      {momPct < 0 ? "▼" : "▲"} {Math.abs(Math.round(momPct))}% vs prior
+                    </div>
+                  )}
+                </div>
+                <div className="px-5 py-4">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light">Cash on hand</div>
+                  <div className="text-2xl font-black tabular-nums text-navy mt-1">{cash != null ? fmtMoney(cash) : "—"}</div>
+                  {weeksRunway != null && weeksRunway > 0 && (
+                    <div className="text-[11px] text-ink-slate mt-0.5">~{Math.round(weeksRunway)} weeks of expenses</div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="px-5 py-8 text-sm text-ink-slate">
+                {qboStatus === "connected" ? "No financial data for this period yet." : "Connect QuickBooks to see the month snapshot."}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="lg:col-span-2">
+          <EmailHistoryPanel
+            clientLinkId={clientLink.id}
+            onSendEmail={() => onSendEmail?.()}
+            onOpenActivity={() => onOpenActivity?.()}
+          />
+        </div>
+      </div>
+
+      {/* Production control — promote-to-production (pre-live) / daily-recon
+          status + pause (live). Kept: it's the operational lever for the stage. */}
       {qboStatus === "connected" && (
         <div id="move-to-production" className="scroll-mt-24">
           <ProductionStatusCard
@@ -1100,16 +1386,10 @@ function OverviewTab({
         </div>
       )}
 
-      {/* Cleanup progress — only meaningful pre-production. A live client
-          doesn't need the "where are we in cleanup" flow on Overview. */}
       {progress && !inProduction && <ProgressFlowChart progress={progress} />}
 
-      {/* Inline message thread — collapsed; "text" the client without leaving. */}
-      <MessagesPanel clientLinkId={clientLink.id} canSend={canSendMessages !== false} />
-
-      {/* Documents & statements — available but folded away; AI files uploaded
-          bank/CC/loan statements by month. Off the main flow so it doesn't
-          crowd a production Overview. */}
+      {/* Documents & statements — folded away; upload target for the "no
+          statements filed" item above. */}
       <details className="group">
         <summary className="flex items-center gap-2 cursor-pointer select-none text-sm font-bold text-navy py-1 list-none">
           <ChevronRight size={15} className="text-ink-slate transition-transform group-open:rotate-90" />
@@ -1120,38 +1400,16 @@ function OverviewTab({
         </div>
       </details>
 
-      {/* Recent activity strip — last 10 events from audit_log */}
-      {activity.length > 0 && (
-        <section>
-          <h2 className="text-base font-bold text-navy mb-3">Recent activity</h2>
-          <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-            {activity.slice(0, 10).map((e) => (
-              <div
-                key={e.id}
-                className="flex items-center justify-between px-4 py-2.5"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <Activity size={13} className="text-ink-slate shrink-0" />
-                  <span className="text-sm text-navy truncate">{e.label}</span>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-xs text-ink-slate">
-                    {new Date(e.occurredAt).toLocaleString()}
-                  </span>
-                  {e.href && (
-                    <Link
-                      href={e.href}
-                      className="text-xs font-semibold text-teal hover:text-teal-dark"
-                    >
-                      View →
-                    </Link>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* ── Bottom low-priority strip ── entity type + change (behind confirm),
+          deliberately out of the way. Delete lives on the Settings tab. */}
+      <EntityChangeStrip
+        clientLinkId={clientLink.id}
+        jurisdiction={clientLink.jurisdiction ?? null}
+        stateProvince={clientLink.state_province ?? null}
+        entityType={clientLink.entity_type ?? null}
+        corporateType={clientLink.corporate_type ?? null}
+        canEdit={!!canEditEntity}
+      />
     </div>
   );
 }

@@ -30,6 +30,51 @@ interface Cta {
   icon: any;
 }
 
+/** What we're waiting on the client for + since when — surfaced on the
+ * "Waiting on client" status pill as a hover tooltip. Sourced from the current
+ * month's rec run (production) or open ask-client questions (cleanup). */
+export interface WaitingInfo {
+  reasons: string[]; // human-readable, already mapped
+  note?: string | null;
+  sinceIso?: string | null;
+}
+
+const REASON_LABELS: Record<string, string> = {
+  waiting_reply: "a reply to our questions",
+  waiting_statements: "bank / credit-card statements",
+  disconnected_feed: "a reconnected bank feed",
+  open_questions: "answers to open transaction questions",
+};
+
+function mapReason(r: string): string {
+  return REASON_LABELS[r] || r.replace(/_/g, " ");
+}
+
+/** "3 days" / "today" / "5 weeks" from an ISO timestamp. */
+function waitedFor(sinceIso?: string | null): string | null {
+  if (!sinceIso) return null;
+  const then = new Date(sinceIso).getTime();
+  if (!Number.isFinite(then)) return null;
+  const days = Math.floor((Date.now() - then) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day";
+  if (days < 14) return `${days} days`;
+  const weeks = Math.round(days / 7);
+  return `${weeks} weeks`;
+}
+
+/** Compose the full tooltip string for the waiting pill. */
+function waitingTooltip(info: WaitingInfo): string {
+  const reasons = (info.reasons || []).map(mapReason).filter(Boolean);
+  const waited = waitedFor(info.sinceIso);
+  const what = reasons.length
+    ? `Waiting for ${reasons.join(" and ")}`
+    : "Waiting on the client";
+  const how = waited ? ` · ${waited === "today" ? "since today" : `for ${waited}`}` : "";
+  const note = info.note ? `\n“${info.note}”` : "";
+  return `${what}${how}${note}`;
+}
+
 /** Status-specific hint override for the states a bookkeeper acts on. */
 function statusHint(status: LifecycleStatus | null | undefined): string | null {
   switch (status) {
@@ -53,6 +98,7 @@ export function StageBanner({
   status,
   clientLinkId,
   canReject = false,
+  waitingInfo = null,
   onGoToTab,
 }: {
   stage: MacroStage;
@@ -60,6 +106,8 @@ export function StageBanner({
   clientLinkId: string;
   /** Senior (admin/lead) — may Manager-Reject a cleanup that's in review. */
   canReject?: boolean;
+  /** Detail for the "Waiting on client" pill tooltip (what + how long). */
+  waitingInfo?: WaitingInfo | null;
   onGoToTab: (tab: TabTarget) => void;
 }) {
   const router = useRouter();
@@ -114,7 +162,8 @@ export function StageBanner({
   } else {
     title = "Production — live books";
     primary = { label: "Monthly close", href: "/production", icon: CheckCircle2 };
-    secondary = { label: "View P&L", tab: "pl", icon: FileText };
+    // View P&L removed (Mike 2026-07-21) — the financials are one tab click
+    // away; a second CTA here was noise.
   }
 
   const statusLabel = status ? LIFECYCLE_META[status]?.label : null;
@@ -150,9 +199,20 @@ export function StageBanner({
             >
               {meta.label}
             </span>
-            {statusLabel && (
-              <span className="text-xs font-semibold text-ink-slate">{statusLabel}</span>
-            )}
+            {statusLabel && (() => {
+              const isWaiting = status === "waiting_on_client";
+              const waited = isWaiting && waitingInfo ? waitedFor(waitingInfo.sinceIso) : null;
+              const tip = isWaiting && waitingInfo ? waitingTooltip(waitingInfo) : undefined;
+              return (
+                <span
+                  className={`text-xs font-semibold text-ink-slate ${isWaiting && waitingInfo ? "underline decoration-dotted decoration-gold-border underline-offset-2 cursor-help" : ""}`}
+                  title={tip}
+                >
+                  {statusLabel}
+                  {waited && <span className="text-gold-deep"> · {waited === "today" ? "today" : waited}</span>}
+                </span>
+              );
+            })()}
           </div>
           <div className="mt-1 text-sm font-semibold text-navy">{title}</div>
           <p className="text-xs text-ink-slate mt-0.5 max-w-2xl">{hint}</p>
