@@ -55,12 +55,14 @@ export function StatementsCard({ clientLinkId }: { clientLinkId: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ path: string; name: string } | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Per-account groups are COLLAPSED by default — track which ones the user has
+  // opened. Empty set = everything collapsed (the default on load).
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function toggleGroup(key: string) {
-    setCollapsed((prev) => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
@@ -203,7 +205,7 @@ export function StatementsCard({ clientLinkId }: { clientLinkId: string }) {
                 <div className="space-y-2">
                   {groupKeys.map((key) => {
                     const rows = [...groups.get(key)!].sort((a, b) => (sortVal(a) - sortVal(b)) * dir);
-                    const isCollapsed = collapsed.has(key);
+                    const isCollapsed = !expanded.has(key);
                     const last4 = rows.find((r) => r.last4)?.last4;
                     const years = [...new Set(rows.map((r) => r.period_year).filter(Boolean))].sort();
                     const yearSpan = years.length ? (years.length === 1 ? String(years[0]) : `${years[0]}–${years[years.length - 1]}`) : "";

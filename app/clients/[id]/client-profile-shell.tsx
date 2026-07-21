@@ -31,7 +31,6 @@ import {
   Trash2,
   ClipboardCheck,
   StickyNote,
-  RefreshCw,
 } from "lucide-react";
 import { CleanupTab } from "./cleanup-tab";
 import { StageBanner } from "./stage-banner";
@@ -213,14 +212,8 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href={`/jobs/new?client=${clientLink.id}&redo=1`}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:text-navy hover:border-gray-300"
-            title="Re-run COA cleanup — applies the latest master chart and skips the redo confirmation"
-          >
-            <RefreshCw size={13} />
-            Re-run COA Cleanup
-          </Link>
+          {/* Re-run COA Cleanup lives on the Cleanup tab (step 2) — no longer
+              duplicated in this header. */}
           <UrgentFlagButton
             clientLinkId={clientLink.id}
             initialUrgent={!!(clientLink as any).urgent_flag}
@@ -1061,70 +1054,6 @@ function OverviewTab({
           </div>
         )}
       </section>
-
-      {/* SNAP-side summary stats — bank rules + recent jobs. Quick numeric
-          glance that complements the outstanding-work cards above. */}
-      {summary && (
-        <section>
-          <h2 className="text-base font-bold text-navy mb-3">SNAP status</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <StatCard
-              label="Active bank rules"
-              value={summary.activeBankRules}
-              subtext={
-                summary.lastRuleExportAt
-                  ? `Last exported ${new Date(summary.lastRuleExportAt).toLocaleDateString()}`
-                  : "Never exported to QBO"
-              }
-            />
-            <StatCard
-              label="Recent reclass jobs"
-              value={summary.recentReclassJobs.length}
-              subtext={
-                summary.recentReclassJobs[0]
-                  ? `Latest: ${summary.recentReclassJobs[0].status}`
-                  : "No reclass jobs yet"
-              }
-            />
-            <StatCard
-              label="Recent BS cleanups"
-              value={summary.recentCleanups.length}
-              subtext={
-                summary.recentCleanups[0]
-                  ? `Latest: ${summary.recentCleanups[0].status}`
-                  : "No cleanups yet"
-              }
-            />
-          </div>
-          {summary.recentReclassJobs.length > 0 && (
-            <div className="mt-4 bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-              {summary.recentReclassJobs.map((j) => (
-                <Link
-                  key={j.id}
-                  href={`/reclass/${j.id}/review`}
-                  className="flex items-center justify-between px-4 py-2.5 hover:bg-teal-lighter/50 transition-colors"
-                >
-                  <div className="text-sm">
-                    <span className="font-semibold text-navy">
-                      {j.workflow || "reclass"}
-                    </span>
-                    <span className="text-ink-slate mx-2">·</span>
-                    <span className="text-ink-slate">
-                      {j.sourceAccountName || "all accounts"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <StatusPill status={j.status} />
-                    <span className="text-xs text-ink-slate">
-                      {new Date(j.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
 
       {/* Recent activity strip — last 10 events from audit_log */}
       {activity.length > 0 && (

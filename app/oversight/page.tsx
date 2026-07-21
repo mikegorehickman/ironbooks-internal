@@ -2,7 +2,6 @@ import { AppShell } from "@/components/AppShell";
 import { HubTabs } from "@/components/HubTabs";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
-import { BadgeCheck, HeartPulse, Gauge } from "lucide-react";
 import ApprovalsPage from "@/app/approvals/page";
 import AdvisorPage from "@/app/advisor/page";
 import FleetHealthPage from "@/app/fleet/page";
@@ -20,9 +19,9 @@ export const maxDuration = 120;
  * inner page bare). Only the active tab renders.
  */
 const TABS = [
-  { key: "approvals", label: "Approvals", icon: BadgeCheck },
-  { key: "advisor", label: "Advisor", icon: HeartPulse },
-  { key: "fleet", label: "Fleet Health", icon: Gauge },
+  { key: "approvals", label: "Approvals" },
+  { key: "advisor", label: "Advisor" },
+  { key: "fleet", label: "Fleet Health" },
 ];
 
 export default async function OversightPage({

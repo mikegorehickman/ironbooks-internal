@@ -2,7 +2,6 @@ import { AppShell } from "@/components/AppShell";
 import { HubTabs } from "@/components/HubTabs";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
-import { Sun, Inbox, ListTodo } from "lucide-react";
 import TodayPage from "@/app/today/page";
 import InboxPage from "@/app/inbox/page";
 import TasksPage from "@/app/tasks/page";
@@ -17,9 +16,9 @@ export const dynamic = "force-dynamic";
  * Only the active tab renders, so heavy tabs cost nothing until opened.
  */
 const TABS = [
-  { key: "today", label: "Today", icon: Sun },
-  { key: "inbox", label: "Inbox", icon: Inbox },
-  { key: "tasks", label: "Tasks", icon: ListTodo },
+  { key: "today", label: "Today" },
+  { key: "inbox", label: "Inbox" },
+  { key: "tasks", label: "Tasks" },
 ];
 
 export default async function HomePage({
