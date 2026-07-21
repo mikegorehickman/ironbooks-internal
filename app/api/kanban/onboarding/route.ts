@@ -94,11 +94,14 @@ export async function GET(request: Request) {
     ruleCountMap.set(r.client_link_id, (ruleCountMap.get(r.client_link_id) || 0) + 1);
   }
 
-  // Bookkeeper names
+  // Bookkeeper names — STAFF only. Portal clients are also rows in `users`
+  // (role 'client'), so without a role filter they leaked into the Cleanup
+  // board's assignee dropdown. Restrict to the roles that actually do cleanup.
   const { data: bookkeepers } = await service
     .from("users")
     .select("id, full_name, avatar_url")
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .in("role", ["admin", "lead", "bookkeeper"]);
 
   const bkById = new Map((bookkeepers || []).map((b) => [b.id, b]));
 
