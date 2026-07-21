@@ -325,12 +325,19 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
                 Waiting on client{waited ? ` · ${waited === "today" ? "today" : waited}` : ""}
               </span>
             )}
+            <span
+              title={isCA ? "Canada" : "United States"}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-slate bg-gray-50 border border-gray-200 rounded-full px-2 py-0.5"
+            >
+              <span className="text-sm leading-none">{isCA ? "🇨🇦" : "🇺🇸"}</span>
+              {isCA ? "CA" : "US"}
+            </span>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={() => setSendEmailOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-navy hover:border-teal hover:text-teal transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-teal/40 bg-teal-lighter px-3 py-2 text-sm font-semibold text-teal-dark hover:bg-teal-light hover:border-teal transition-colors"
             >
               <Mail size={14} /> Send email
             </button>
@@ -1171,10 +1178,18 @@ function MessagesAndNotesTab({
     <div className="space-y-6">
       <MessagesPanel clientLinkId={clientLinkId} canSend={canSend} />
       <NotesPanel clientLinkId={clientLinkId} />
-      <div>
-        <h2 className="text-base font-bold text-navy mb-3">Recent activity</h2>
-        <ActivityTab activity={activity} />
-      </div>
+      {/* Recent activity — collapsed by default; it's reference, not the point
+          of this tab, so it stays out of the way until expanded. */}
+      <details className="group rounded-xl border border-gray-200 bg-white">
+        <summary className="flex items-center gap-2 cursor-pointer select-none text-sm font-bold text-navy px-4 py-3 list-none">
+          <ChevronRight size={15} className="text-ink-slate transition-transform group-open:rotate-90" />
+          Recent activity
+          {activity.length > 0 && <span className="text-xs font-normal text-ink-light">({activity.length})</span>}
+        </summary>
+        <div className="px-2 pb-2">
+          <ActivityTab activity={activity} />
+        </div>
+      </details>
     </div>
   );
 }
@@ -1364,7 +1379,6 @@ function OverviewTab({
           <EmailHistoryPanel
             clientLinkId={clientLink.id}
             onSendEmail={() => onSendEmail?.()}
-            onOpenActivity={() => onOpenActivity?.()}
           />
         </div>
       </div>
@@ -1790,7 +1804,7 @@ function PLTab({
 
   const incomeRows = filtered
     .filter((r) => r.classification === "Revenue")
-    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   // Match COGS by full type OR QBO's abbreviated report group ("COGS") — a
   // deleted account that isn't in the active account list falls back to the
   // report's group key, which reads "COGS", so a "cost of goods sold"-only
@@ -1798,10 +1812,10 @@ function PLTab({
   const isCogsType = (t: string) => /cost of goods sold|\bcogs\b/i.test(t || "");
   const cogsRows = filtered
     .filter((r) => r.classification === "Expense" && isCogsType(r.accountType))
-    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   const expenseRows = filtered
     .filter((r) => r.classification === "Expense" && !isCogsType(r.accountType))
-    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 
   // Gross profit + margins for the KPI band (same bands as the month-end
   // red-flag gate: COGS 20–65% → gross margin 35–80%; net margin 10–35%).
@@ -1912,17 +1926,33 @@ function PLTab({
             <MarginBadge label="Net margin" pct={netMarginPct} band="10–35%" flag={netFlag} />
           </div>
 
-          <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} income={pl.totalIncome} onDrill={onDrill} />
-          {cogsRows.length > 0 && (
-            <PLSection
-              title="Cost of Goods Sold (COGS)"
-              rows={cogsRows}
-              total={cogsTotal}
-              income={pl.totalIncome}
-              onDrill={onDrill}
-            />
-          )}
-          <PLSection title="Operating Expenses" rows={expenseRows} total={pl.totalExpenses} income={pl.totalIncome} onDrill={onDrill} />
+          {/* Statement body — constrained to a readable statement width so the
+              account name and its number sit close together (like the client
+              portal view), not stretched to opposite edges of the screen. */}
+          <div className="max-w-2xl space-y-3">
+            <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} income={pl.totalIncome} onDrill={onDrill} />
+            {cogsRows.length > 0 && (
+              <PLSection
+                title="Cost of Goods Sold (COGS)"
+                rows={cogsRows}
+                total={cogsTotal}
+                income={pl.totalIncome}
+                onDrill={onDrill}
+              />
+            )}
+            <PLSection title="Operating Expenses" rows={expenseRows} total={pl.totalExpenses} income={pl.totalIncome} onDrill={onDrill} />
+
+            {/* Net profit — the bottom line of the statement. */}
+            <div className={`flex items-center justify-between rounded-xl border-2 px-4 py-3 ${pl.netIncome < 0 ? "border-[#954E44]/40 bg-[#954E44]/5" : "border-teal/40 bg-teal-lighter/40"}`}>
+              <div className="text-sm font-black uppercase tracking-wide text-navy">Net Profit</div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className={`font-mono text-base font-black tabular-nums ${pl.netIncome < 0 ? "text-[#954E44]" : "text-navy"}`}>
+                  {formatCurrency(pl.netIncome)}
+                </div>
+                <div className="font-mono text-xs text-teal-dark font-bold w-14 text-right">{pctOfIncomeLabel(pl.netIncome, pl.totalIncome)}</div>
+              </div>
+            </div>
+          </div>
         </>
       )}
     </div>
@@ -1995,6 +2025,9 @@ function PLSection({
           rows.map((r, i) => {
             const isZero = Math.abs(r.amount) < 0.005;
             const clickable = !!r.accountId;
+            // Sub-accounts are indented under their parent — depth = number of
+            // ":" segments in the QBO fully-qualified name.
+            const depth = Math.max(0, r.name.split(":").length - 1);
             return (
               <button
                 key={`${r.accountId || r.name}-${i}`}
@@ -2007,11 +2040,17 @@ function PLSection({
                 } ${isZero ? "opacity-60" : ""}`}
                 title={`${r.name}${clickable ? " — click to see transactions" : " (no account ID — can't drill)"}`}
               >
-                <div className="text-navy truncate pr-2 flex-1 min-w-0">
-                  {/* Leaf name only — "Marketing:Marketing Tools" next to a
-                      parent-direct "Marketing" row read as a duplicate (Lisa,
-                      2026-07-21). Full path stays in the hover title. */}
-                  {r.name.split(":").pop()}
+                <div
+                  className="truncate pr-2 flex-1 min-w-0"
+                  style={{ paddingLeft: depth * 18 }}
+                >
+                  {/* Leaf name only, indented by depth — "Marketing:Marketing
+                      Tools" shows as an indented "Marketing Tools" under
+                      "Marketing". Full path stays in the hover title. */}
+                  <span className={depth > 0 ? "text-ink-slate" : "text-navy"}>
+                    {depth > 0 && <span className="text-ink-light mr-1">└</span>}
+                    {r.name.split(":").pop()}
+                  </span>
                   <span className="text-[10px] text-ink-slate ml-2 font-normal">
                     {r.accountType}
                   </span>

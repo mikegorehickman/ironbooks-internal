@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, StickyNote, Trash2, Plus } from "lucide-react";
+import { Loader2, StickyNote, Trash2, Plus, UserCheck } from "lucide-react";
 
 interface Note {
   id: string;
@@ -9,12 +9,20 @@ interface Note {
   created_at: string;
   author_id: string;
   author: string;
+  assignee_id?: string | null;
+  assignee?: string | null;
+  assignee_done_at?: string | null;
 }
+interface TeamMember { id: string; name: string }
 
-/** Internal per-client notes — free-form, newest first. Never client-visible. */
+/** Internal per-client notes — free-form, newest first. Never client-visible.
+ *  A note can be assigned to a teammate; it then shows on their Home until
+ *  they mark it done. */
 export function NotesPanel({ clientLinkId }: { clientLinkId: string }) {
   const [notes, setNotes] = useState<Note[] | null>(null);
+  const [team, setTeam] = useState<TeamMember[]>([]);
   const [draft, setDraft] = useState("");
+  const [assignTo, setAssignTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -22,7 +30,7 @@ export function NotesPanel({ clientLinkId }: { clientLinkId: string }) {
     try {
       const res = await fetch(`/api/clients/${clientLinkId}/notes`);
       const j = await res.json();
-      if (res.ok) setNotes(j.notes || []);
+      if (res.ok) { setNotes(j.notes || []); setTeam(j.team || []); }
       else setError(j.error || "Failed to load notes");
     } catch (e: any) {
       setError(e.message);
@@ -37,11 +45,11 @@ export function NotesPanel({ clientLinkId }: { clientLinkId: string }) {
       const res = await fetch(`/api/clients/${clientLinkId}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: draft.trim() }),
+        body: JSON.stringify({ body: draft.trim(), assignee_id: assignTo || null }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to save");
-      setDraft("");
+      setDraft(""); setAssignTo("");
       await load();
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
@@ -63,24 +71,42 @@ export function NotesPanel({ clientLinkId }: { clientLinkId: string }) {
         </h3>
         <p className="text-xs text-ink-slate mt-0.5">
           Internal team notes for this client — context, quirks, promises made. Never visible to the client.
+          Assign one to a teammate and it shows on their Home.
         </p>
       </div>
       <div className="p-5 space-y-3">
-        <div className="flex items-start gap-2">
+        <div className="space-y-2">
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={2}
             placeholder="Add a note… (e.g. prefers text over email; CPA is Smith & Co; promised statements by the 5th)"
-            className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none"
+            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 focus:border-teal outline-none"
           />
-          <button
-            onClick={add}
-            disabled={busy || !draft.trim()}
-            className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark disabled:opacity-50 text-white text-xs font-bold px-3 py-2 rounded-lg"
-          >
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Add
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-slate">
+              <UserCheck size={13} className="text-ink-light" />
+              Assign to
+              <select
+                value={assignTo}
+                onChange={(e) => setAssignTo(e.target.value)}
+                className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 bg-white focus:border-teal outline-none"
+              >
+                <option value="">No one (just a note)</option>
+                {team.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              onClick={add}
+              disabled={busy || !draft.trim()}
+              className="ml-auto inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark disabled:opacity-50 text-white text-xs font-bold px-3 py-2 rounded-lg"
+            >
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+              {assignTo ? "Add & assign" : "Add"}
+            </button>
+          </div>
         </div>
         {error && <div className="text-xs text-red-700">{error}</div>}
 
@@ -96,8 +122,19 @@ export function NotesPanel({ clientLinkId }: { clientLinkId: string }) {
               <div key={n.id} className="py-2.5 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-navy whitespace-pre-wrap">{n.body}</div>
-                  <div className="text-[11px] text-ink-light mt-1">
-                    {n.author} · {new Date(n.created_at).toLocaleString()}
+                  <div className="text-[11px] text-ink-light mt-1 flex items-center gap-1.5 flex-wrap">
+                    <span>{n.author} · {new Date(n.created_at).toLocaleString()}</span>
+                    {n.assignee && (
+                      <span
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-semibold ${
+                          n.assignee_done_at
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-teal-light text-teal-dark"
+                        }`}
+                      >
+                        <UserCheck size={10} /> {n.assignee_done_at ? `done · ${n.assignee}` : `for ${n.assignee}`}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <button onClick={() => remove(n.id)} className="p-1 text-ink-light hover:text-red-600 flex-shrink-0" title="Delete note">

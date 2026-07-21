@@ -10,6 +10,7 @@ import { ReclassRequestsWidget, type PendingReclassRequest } from "./reclass-req
 import { ClientInboxWidget, type InboundCommRow } from "./client-inbox-widget";
 import { CleanupDeadlinesWidget, type CleanupDeadlineRow } from "./cleanup-deadlines-widget";
 import { ClientAnswersWidget } from "./client-answers-widget";
+import { AssignedNotesWidget } from "./assigned-notes-widget";
 import { DuplicatesPanel } from "@/components/DuplicatesPanel";
 import { getClientAnswers, type ClientAnswerRow } from "@/lib/client-answers";
 import { QboHealthAlert } from "@/components/QboHealthAlert";
@@ -91,6 +92,28 @@ export default async function TodayPage({
     .select("client_link_id, period, review_notes, rejected_at, client_links!inner(client_name, assigned_bookkeeper_id, is_active)")
     .eq("status", "failed_review")
     .order("rejected_at", { ascending: false });
+
+  // Notes a teammate assigned to the person whose Home this is (migration 141).
+  // Shown until they clear it. Tolerant of the migration not being applied yet.
+  const notesAssignee = scopeUserId || user.id;
+  let assignedNotes: any[] = [];
+  try {
+    const { data: an } = await (service as any)
+      .from("client_notes")
+      .select("id, body, created_at, client_link_id, author:author_id(full_name, email), client_links!inner(client_name)")
+      .eq("assignee_id", notesAssignee)
+      .is("assignee_done_at", null)
+      .order("created_at", { ascending: false })
+      .limit(25);
+    assignedNotes = ((an as any[]) || []).map((n) => ({
+      id: n.id,
+      body: n.body,
+      created_at: n.created_at,
+      client_link_id: n.client_link_id,
+      client_name: n.client_links?.client_name || "Client",
+      author: n.author?.full_name || n.author?.email || "—",
+    }));
+  } catch { /* pre-migration — no assignee column yet */ }
 
   // ── "This week" wins — home should show progress, not only pressure. ──
   // Scoped like everything else: bookkeepers see their own wins, seniors see
@@ -547,6 +570,7 @@ export default async function TodayPage({
   // don't count it toward the personal "Your work" total in that case.
   const workCount =
     rejectedForRework.length +
+    assignedNotes.length +
     pendingFlags.length +
     pendingReclassRequests.length +
     clientAnswers.length +
@@ -665,6 +689,8 @@ export default async function TodayPage({
                   </div>
                 </div>
               )}
+              {/* Notes a teammate assigned to you — personal to-dos, near the top. */}
+              <AssignedNotesWidget notes={assignedNotes} />
               {/* Client-waiting items first (a human is blocked on a reply),
                   then your cleanup deadlines. Each widget self-manages its
                   resolve state and hides at zero rows. */}

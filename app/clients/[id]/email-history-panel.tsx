@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, X as XIcon, ArrowRight, Mail } from "lucide-react";
+import { Loader2, X as XIcon, Mail, Send } from "lucide-react";
 
 /**
  * Email history — every client-facing email we've logged for this client
@@ -9,7 +9,8 @@ import { Loader2, X as XIcon, ArrowRight, Mail } from "lucide-react";
  * Resend webhook (migration 93 + 107). Replaces the old "recent activity" strip
  * on the Overview: the question a bookkeeper actually has is "did they see what
  * we sent?" A row opens the actual sent email (pulled back from Resend by
- * provider_message_id via /email-log/[logId]).
+ * provider_message_id via /email-log/[logId]); "All emails" shows the full
+ * history, not just the latest few.
  */
 
 interface EmailRow {
@@ -40,7 +41,6 @@ const TYPE_LABEL: Record<string, string> = {
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "2-digit" });
 
-/** Tracking pill — the whole point of this panel. */
 function trackPill(e: EmailRow): { label: string; cls: string } {
   if (e.status === "bounced" || e.status === "complained")
     return { label: "Bounced", cls: "bg-red-50 text-[#954E44] border border-red-100" };
@@ -55,20 +55,36 @@ function trackPill(e: EmailRow): { label: string; cls: string } {
   return { label: "Sent", cls: "bg-gray-50 text-ink-slate border border-gray-200" };
 }
 
+function EmailRowButton({ e, onOpen }: { e: EmailRow; onOpen: () => void }) {
+  const pill = trackPill(e);
+  return (
+    <button
+      onClick={onOpen}
+      className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-gray-50/70 transition-colors"
+      title="View the sent email"
+    >
+      <span className="text-xs text-ink-light tabular-nums w-12 shrink-0">{fmtDate(e.created_at)}</span>
+      <span className="text-sm text-navy truncate flex-1 min-w-0">
+        {e.subject || TYPE_LABEL[e.email_type] || "(no subject)"}
+      </span>
+      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${pill.cls}`}>{pill.label}</span>
+    </button>
+  );
+}
+
 export function EmailHistoryPanel({
   clientLinkId,
   onSendEmail,
-  onOpenActivity,
 }: {
   clientLinkId: string;
   onSendEmail: () => void;
-  onOpenActivity?: () => void;
 }) {
   const [emails, setEmails] = useState<EmailRow[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   const load = () => {
-    fetch(`/api/clients/${clientLinkId}/email-log?limit=12`)
+    fetch(`/api/clients/${clientLinkId}/email-log?limit=8`)
       .then((r) => (r.ok ? r.json() : { emails: [] }))
       .then((j) => setEmails(j.emails || []))
       .catch(() => setEmails([]));
@@ -79,14 +95,15 @@ export function EmailHistoryPanel({
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
         <h2 className="text-sm font-bold text-navy uppercase tracking-wider">Email history</h2>
-        <div className="ml-auto flex items-center gap-3">
-          {onOpenActivity && (
-            <button onClick={onOpenActivity} className="text-xs font-semibold text-teal hover:text-teal-dark">
-              Activity →
-            </button>
-          )}
-          <button onClick={onSendEmail} className="text-xs font-semibold text-teal hover:text-teal-dark">
-            Send email →
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setShowAll(true)} className="text-xs font-semibold text-teal hover:text-teal-dark">
+            All emails →
+          </button>
+          <button
+            onClick={onSendEmail}
+            className="inline-flex items-center gap-1 rounded-lg bg-teal px-2.5 py-1 text-xs font-bold text-white hover:bg-teal-dark"
+          >
+            <Send size={11} /> Send email
           </button>
         </div>
       </div>
@@ -104,37 +121,90 @@ export function EmailHistoryPanel({
           </button>
         </div>
       ) : (
-        <ul className="divide-y divide-gray-100">
-          {emails.map((e) => {
-            const pill = trackPill(e);
-            return (
+        <>
+          <ul className="divide-y divide-gray-100">
+            {emails.map((e) => (
               <li key={e.id}>
-                <button
-                  onClick={() => setOpenId(e.id)}
-                  className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-gray-50/70 transition-colors"
-                  title="View the sent email"
-                >
-                  <span className="text-xs text-ink-light tabular-nums w-12 shrink-0">{fmtDate(e.created_at)}</span>
-                  <span className="text-sm text-navy truncate flex-1 min-w-0">
-                    {e.subject || TYPE_LABEL[e.email_type] || "(no subject)"}
-                  </span>
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${pill.cls}`}>
-                    {pill.label}
-                  </span>
-                </button>
+                <EmailRowButton e={e} onOpen={() => setOpenId(e.id)} />
               </li>
-            );
-          })}
-        </ul>
+            ))}
+          </ul>
+          <button
+            onClick={() => setShowAll(true)}
+            className="w-full text-center py-2.5 text-xs font-semibold text-teal hover:text-teal-dark border-t border-gray-100"
+          >
+            See all emails →
+          </button>
+        </>
       )}
 
       {openId && (
-        <ViewEmailModal
+        <ViewEmailModal clientLinkId={clientLinkId} logId={openId} onClose={() => setOpenId(null)} />
+      )}
+      {showAll && (
+        <AllEmailsModal
           clientLinkId={clientLinkId}
-          logId={openId}
-          onClose={() => setOpenId(null)}
+          onClose={() => setShowAll(false)}
+          onOpen={(id) => { setShowAll(false); setOpenId(id); }}
+          onSendEmail={() => { setShowAll(false); onSendEmail(); }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── All emails (full history) ─────────────────────────────────────────────
+
+function AllEmailsModal({
+  clientLinkId,
+  onClose,
+  onOpen,
+  onSendEmail,
+}: {
+  clientLinkId: string;
+  onClose: () => void;
+  onOpen: (id: string) => void;
+  onSendEmail: () => void;
+}) {
+  const [emails, setEmails] = useState<EmailRow[] | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/clients/${clientLinkId}/email-log?limit=100`)
+      .then((r) => (r.ok ? r.json() : { emails: [] }))
+      .then((j) => setEmails(j.emails || []))
+      .catch(() => setEmails([]));
+  }, [clientLinkId]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(11,29,46,0.32)" }} onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+          <h3 className="text-sm font-bold text-navy uppercase tracking-wider">All emails</h3>
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={onSendEmail} className="inline-flex items-center gap-1 rounded-lg bg-teal px-2.5 py-1 text-xs font-bold text-white hover:bg-teal-dark">
+              <Send size={11} /> Send email
+            </button>
+            <button onClick={onClose} className="text-ink-light hover:text-navy" aria-label="Close"><XIcon size={16} /></button>
+          </div>
+        </div>
+        <div className="overflow-y-auto">
+          {emails === null ? (
+            <div className="flex items-center justify-center gap-2 text-sm text-ink-slate py-10">
+              <Loader2 size={15} className="animate-spin text-teal" /> Loading…
+            </div>
+          ) : emails.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-ink-slate">No emails sent yet.</div>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {emails.map((e) => (
+                <li key={e.id}>
+                  <EmailRowButton e={e} onOpen={() => onOpen(e.id)} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -167,30 +237,19 @@ function ViewEmailModal({
   const resend = data?.resend;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(11,29,46,0.32)" }}
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
-        onClick={(ev) => ev.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(11,29,46,0.32)" }} onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col" onClick={(ev) => ev.stopPropagation()}>
         <div className="px-5 py-3 border-b border-gray-100 flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light">Sent email</div>
-            <div className="text-sm font-bold text-navy truncate">
-              {resend?.subject || stored?.subject || "(no subject)"}
-            </div>
+            <div className="text-sm font-bold text-navy truncate">{resend?.subject || stored?.subject || "(no subject)"}</div>
             <div className="text-[11px] text-ink-slate mt-0.5">
               To {stored?.to_address}
               {stored?.created_at ? ` · ${new Date(stored.created_at).toLocaleString()}` : ""}
               {stored?.opened_at ? " · opened" : stored?.delivered_at ? " · delivered" : ""}
             </div>
           </div>
-          <button onClick={onClose} className="text-ink-light hover:text-navy shrink-0" aria-label="Close">
-            <XIcon size={16} />
-          </button>
+          <button onClick={onClose} className="text-ink-light hover:text-navy shrink-0" aria-label="Close"><XIcon size={16} /></button>
         </div>
         <div className="overflow-y-auto p-5">
           {!data && !error ? (
@@ -198,19 +257,14 @@ function ViewEmailModal({
               <Loader2 size={15} className="animate-spin text-teal" /> Loading the email…
             </div>
           ) : resend?.html ? (
-            <div
-              className="text-sm [&_img]:max-w-full"
-              dangerouslySetInnerHTML={{ __html: resend.html }}
-            />
+            <div className="text-sm [&_img]:max-w-full" dangerouslySetInnerHTML={{ __html: resend.html }} />
           ) : resend?.text ? (
             <pre className="text-sm whitespace-pre-wrap font-sans text-navy">{resend.text}</pre>
           ) : (
             <div className="text-sm text-ink-slate">
               <p className="mb-2">The email body isn't retrievable{error ? ":" : "."}</p>
               {error && <p className="text-xs text-ink-light">{error}</p>}
-              <p className="text-xs text-ink-light mt-2">
-                Subject and delivery status are still tracked above.
-              </p>
+              <p className="text-xs text-ink-light mt-2">Subject and delivery status are still tracked above.</p>
             </div>
           )}
         </div>
