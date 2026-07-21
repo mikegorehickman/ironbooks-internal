@@ -163,18 +163,25 @@ interface Props {
   lifecycleStatus?: LifecycleStatus | null;
 }
 
-type TabId = "overview" | "cleanup" | "profile" | "billing" | "pl" | "bs" | "bank" | "notes" | "activity";
+type TabId = "overview" | "cleanup" | "financials" | "profile" | "billing" | "notes";
+type FinView = "pl" | "bs" | "bank";
 
+// Nine tabs was a source of "which do I open?" busy-ness. The three financial
+// views collapse into one Financials tab (sub-toggle inside), and Activity
+// folds into Overview's recent-activity strip.
 const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: "overview", label: "Overview", icon: Activity },
   { id: "cleanup", label: "Cleanup", icon: ClipboardCheck },
+  { id: "financials", label: "Financials", icon: FileText },
   { id: "profile", label: "Profile", icon: Building2 },
   { id: "billing", label: "Billing", icon: CreditCard },
+  { id: "notes", label: "Notes", icon: StickyNote },
+];
+
+const FIN_VIEWS: { id: FinView; label: string; icon: any }[] = [
   { id: "pl", label: "P&L", icon: FileText },
   { id: "bs", label: "Balance Sheet", icon: Scale },
   { id: "bank", label: "Bank Balances", icon: Banknote },
-  { id: "notes", label: "Notes", icon: StickyNote },
-  { id: "activity", label: "Activity", icon: Clock },
 ];
 
 export function ClientProfileShell({ clientLink, actorRole, overview, financials, onboarding, bsCleanupOwed, macroStage, lifecycleStatus }: Props) {
@@ -184,6 +191,21 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
   const [activeTab, setActiveTab] = useState<TabId>(
     macroStage === "cleanup" ? "cleanup" : "overview"
   );
+  // Which financial view is showing inside the Financials tab.
+  const [finView, setFinView] = useState<FinView>("pl");
+  // Nav shim: StageBanner / CleanupTab still ask for the old tab ids
+  // (pl / bs / bank / activity). Map them onto the consolidated tabs so those
+  // links keep working after the merge.
+  const navTo = (tab: string) => {
+    if (tab === "pl" || tab === "bs" || tab === "bank") {
+      setFinView(tab);
+      setActiveTab("financials");
+    } else if (tab === "activity") {
+      setActiveTab("overview");
+    } else {
+      setActiveTab(tab as TabId);
+    }
+  };
   const canImpersonate = actorRole === "admin" || actorRole === "lead";
 
   // Drill-down drawer state — shared across P&L and BS tabs. Holds the
@@ -236,7 +258,7 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           status={lifecycleStatus}
           clientLinkId={clientLink.id}
           canReject={canImpersonate}
-          onGoToTab={(tab) => setActiveTab(tab as TabId)}
+          onGoToTab={navTo}
         />
       )}
 
@@ -272,6 +294,8 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           onboarding={onboarding}
           bsCleanupOwed={bsCleanupOwed}
           canSendMessages={actorRole !== "viewer"}
+          macroStage={macroStage ?? null}
+          onGoToTab={navTo}
         />
       )}
       {activeTab === "cleanup" && (
@@ -281,82 +305,98 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
           cleanupCompletedAt={clientLink.cleanup_completed_at || null}
           initialSequence={clientLink.cleanup_sequence ?? null}
           stage={macroStage ?? null}
-          onNavigateTab={(tab) => setActiveTab(tab)}
+          onNavigateTab={navTo}
         />
       )}
       {activeTab === "profile" && (
         <ProfileTab clientLink={clientLink} onboarding={onboarding} actorRole={actorRole} />
       )}
       {activeTab === "billing" && <BillingTab clientLinkId={clientLink.id} />}
-      {activeTab === "pl" && (
-        <div className="space-y-3">
-          {canImpersonate && (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
-              <span className="text-xs text-ink-slate">
-                This is the bookkeeper view (COA check). Preview the exact P&amp;L the client sees in their portal.
-              </span>
-              <ViewAsClientButton
+      {activeTab === "financials" && (
+        <div className="space-y-4">
+          {/* Sub-toggle — P&L / Balance Sheet / Bank Balances live together
+              now; three top-level tabs collapsed into one. */}
+          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 gap-1">
+            {FIN_VIEWS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setFinView(id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                  finView === id ? "bg-teal text-white" : "text-ink-slate hover:text-navy hover:bg-gray-50"
+                }`}
+              >
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+          </div>
+
+          {finView === "pl" && (
+            <div className="space-y-3">
+              {canImpersonate && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+                  <span className="text-xs text-ink-slate">
+                    This is the bookkeeper view (COA check). Preview the exact P&amp;L the client sees in their portal.
+                  </span>
+                  <ViewAsClientButton
+                    clientLinkId={clientLink.id}
+                    portalPath="/portal/profit-loss"
+                    label="See client's P&L"
+                    title="Open the client's portal P&L in a new tab — exactly what they see"
+                  />
+                </div>
+              )}
+              <PLTab
+                financials={financials}
                 clientLinkId={clientLink.id}
-                portalPath="/portal/profit-loss"
-                label="See client's P&L"
-                title="Open the client's portal P&L in a new tab — exactly what they see"
+                onDrill={(accountId, accountName) =>
+                  setDrill({
+                    accountId,
+                    accountName,
+                    kind: "pl",
+                    start: financials.overview?.primaryMonth.start || "",
+                    end: financials.overview?.primaryMonth.end || "",
+                  })
+                }
               />
             </div>
           )}
-          <PLTab
-            financials={financials}
-            clientLinkId={clientLink.id}
-            onDrill={(accountId, accountName) =>
-              setDrill({
-                accountId,
-                accountName,
-                kind: "pl",
-                start: financials.overview?.primaryMonth.start || "",
-                end: financials.overview?.primaryMonth.end || "",
-              })
-            }
-          />
-        </div>
-      )}
-      {activeTab === "bs" && (
-        <div className="space-y-3">
-          {canImpersonate && (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
-              <span className="text-xs text-ink-slate">
-                Preview the exact Balance Sheet the client sees in their portal.
-              </span>
-              <ViewAsClientButton
+
+          {finView === "bs" && (
+            <div className="space-y-3">
+              {canImpersonate && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+                  <span className="text-xs text-ink-slate">
+                    Preview the exact Balance Sheet the client sees in their portal.
+                  </span>
+                  <ViewAsClientButton
+                    clientLinkId={clientLink.id}
+                    portalPath="/portal/balance-sheet"
+                    label="See client's Balance Sheet"
+                    title="Open the client's portal Balance Sheet in a new tab — exactly what they see"
+                  />
+                </div>
+              )}
+              <BSTab
+                financials={financials}
                 clientLinkId={clientLink.id}
-                portalPath="/portal/balance-sheet"
-                label="See client's Balance Sheet"
-                title="Open the client's portal Balance Sheet in a new tab — exactly what they see"
+                onDrill={(accountId, accountName) =>
+                  setDrill({
+                    accountId,
+                    accountName,
+                    kind: "bs",
+                    start: ymdDaysAgo(90),
+                    end: ymdToday(),
+                  })
+                }
               />
             </div>
           )}
-          <BSTab
-            financials={financials}
-            clientLinkId={clientLink.id}
-            onDrill={(accountId, accountName) =>
-              setDrill({
-                accountId,
-                accountName,
-                kind: "bs",
-                // BS drill defaults to last 90 days of activity hitting the
-                // account — gives the bookkeeper context without flooding
-                // them with multi-year history on the first click.
-                start: ymdDaysAgo(90),
-                end: ymdToday(),
-              })
-            }
-          />
+
+          {finView === "bank" && <BankTab financials={financials} clientLinkId={clientLink.id} />}
         </div>
       )}
-      {activeTab === "bank" && <BankTab financials={financials} clientLinkId={clientLink.id} />}
 
       {activeTab === "notes" && <NotesPanel clientLinkId={clientLink.id} />}
-      {activeTab === "activity" && (
-        <ActivityTab activity={overview.activity} />
-      )}
 
       {drill && (
         <DrillDrawer
@@ -901,6 +941,8 @@ function OverviewTab({
   onboarding,
   bsCleanupOwed,
   canSendMessages,
+  macroStage,
+  onGoToTab,
 }: {
   clientLink: ClientLink;
   overview: OverviewBundle;
@@ -908,6 +950,8 @@ function OverviewTab({
   onboarding?: OnboardingProfile | null;
   bsCleanupOwed?: boolean;
   canSendMessages?: boolean;
+  macroStage?: "onboarding" | "cleanup" | "production" | null;
+  onGoToTab?: (tab: string) => void;
 }) {
   const { outstanding, summary, activity, progress } = overview;
 
@@ -939,6 +983,44 @@ function OverviewTab({
         <div className="flex items-center gap-2 rounded-lg border border-gold-border bg-gold-tint px-3 py-2 text-[13px] text-[#7c5210]">
           <AlertTriangle size={14} className="flex-shrink-0" />
           <span><strong>Balance-sheet cleanup deferred</strong> — still owed. Mark it done from the Clients table once complete.</span>
+        </div>
+      )}
+
+      {/* ── STAGE FOCUS ── a per-stage framing card so Overview reads
+          differently for an onboarding vs cleanup vs production client. The
+          thin StageBanner above the tabs carries the one CTA; this gives the
+          supporting "what this stage is about" detail. */}
+      {macroStage === "onboarding" && (
+        <div className="rounded-xl border border-teal-border bg-teal-light/50 p-4">
+          <div className="text-sm font-bold text-navy">Getting set up</div>
+          <ul className="mt-2 space-y-1.5 text-[13px] text-ink-slate">
+            <li className="flex items-center gap-2">
+              <span className={`w-1.5 h-1.5 rounded-full ${qboStatus === "connected" ? "bg-emerald-500" : "bg-gold"}`} />
+              QuickBooks {qboStatus === "connected" ? "connected" : "— connect it to begin"}
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-ink-light" />
+              Review the client's foundation intake on the <button onClick={() => onGoToTab?.("profile")} className="font-semibold text-teal-dark hover:text-navy underline decoration-dotted">Profile</button> tab
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-ink-light" />
+              Once QBO is connected and the intake's in, this client moves to Cleanup.
+            </li>
+          </ul>
+        </div>
+      )}
+      {macroStage === "cleanup" && (
+        <div className="rounded-xl border border-teal-border bg-teal-light/50 p-4 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-bold text-navy">In cleanup</div>
+            <p className="text-[13px] text-ink-slate mt-0.5">Work the 8-step sequence — it remembers where you left off.</p>
+          </div>
+          <button
+            onClick={() => onGoToTab?.("cleanup")}
+            className="inline-flex items-center gap-1.5 bg-navy hover:bg-navy-deep text-white text-xs font-semibold px-3.5 py-2 rounded-md flex-shrink-0 transition-colors"
+          >
+            Open cleanup sequence →
+          </button>
         </div>
       )}
 
