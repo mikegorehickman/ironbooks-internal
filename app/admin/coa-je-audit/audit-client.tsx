@@ -63,7 +63,7 @@ export function CoaJeAuditClient() {
 
   async function reverse(id: string, clientName: string) {
     const r = results[id] as ScanResult;
-    if (!r || "error" in r || r.rows.length === 0) return;
+    if (!r || !("rows" in r) || r.rows.length === 0) return;
     const ok = window.confirm(
       `DELETE ${r.rows.length} merge journal entr${r.rows.length === 1 ? "y" : "ies"} for ${clientName} in QuickBooks?\n\n` +
       `This is a live, destructive change. After deleting, you'll get a checklist to finish each consolidation with a native QBO account merge (which restores the transaction detail).`
@@ -90,11 +90,11 @@ export function CoaJeAuditClient() {
   const done = clients.filter((c) => results[c.id]);
   const withHits = done.filter((c) => {
     const r = results[c.id] as ScanResult;
-    return r && !("error" in r) && r.matched_count > 0;
+    return r && "rows" in r && r.matched_count > 0;
   });
   const fleetTotal = done.reduce((s, c) => {
     const r = results[c.id] as ScanResult;
-    return s + (r && !("error" in r) ? r.total_affected_amount : 0);
+    return s + (r && "rows" in r ? r.total_affected_amount : 0);
   }, 0);
 
   return (
@@ -129,7 +129,7 @@ export function CoaJeAuditClient() {
         {clients.map((c) => {
           const r = results[c.id] as ScanResult | { error: string } | undefined;
           const isOpen = expanded.has(c.id);
-          const hits = r && !("error" in r) ? r.matched_count : null;
+          const hits = r && "rows" in r ? r.matched_count : null;
           return (
             <div key={c.id}>
               <div className="flex items-center justify-between gap-3 px-4 py-2.5">
@@ -139,13 +139,14 @@ export function CoaJeAuditClient() {
                 >
                   {isOpen ? <ChevronDown size={14} className="text-ink-slate" /> : <ChevronRight size={14} className="text-ink-slate" />}
                   <span className="text-sm font-semibold text-navy truncate">{c.client_name}</span>
-                  {r && ("error" in r ? (
-                    <span className="text-[11px] text-red-600">{r.error}</span>
+                  {r && (!("rows" in r) ? (
+                    <span className="text-[11px] text-red-600">{(r as any).error}</span>
                   ) : (
                     <span className={`text-[11px] font-bold ${hits ? "text-red-700" : "text-emerald-700"}`}>
                       {hits
                         ? `${hits} merge-JE${hits === 1 ? "" : "s"} · ${money(r.total_affected_amount)}`
                         : `clean (scanned ${r.scanned})`}
+                      {r.error ? ` · ⚠ ${r.error}` : ""}
                     </span>
                   ))}
                 </button>
@@ -161,7 +162,7 @@ export function CoaJeAuditClient() {
                   </button>
                 </div>
               </div>
-              {isOpen && r && !("error" in r) && r.rows.length > 0 && (
+              {isOpen && r && "rows" in r && r.rows.length > 0 && (
                 <div className="px-4 pb-2 flex justify-end">
                   <button
                     onClick={() => reverse(c.id, c.client_name)}
@@ -190,7 +191,7 @@ export function CoaJeAuditClient() {
                   </div>
                 </div>
               )}
-              {isOpen && r && !("error" in r) && r.rows.length > 0 && (
+              {isOpen && r && "rows" in r && r.rows.length > 0 && (
                 <div className="px-4 pb-3 overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
@@ -221,7 +222,7 @@ export function CoaJeAuditClient() {
                   </table>
                 </div>
               )}
-              {isOpen && r && !("error" in r) && r.rows.length === 0 && (
+              {isOpen && r && "rows" in r && r.rows.length === 0 && (
                 <div className="px-8 pb-3 text-xs text-ink-light">No merge-JEs on the affected accounts.</div>
               )}
             </div>
