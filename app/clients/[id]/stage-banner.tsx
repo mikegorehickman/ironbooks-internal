@@ -70,10 +70,14 @@ export function StageBanner({
   // Manager Reject (profile) — bounce a cleanup that's in review back to the
   // bookkeeper (Failed Review) with a required note. Same path as the review
   // modal; senior-only, shown only while ready_for_review.
-  const showReject = canReject && stage === "cleanup" && status === "ready_for_review";
+  // Manager Reject is available whenever a file is awaiting manager review —
+  // in BOTH the cleanup review (cleanup_review_state='in_review') and the
+  // production monthly-close review (monthly_rec_runs.status='pending_review').
+  // Each path posts to its own reject endpoint.
+  const showReject = canReject && status === "ready_for_review";
   async function reject() {
     const note = window.prompt(
-      "Reject this cleanup — what does the bookkeeper need to fix?\n(They'll see this note on their Today.)"
+      "Reject — what does the bookkeeper need to fix?\n(They'll see this note on their Today.)"
     );
     if (note === null) return;
     if (!note.trim()) {
@@ -82,11 +86,18 @@ export function StageBanner({
     }
     setRejecting(true);
     try {
-      const res = await fetch(`/api/clients/${clientLinkId}/reject-review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: note.trim() }),
-      });
+      const res =
+        stage === "production"
+          ? await fetch(`/api/clients/${clientLinkId}/monthly-rec`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "reject", notes: note.trim() }),
+            })
+          : await fetch(`/api/clients/${clientLinkId}/reject-review`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ notes: note.trim() }),
+            });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't reject");
       router.refresh();
