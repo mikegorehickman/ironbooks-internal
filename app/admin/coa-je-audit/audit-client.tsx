@@ -11,7 +11,7 @@ interface JeRow {
   lines: JeLine[]; affectedAccounts: string[];
 }
 interface ScanResult {
-  client_name: string; scanned: number; matched_count: number; matched_any_count: number;
+  client_name: string; scanned: number; matched_count: number; affected_subset_count?: number;
   total_affected_amount: number; rows: JeRow[]; error: string | null;
 }
 
@@ -143,7 +143,9 @@ export function CoaJeAuditClient() {
                     <span className="text-[11px] text-red-600">{r.error}</span>
                   ) : (
                     <span className={`text-[11px] font-bold ${hits ? "text-red-700" : "text-emerald-700"}`}>
-                      {hits ? `${hits} merge-JE${hits === 1 ? "" : "s"} · ${money(r.total_affected_amount)}` : "clean"}
+                      {hits
+                        ? `${hits} merge-JE${hits === 1 ? "" : "s"} · ${money(r.total_affected_amount)}`
+                        : `clean (scanned ${r.scanned})`}
                     </span>
                   ))}
                 </button>
@@ -205,7 +207,12 @@ export function CoaJeAuditClient() {
                         <tr key={je.jeId} className="border-t border-gray-50">
                           <td className="py-1 pr-3 whitespace-nowrap text-ink-slate">{je.txnDate}</td>
                           <td className="py-1 pr-3 font-mono text-ink-light">{je.jeId}</td>
-                          <td className="py-1 pr-3 text-navy">{je.affectedAccounts.join(", ")}</td>
+                          <td className="py-1 pr-3 text-navy">
+                            {(je.affectedAccounts.length
+                              ? je.affectedAccounts
+                              : [...new Set((je.lines || []).map((l) => l.accountName).filter(Boolean))]
+                            ).join(", ")}
+                          </td>
                           <td className="py-1 pr-3 text-ink-slate truncate max-w-[240px]" title={je.privateNote}>{je.privateNote}</td>
                           <td className="py-1 pr-3 text-right font-mono text-navy whitespace-nowrap">{money(je.totalAmount)}</td>
                         </tr>
