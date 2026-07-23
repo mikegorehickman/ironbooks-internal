@@ -1223,6 +1223,44 @@ export async function createJournalEntry(
   return data.JournalEntry;
 }
 
+/**
+ * Delete a Journal Entry. Fetches the current JE first (for a fresh SyncToken +
+ * to confirm it still exists), then POSTs operation=delete. Idempotent: a JE
+ * that's already gone returns { alreadyGone: true } rather than throwing.
+ * Returns the fetched JE so the caller can re-verify (memo/date/lines) before
+ * deleting — used by the COA-merge JE reversal.
+ */
+export async function fetchJournalEntry(
+  realmId: string,
+  accessToken: string,
+  jeId: string
+): Promise<any | null> {
+  try {
+    const data = await qboRequest<{ JournalEntry: any }>(
+      realmId, accessToken, `/journalentry/${jeId}?minorversion=70`, { method: "GET" }
+    );
+    return data.JournalEntry || null;
+  } catch (e: any) {
+    if (String(e?.message || "").includes("6240") || String(e?.message || "").toLowerCase().includes("not found")) {
+      return null;
+    }
+    throw e;
+  }
+}
+
+export async function deleteJournalEntry(
+  realmId: string,
+  accessToken: string,
+  jeId: string,
+  syncToken: string
+): Promise<{ deleted: boolean }> {
+  await qboRequest(
+    realmId, accessToken, `/journalentry?operation=delete&minorversion=70`,
+    { method: "POST", body: JSON.stringify({ Id: jeId, SyncToken: syncToken }) }
+  );
+  return { deleted: true };
+}
+
 // ============== V2 HARDCORE CLEANUP — Invoice + Payment writes ==============
 
 /**

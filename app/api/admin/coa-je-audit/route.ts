@@ -3,6 +3,7 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken } from "@/lib/qbo";
 import {
   scanClientForMergeJEs,
+  reverseMergeJEs,
   isExcludedClient,
   MERGE_JE_AFFECTED_ACCOUNTS,
   MERGE_JE_EXCLUDED_CLIENTS,
@@ -92,6 +93,67 @@ export async function POST(request: Request) {
       total_affected_amount: totalAffected,
       rows: result.matched,
       error: result.error || null,
+    });
+  } catch (e: any) {
+    return NextResponse.json({ error: String(e?.message || e).slice(0, 300) }, { status: 502 });
+  }
+}
+
+/**
+ * PUT — DESTRUCTIVE: delete the given merge JEs for a client. Every JE is
+ * re-verified server-side (fingerprint + 2026) before deletion. Body:
+ * { clientLinkId, jeIds: string[], confirm: true }.
+ */
+export async function PUT(request: Request) {
+  const auth = await requireSenior();
+  if ("error" in auth) return auth.error;
+
+  let body: { clientLinkId?: string; jeIds?: string[]; confirm?: boolean };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  if (!body.clientLinkId || !Array.isArray(body.jeIds) || body.jeIds.length === 0) {
+    return NextResponse.json({ error: "clientLinkId + jeIds required" }, { status: 400 });
+  }
+  if (body.confirm !== true) {
+    return NextResponse.json({ error: "confirm:true required to delete" }, { status: 400 });
+  }
+
+  const { data: client } = await auth.service
+    .from("client_links")
+    .select("id, client_name, qbo_realm_id")
+    .eq("id", body.clientLinkId)
+    .single();
+  if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+  if (isExcludedClient((client as any).client_name)) {
+    return NextResponse.json({ error: "This client is on the excluded (clean) list." }, { status: 400 });
+  }
+
+  try {
+    const token = await getValidToken(body.clientLinkId, auth.service as any, "ironbooks/api/admin/coa-je-audit/reverse");
+    const { results, mergePairs } = await reverseMergeJEs((client as any).qbo_realm_id, token, body.jeIds, { year: 2026 });
+    const deleted = results.filter((r) => r.deleted);
+
+    // Audit every deletion.
+    await auth.service.from("audit_log").insert({
+      user_id: auth.user.id,
+      event_type: "coa_merge_je_reversed",
+      request_payload: {
+        client_link_id: body.clientLinkId,
+        client_name: (client as any).client_name,
+        deleted_je_ids: deleted.map((r) => r.jeId),
+        skipped: results.filter((r) => !r.deleted).map((r) => ({ jeId: r.jeId, reason: r.skipped || r.error })),
+        merge_pairs: mergePairs,
+      } as any,
+    });
+
+    return NextResponse.json({
+      client_name: (client as any).client_name,
+      deleted_count: deleted.length,
+      results,
+      mergePairs,
     });
   } catch (e: any) {
     return NextResponse.json({ error: String(e?.message || e).slice(0, 300) }, { status: 502 });
