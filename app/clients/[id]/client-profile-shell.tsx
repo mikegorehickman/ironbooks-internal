@@ -1574,17 +1574,60 @@ function PLTab({
 
           <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} income={pl.totalIncome} onDrill={onDrill} />
           {cogsRows.length > 0 && (
-            <PLSection
-              title="Cost of Goods Sold (COGS)"
-              rows={cogsRows}
-              total={cogsTotal}
-              income={pl.totalIncome}
-              onDrill={onDrill}
-            />
+            <>
+              <PLSection
+                title="Cost of Goods Sold (COGS)"
+                rows={cogsRows}
+                total={cogsTotal}
+                income={pl.totalIncome}
+                onDrill={onDrill}
+              />
+              {/* Gross Profit subtotal band — mirrors QBO + the client portal
+                  (Income − COGS). Was only visible via KPI/margin chips before,
+                  not as a statement line. */}
+              <PLResultBand label="Gross Profit" amount={grossProfit} pct={grossMarginPct} />
+            </>
           )}
           <PLSection title="Operating Expenses" rows={expenseRows} total={pl.totalExpenses} income={pl.totalIncome} onDrill={onDrill} />
+          {/* Net Profit band — the bottom line, same figure the client sees. */}
+          <PLResultBand label="Net Profit" amount={pl.netIncome} pct={netMarginPct} strong />
         </>
       )}
+    </div>
+  );
+}
+
+/** Gross Profit / Net Profit subtotal band inside the P&L statement — mirrors
+ *  QBO's statement structure and the client portal's result bands. */
+function PLResultBand({
+  label,
+  amount,
+  pct,
+  strong,
+}: {
+  label: string;
+  amount: number;
+  pct: number | null;
+  strong?: boolean;
+}) {
+  const neg = amount < 0;
+  return (
+    <div
+      className={`flex items-center justify-between rounded-xl px-4 py-3 ${
+        strong ? "bg-navy text-white" : "bg-teal-light/50 border border-teal/30"
+      }`}
+    >
+      <span className={`text-sm font-bold ${strong ? "text-white" : "text-navy"}`}>{label}</span>
+      <span className="flex items-baseline gap-2">
+        {pct != null && (
+          <span className={`text-xs ${strong ? "text-white/70" : "text-ink-slate"}`}>
+            {pct.toFixed(1)}%
+          </span>
+        )}
+        <span className={`text-base font-bold font-mono ${strong ? "text-white" : neg ? "text-red-600" : "text-navy"}`}>
+          {formatCurrency(amount)}
+        </span>
+      </span>
     </div>
   );
 }
