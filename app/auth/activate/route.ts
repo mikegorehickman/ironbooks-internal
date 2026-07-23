@@ -46,6 +46,15 @@ export async function GET(request: Request) {
   }
 
   // Mint a fresh short-lived sign-in link and bounce the browser to it.
+  //
+  // We route through the token_hash + verifyOtp flow (our own callback URL with
+  // the hashed_token) rather than Supabase's raw action_link. The action_link
+  // lands on /auth/callback with a PKCE ?code= that can only be exchanged in the
+  // browser that requested it — but these links are minted server-side, so no
+  // verifier exists, and the exchange failed whenever the client opened the link
+  // on a different device or in an email in-app browser. verifyOtp(token_hash)
+  // has no such browser binding. We fall back to the raw action_link only if a
+  // hashed_token isn't returned.
   const redirectTo = `${origin}/auth/callback`;
   let link: string | null = null;
   try {
@@ -54,14 +63,22 @@ export async function GET(request: Request) {
       email,
       options: { redirectTo },
     });
-    link = ml?.data?.properties?.action_link || null;
+    const hashed = ml?.data?.properties?.hashed_token;
+    if (hashed) {
+      link = `${origin}/auth/callback?token_hash=${encodeURIComponent(hashed)}&type=magiclink`;
+    } else {
+      link = ml?.data?.properties?.action_link || null;
+    }
     if (!link) {
       const inv = await (service as any).auth.admin.generateLink({
         type: "invite",
         email,
         options: { redirectTo },
       });
-      link = inv?.data?.properties?.action_link || null;
+      const invHashed = inv?.data?.properties?.hashed_token;
+      link = invHashed
+        ? `${origin}/auth/callback?token_hash=${encodeURIComponent(invHashed)}&type=invite`
+        : inv?.data?.properties?.action_link || null;
     }
   } catch {
     link = null;
