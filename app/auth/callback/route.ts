@@ -29,16 +29,35 @@ const INTERNAL_EMAIL_DOMAIN = "@ironbooks.com";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
+  const tokenHash = searchParams.get("token_hash");
+  const otpType = searchParams.get("type");
   const explicitNext = searchParams.get("next");
 
-  if (!code) {
-    return NextResponse.redirect(`${origin}/auth/login?error=missing_code`);
-  }
-
   const supabase = await createServerSupabase();
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
-  if (error) {
-    return NextResponse.redirect(`${origin}/auth/login?error=oauth_failed`);
+
+  // Two sign-in link flavors converge here:
+  //   • token_hash + type → verifyOtp. This is the flow for emailed links we
+  //     mint server-side (/auth/activate, invites, resends). It is NOT bound to
+  //     the browser that requested it — so it works when the client opens the
+  //     link on a different device / in their email app's in-app browser, which
+  //     is exactly where the old PKCE-only path failed for some users.
+  //   • code → exchangeCodeForSession (PKCE). This is the login-page flow
+  //     (signInWithOtp sets a verifier cookie in the requesting browser).
+  if (tokenHash && otpType) {
+    const { error } = await supabase.auth.verifyOtp({
+      type: otpType as any,
+      token_hash: tokenHash,
+    });
+    if (error) {
+      return NextResponse.redirect(`${origin}/auth/login?error=oauth_failed`);
+    }
+  } else if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) {
+      return NextResponse.redirect(`${origin}/auth/login?error=oauth_failed`);
+    }
+  } else {
+    return NextResponse.redirect(`${origin}/auth/login?error=missing_code`);
   }
 
   if (explicitNext) {
