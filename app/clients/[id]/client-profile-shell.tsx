@@ -1478,6 +1478,18 @@ function PLTab({
   const totalAccounts = allRows.length;
   const populatedAccounts = allRows.filter((r) => Math.abs(r.amount) >= 0.005).length;
 
+  // Path → account lookup so PLSection can attach an accountId/type to parent
+  // header rows even when the parent account itself was filtered out (e.g. a
+  // $0-direct parent like "Vehicle Expenses" whose subs carry all the activity).
+  const acctByPath = new Map<string, { id: string; accountType: string }>();
+  for (const acct of allAccounts) {
+    if (acct.Classification !== "Revenue" && acct.Classification !== "Expense") continue;
+    acctByPath.set(
+      (acct.FullyQualifiedName || acct.Name).toLowerCase(),
+      { id: acct.Id, accountType: acct.AccountType }
+    );
+  }
+
   // Detection: deleted/inactive accounts that still carry a balance. QBO appends
   // "(deleted)" to an inactive account's name; if transactions landed in it
   // (usually a memorized/recurring txn in QBO posting to an old account) it
@@ -1572,7 +1584,7 @@ function PLTab({
             <MarginBadge label="Net margin" pct={netMarginPct} band="10–35%" flag={netFlag} />
           </div>
 
-          <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} income={pl.totalIncome} onDrill={onDrill} />
+          <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} income={pl.totalIncome} onDrill={onDrill} pathLookup={acctByPath} />
           {cogsRows.length > 0 && (
             <PLSection
               title="Cost of Goods Sold (COGS)"
@@ -1580,9 +1592,10 @@ function PLTab({
               total={cogsTotal}
               income={pl.totalIncome}
               onDrill={onDrill}
+              pathLookup={acctByPath}
             />
           )}
-          <PLSection title="Operating Expenses" rows={expenseRows} total={pl.totalExpenses} income={pl.totalIncome} onDrill={onDrill} />
+          <PLSection title="Operating Expenses" rows={expenseRows} total={pl.totalExpenses} income={pl.totalIncome} onDrill={onDrill} pathLookup={acctByPath} />
         </>
       )}
     </div>
@@ -1625,12 +1638,87 @@ function pctOfIncomeLabel(amount: number, income: number): string {
   return `${Math.round((amount / income) * 100)}%`;
 }
 
+// ─── P&L hierarchy ──────────────────────────────────────────────────
+// QBO account names encode the parent chain with ":" (FullyQualifiedName,
+// e.g. "Vehicle Expenses:Fuel – Overhead"). Rendering rows flat and showing
+// only the leaf name lost the parent/sub structure the bookkeeper sees in
+// QBO's own P&L (Baldwin Inc, 2026-07-22). We rebuild the tree here and
+// render QBO-style: parent header → indented subs → "Total for {parent}".
+
+type PLTreeNode = {
+  label: string;          // this segment's name (leaf name)
+  fullPath: string;       // full FullyQualifiedName up to this node
+  accountId: string | null;
+  accountType: string;
+  direct: number;         // amount posted directly to THIS account
+  hasDirect: boolean;     // whether a row existed for this account (vs. synthesized parent)
+  children: PLTreeNode[];
+};
+
+function buildPLTree(
+  rows: Array<{ accountId: string | null; name: string; accountType: string; amount: number }>,
+  pathLookup?: Map<string, { id: string; accountType: string }>
+): PLTreeNode[] {
+  const root: PLTreeNode = { label: "", fullPath: "", accountId: null, accountType: "", direct: 0, hasDirect: false, children: [] };
+  const byPath = new Map<string, PLTreeNode>();
+
+  const ensure = (segments: string[]): PLTreeNode => {
+    let node = root;
+    let path = "";
+    for (const seg of segments) {
+      path = path ? `${path}:${seg}` : seg;
+      const key = path.toLowerCase();
+      let child = byPath.get(key);
+      if (!child) {
+        // Parent may not have its own filtered row (e.g. $0 direct) — pull its
+        // accountId/type from the full account list so the header can still drill.
+        const known = pathLookup?.get(key);
+        child = {
+          label: seg,
+          fullPath: path,
+          accountId: known?.id || null,
+          accountType: known?.accountType || "",
+          direct: 0,
+          hasDirect: false,
+          children: [],
+        };
+        byPath.set(key, child);
+        node.children.push(child);
+      }
+      node = child;
+    }
+    return node;
+  };
+
+  for (const r of rows) {
+    const node = ensure(r.name.split(":"));
+    if (r.accountId) node.accountId = r.accountId;
+    if (r.accountType) node.accountType = r.accountType;
+    node.direct += r.amount;
+    node.hasDirect = true;
+  }
+
+  // Sort siblings by subtotal size (largest first), recursively — keeps the
+  // "biggest numbers on top" read the flat view had, now per level.
+  const sortRec = (nodes: PLTreeNode[]) => {
+    nodes.sort((a, b) => Math.abs(plSubtotal(b)) - Math.abs(plSubtotal(a)));
+    nodes.forEach((n) => sortRec(n.children));
+  };
+  sortRec(root.children);
+  return root.children;
+}
+
+function plSubtotal(node: PLTreeNode): number {
+  return node.direct + node.children.reduce((s, c) => s + plSubtotal(c), 0);
+}
+
 function PLSection({
   title,
   rows,
   total,
   income,
   onDrill,
+  pathLookup,
 }: {
   title: string;
   rows: Array<{ accountId: string | null; name: string; accountType: string; amount: number }>;
@@ -1638,7 +1726,9 @@ function PLSection({
   /** Total P&L income — denominator for the % of income column. */
   income: number;
   onDrill: (accountId: string, accountName: string) => void;
+  pathLookup?: Map<string, { id: string; accountType: string }>;
 }) {
+  const tree = buildPLTree(rows, pathLookup);
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
@@ -1652,46 +1742,7 @@ function PLSection({
             No {title.toLowerCase()} accounts to show.
           </div>
         ) : (
-          rows.map((r, i) => {
-            const isZero = Math.abs(r.amount) < 0.005;
-            const clickable = !!r.accountId;
-            return (
-              <button
-                key={`${r.accountId || r.name}-${i}`}
-                onClick={() => r.accountId && onDrill(r.accountId, r.name)}
-                disabled={!clickable}
-                className={`w-full flex items-center justify-between px-4 py-2 text-sm text-left ${
-                  clickable
-                    ? "hover:bg-teal-lighter/40 cursor-pointer"
-                    : "cursor-default"
-                } ${isZero ? "opacity-60" : ""}`}
-                title={`${r.name}${clickable ? " — click to see transactions" : " (no account ID — can't drill)"}`}
-              >
-                <div className="text-navy truncate pr-2 flex-1 min-w-0">
-                  {/* Leaf name only — "Marketing:Marketing Tools" next to a
-                      parent-direct "Marketing" row read as a duplicate (Lisa,
-                      2026-07-21). Full path stays in the hover title. */}
-                  {r.name.split(":").pop()}
-                  <span className="text-[10px] text-ink-slate ml-2 font-normal">
-                    {r.accountType}
-                  </span>
-                </div>
-                <div
-                  className={`font-mono font-semibold shrink-0 ${
-                    r.amount < 0 ? "text-red-600" : isZero ? "text-ink-slate" : "text-navy"
-                  }`}
-                >
-                  {formatCurrency(r.amount)}
-                </div>
-                <div className="font-mono text-xs font-semibold text-teal-dark w-14 text-right shrink-0" title="% of income">
-                  {pctOfIncomeLabel(r.amount, income)}
-                </div>
-                {clickable && (
-                  <ChevronRight size={14} className="text-ink-slate ml-1 shrink-0" />
-                )}
-              </button>
-            );
-          })
+          <PLTreeRows nodes={tree} depth={0} income={income} onDrill={onDrill} />
         )}
       </div>
       {rows.length > 0 && (
@@ -1706,6 +1757,118 @@ function PLSection({
         </div>
       )}
     </div>
+  );
+}
+
+function PLTreeRows({
+  nodes,
+  depth,
+  income,
+  onDrill,
+}: {
+  nodes: PLTreeNode[];
+  depth: number;
+  income: number;
+  onDrill: (accountId: string, accountName: string) => void;
+}) {
+  return (
+    <>
+      {nodes.map((node, i) => {
+        const indent = 16 + depth * 18;
+        const isZero = Math.abs(node.direct) < 0.005;
+        const clickable = !!node.accountId;
+        const sub = plSubtotal(node);
+
+        // Leaf account — same row as before, now indented under its parent.
+        if (node.children.length === 0) {
+          return (
+            <button
+              key={`${node.accountId || node.fullPath}-${i}`}
+              onClick={() => node.accountId && onDrill(node.accountId, node.fullPath)}
+              disabled={!clickable}
+              style={{ paddingLeft: indent }}
+              className={`w-full flex items-center justify-between pr-4 py-2 text-sm text-left ${
+                clickable ? "hover:bg-teal-lighter/40 cursor-pointer" : "cursor-default"
+              } ${isZero ? "opacity-60" : ""}`}
+              title={`${node.fullPath}${clickable ? " — click to see transactions" : " (no account ID — can't drill)"}`}
+            >
+              <div className="text-navy truncate pr-2 flex-1 min-w-0">
+                {node.label}
+                <span className="text-[10px] text-ink-slate ml-2 font-normal">
+                  {node.accountType}
+                </span>
+              </div>
+              <div
+                className={`font-mono font-semibold shrink-0 ${
+                  node.direct < 0 ? "text-red-600" : isZero ? "text-ink-slate" : "text-navy"
+                }`}
+              >
+                {formatCurrency(node.direct)}
+              </div>
+              <div className="font-mono text-xs font-semibold text-teal-dark w-14 text-right shrink-0" title="% of income">
+                {pctOfIncomeLabel(node.direct, income)}
+              </div>
+              {clickable && <ChevronRight size={14} className="text-ink-slate ml-1 shrink-0" />}
+            </button>
+          );
+        }
+
+        // Parent account — header row, indented children, then a subtotal
+        // ("Total for X"), mirroring QBO's P&L layout. If money was posted
+        // directly to the parent account itself, show it on the header row
+        // (drillable); the subtotal always includes direct + all subs.
+        return (
+          <div key={`${node.accountId || node.fullPath}-${i}`} className="divide-y divide-gray-100">
+            <button
+              onClick={() => node.accountId && onDrill(node.accountId, node.fullPath)}
+              disabled={!clickable}
+              style={{ paddingLeft: indent }}
+              className={`w-full flex items-center justify-between pr-4 py-2 text-sm text-left ${
+                clickable ? "hover:bg-teal-lighter/40 cursor-pointer" : "cursor-default"
+              }`}
+              title={`${node.fullPath}${clickable ? " — click to see transactions posted directly to this parent" : ""}`}
+            >
+              <div className="font-semibold text-navy truncate pr-2 flex-1 min-w-0">
+                {node.label}
+                <span className="text-[10px] text-ink-slate ml-2 font-normal">
+                  {node.accountType}
+                </span>
+              </div>
+              {node.hasDirect && !isZero ? (
+                <>
+                  <div className={`font-mono font-semibold shrink-0 ${node.direct < 0 ? "text-red-600" : "text-navy"}`}>
+                    {formatCurrency(node.direct)}
+                  </div>
+                  <div className="font-mono text-xs font-semibold text-teal-dark w-14 text-right shrink-0" title="% of income (direct only)">
+                    {pctOfIncomeLabel(node.direct, income)}
+                  </div>
+                </>
+              ) : (
+                <div className="w-14 shrink-0" />
+              )}
+              {clickable && <ChevronRight size={14} className="text-ink-slate ml-1 shrink-0" />}
+            </button>
+            <PLTreeRows nodes={node.children} depth={depth + 1} income={income} onDrill={onDrill} />
+            <div
+              style={{ paddingLeft: indent }}
+              className="flex items-center justify-between pr-4 py-1.5 bg-gray-50/60"
+            >
+              <div className="text-xs font-semibold text-ink-slate">
+                Total for {node.label}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className={`font-mono text-sm font-semibold ${sub < 0 ? "text-red-600" : "text-navy"}`}>
+                  {formatCurrency(sub)}
+                </div>
+                <div className="font-mono text-xs font-semibold text-teal-dark w-14 text-right">
+                  {pctOfIncomeLabel(sub, income)}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
