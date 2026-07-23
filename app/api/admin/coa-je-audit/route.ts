@@ -84,14 +84,19 @@ export async function POST(request: Request) {
     const result = await scanClientForMergeJEs((client as any).qbo_realm_id, token, {
       sinceDate: body.sinceDate,
     });
-    const totalAffected = result.matched.reduce((s, r) => s + Math.abs(r.totalAmount), 0);
+    // Show EVERY fingerprinted merge JE (matchedAny), not just ones whose lines
+    // matched the canonical affected-account names — the actual QBO account
+    // names differ from the master names (e.g. "Direct Field Labor - Taxes" vs
+    // "Direct Labour - Taxes"), so the name filter was hiding real merge JEs.
+    // The directive is to reverse ALL lump merge JEs.
+    const total = result.matchedAny.reduce((s, r) => s + Math.abs(r.totalAmount), 0);
     return NextResponse.json({
       client_name: (client as any).client_name,
       scanned: result.scanned,
-      matched_count: result.matched.length,
-      matched_any_count: result.matchedAny.length,
-      total_affected_amount: totalAffected,
-      rows: result.matched,
+      matched_count: result.matchedAny.length,
+      affected_subset_count: result.matched.length,
+      total_affected_amount: total,
+      rows: result.matchedAny,
       error: result.error || null,
     });
   } catch (e: any) {
