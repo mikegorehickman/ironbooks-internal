@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import {
   ChevronDown, AlertTriangle, X, Loader2, ChevronRight, Flag, CheckCircle2,
-  Sparkles, Info, ArrowDown, TrendingUp, TrendingDown, CalendarRange, Tag, Search,
+  Sparkles, ArrowDown, TrendingUp, TrendingDown, CalendarRange, Tag, Search,
   MessageCircleQuestion,
 } from "lucide-react";
 import type { ProfitLossData } from "@/lib/qbo-reports";
-import { classifyProfitLoss, marginVerdict, netMarginVerdict, type PortalPl, type PlBucket, type PlLine } from "@/lib/portal-pl";
+import { classifyProfitLoss, marginVerdict, netMarginVerdict, type PortalPl } from "@/lib/portal-pl";
+import { buildPLHierarchy, type PLHierSection, type PLHierRow, type PLAccountLite } from "@/lib/pl-hierarchy";
 import { AskAboutButton } from "../ask-about";
 
 /** The five ranges the server pre-fetches. */
@@ -30,13 +31,20 @@ type RangeKey = FixedRangeKey | "custom";
 export function ProfitLossClient({
   ranges,
   data,
+  accounts = [],
   closedSource,
 }: {
   ranges: Record<FixedRangeKey, { label: string; start: string; end: string }>;
   data: Record<FixedRangeKey, ProfitLossData | null>;
-  closedSource: "reclass_job_closed" | "cleanup_completed" | "calendar_default";
+  /** Chart of accounts — supplies the parent/sub STRUCTURE so the statement
+   *  nests accounts the way QuickBooks does. Empty → flat fallback. */
+  accounts?: PLAccountLite[];
+  closedSource: "reclass_job_closed" | "cleanup_completed" | "calendar_default" | "monthly_close_sent";
 }) {
   const [activeRange, setActiveRange] = useState<RangeKey>("lastMonth");
+  // Show accounts that net to zero for the period (off by default — QBO's
+  // "collapse rows with no balance"). Toggle mirrors the internal profile P&L.
+  const [showZeros, setShowZeros] = useState(false);
   const [drillLine, setDrillLine] = useState<{
     label: string;
     account_id: string;
@@ -65,6 +73,8 @@ export function ProfitLossClient({
       : null
     : ranges[activeRange as FixedRangeKey];
   const c: PortalPl | null = pl ? classifyProfitLoss(pl) : null;
+  // QBO-mirroring parent/sub hierarchy for the detailed breakdown.
+  const hier = pl ? buildPLHierarchy((pl.lineItems || []) as any, accounts, { showZeros }) : null;
   const periodLabel = range
     ? `${range.label} · ${formatDate(range.start)} → ${formatDate(range.end)}`
     : "Custom range — pick dates below";
@@ -191,64 +201,60 @@ export function ProfitLossClient({
           {/* ── Where each dollar goes ──────────────────────────────── */}
           <ProportionBar c={c} />
 
-          {/* ── Detailed breakdown ──────────────────────────────────── */}
+          {/* ── Detailed breakdown — mirrors your QuickBooks P&L ─────── */}
           <div className="space-y-4">
-            <BucketSection
-              bucket={c.income}
-              accent="teal"
-              periodLabel={range.label}
-              onDrill={setDrillLine}
-              onReclass={(t) => setReclassTarget(t)}
-              range={range}
-            />
+            <div className="flex items-center justify-between gap-3 px-1">
+              <div className="text-xs text-ink-light">
+                Laid out the way it appears in QuickBooks — parent accounts with their sub-accounts.
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowZeros((z) => !z)}
+                className="text-xs font-semibold text-teal-dark hover:underline whitespace-nowrap flex-shrink-0"
+              >
+                {showZeros ? "Hide $0 accounts" : "Show $0 accounts"}
+              </button>
+            </div>
 
-            <BucketSection
-              bucket={c.variableCosts}
-              accent="amber"
-              groupByCategory
-              periodLabel={range.label}
-              onDrill={setDrillLine}
-              onReclass={(t) => setReclassTarget(t)}
-              range={range}
-              note={
-                c.costSplitEstimated
-                  ? "Estimated from account names — your books don't separate direct job costs from overhead yet. Your bookkeeper can set up Cost of Goods Sold for a precise gross margin."
-                  : undefined
-              }
-              emptyNote="No direct job costs recorded for this period."
-            />
+            {(() => {
+              const secs = hier?.sections || [];
+              const sec = (k: PLHierSection["key"]) => secs.find((s) => s.key === k) || null;
+              const income = sec("income");
+              const cogs = sec("cogs");
+              const expenses = sec("expenses");
+              const otherIncome = sec("other_income");
+              const otherExpense = sec("other_expense");
+              return (
+                <>
+                  {income && (
+                    <HierSection section={income} income={c.totalIncome} periodLabel={range.label} onDrill={setDrillLine} onReclass={(t) => setReclassTarget(t)} range={range} />
+                  )}
+                  {cogs && (
+                    <HierSection section={cogs} income={c.totalIncome} periodLabel={range.label} onDrill={setDrillLine} onReclass={(t) => setReclassTarget(t)} range={range} />
+                  )}
 
-            {/* Gross Profit band */}
-            <ResultBand
-              title="Gross Profit"
-              subtitle={
-                c.costSplitEstimated
-                  ? "Income minus cost of goods sold (estimated)"
-                  : "Income minus the direct cost of doing the work"
-              }
-              amount={c.grossProfit}
-              marginPct={c.grossMarginPct}
-              marginNoun="gross margin"
-              tone={c.grossProfit >= 0 ? "emerald" : "red"}
-            />
+                  {/* Gross Profit band */}
+                  <ResultBand
+                    title="Gross Profit"
+                    subtitle="Income minus the direct cost of doing the work"
+                    amount={c.grossProfit}
+                    marginPct={c.grossMarginPct}
+                    marginNoun="gross margin"
+                    tone={c.grossProfit >= 0 ? "emerald" : "red"}
+                  />
 
-            <BucketSection
-              bucket={c.fixedExpenses}
-              accent="orange"
-              groupByCategory
-              periodLabel={range.label}
-              onDrill={setDrillLine}
-              onReclass={(t) => setReclassTarget(t)}
-              range={range}
-              emptyNote="No overhead expenses recorded for this period."
-            />
-
-            {c.otherIncome && (
-              <BucketSection bucket={c.otherIncome} accent="teal" periodLabel={range.label} onDrill={setDrillLine} onReclass={(t) => setReclassTarget(t)} range={range} />
-            )}
-            {c.otherExpense && (
-              <BucketSection bucket={c.otherExpense} accent="orange" periodLabel={range.label} onDrill={setDrillLine} onReclass={(t) => setReclassTarget(t)} range={range} />
-            )}
+                  {expenses && (
+                    <HierSection section={expenses} income={c.totalIncome} periodLabel={range.label} onDrill={setDrillLine} onReclass={(t) => setReclassTarget(t)} range={range} />
+                  )}
+                  {otherIncome && (
+                    <HierSection section={otherIncome} income={c.totalIncome} periodLabel={range.label} onDrill={setDrillLine} onReclass={(t) => setReclassTarget(t)} range={range} />
+                  )}
+                  {otherExpense && (
+                    <HierSection section={otherExpense} income={c.totalIncome} periodLabel={range.label} onDrill={setDrillLine} onReclass={(t) => setReclassTarget(t)} range={range} />
+                  )}
+                </>
+              );
+            })()}
 
             {/* Net Profit band — the bottom line */}
             <ResultBand
@@ -430,64 +436,42 @@ function Legend({ color, label, value }: { color: string; label: string; value: 
   );
 }
 
-// ─── BUCKET SECTION ─────────────────────────────────────────────────────
+// ─── HIERARCHY SECTION (QBO-mirroring parent/sub) ─────────────────────────
 
-/** Roll a bucket's lines up into master-COA category groups with subtotal +
- *  % of income. "Other …" categories sort last; everything else by size. */
-function groupLinesByCategory(
-  lines: PlLine[]
-): { key: string; label: string; subtotal: number; pct: number; lines: PlLine[] }[] {
-  const groups = new Map<string, { key: string; label: string; subtotal: number; pct: number; lines: PlLine[] }>();
-  for (const l of lines) {
-    const key = l.category?.key || "other_operating";
-    const label = l.category?.label || "Other Operating Expenses";
-    let g = groups.get(key);
-    if (!g) {
-      g = { key, label, subtotal: 0, pct: 0, lines: [] };
-      groups.set(key, g);
-    }
-    g.subtotal += Math.abs(l.amount);
-    g.pct += l.pctOfIncome;
-    g.lines.push(l);
-  }
-  const arr = [...groups.values()];
-  for (const g of arr) g.lines.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-  const isOther = (k: string) => k === "other_operating" || k === "cogs_other";
-  arr.sort((a, b) => {
-    const ao = isOther(a.key) ? 1 : 0;
-    const bo = isOther(b.key) ? 1 : 0;
-    if (ao !== bo) return ao - bo;
-    return b.subtotal - a.subtotal;
-  });
-  return arr;
-}
+const SECTION_ACCENT: Record<PLHierSection["key"], "teal" | "amber" | "orange"> = {
+  income: "teal",
+  cogs: "amber",
+  expenses: "orange",
+  other_income: "teal",
+  other_expense: "orange",
+};
 
-function BucketSection({
-  bucket,
-  accent,
+/**
+ * One P&L section (Income / COGS / Operating Expenses / …) rendered the way
+ * QuickBooks lays it out: parent accounts with their sub-accounts nested and a
+ * "Total <parent>" line. Structure comes from the chart of accounts (via
+ * buildPLHierarchy); leaf rows keep the portal's drill-down, "ask", and
+ * "suggest a category" affordances so nothing regresses from the old buckets.
+ */
+function HierSection({
+  section,
+  income,
   periodLabel,
   onDrill,
   onReclass,
   range,
-  note,
-  emptyNote,
-  groupByCategory,
 }: {
-  bucket: PlBucket;
-  accent: "teal" | "amber" | "orange";
+  section: PLHierSection;
+  income: number;
   periodLabel: string;
   onDrill: (l: { label: string; account_id: string; amount: number }) => void;
   onReclass: (t: ReclassTarget) => void;
   range: { label: string; start: string; end: string };
-  note?: string;
-  emptyNote?: string;
-  /** Group lines under master-COA category sub-headers (Marketing, Office &
-   *  Admin, …) with a subtotal + % — for the expense buckets. */
-  groupByCategory?: boolean;
 }) {
   const [open, setOpen] = useState(true);
-  const accentBar = { teal: "bg-teal", amber: "bg-amber-400", orange: "bg-orange-500" }[accent];
-  const kind = bucket.key === "income" || bucket.key === "otherIncome" ? "pl_line" : "pl_line";
+  const accentBar = { teal: "bg-teal", amber: "bg-amber-400", orange: "bg-orange-500" }[SECTION_ACCENT[section.key]];
+  const leafCount = section.rows.filter((r) => !r.isTotalRow && !r.hasChildren).length;
+  const sectionPct = income > 0 ? (Math.abs(section.total) / income) * 100 : 0;
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
@@ -499,66 +483,27 @@ function BucketSection({
           <span className={`w-1.5 h-8 rounded-full ${accentBar} flex-shrink-0`} />
           <ChevronDown size={15} className={`text-ink-slate transition-transform ${open ? "" : "-rotate-90"}`} />
           <div className="text-left min-w-0">
-            <div className="font-bold text-navy truncate">{bucket.label}</div>
+            <div className="font-bold text-navy truncate">{section.title}</div>
             <div className="text-[11px] text-ink-light">
-              {bucket.lines.length} {bucket.lines.length === 1 ? "line" : "lines"}
+              {leafCount} {leafCount === 1 ? "account" : "accounts"}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-5 flex-shrink-0">
-          <div className="text-xs font-semibold text-teal-dark w-12 text-right">
-            {bucket.pctOfIncome > 0 ? `${Math.round(bucket.pctOfIncome)}%` : "—"}
-          </div>
+        <div className="flex items-center gap-4 flex-shrink-0">
+          <span className="font-mono text-sm font-bold text-navy">{fmtMoney(section.total)}</span>
+          <span className="text-xs font-semibold text-teal-dark w-10 text-right">
+            {sectionPct >= 0.5 ? `${Math.round(sectionPct)}%` : "—"}
+          </span>
         </div>
       </button>
 
       {open && (
         <div className="px-5 pb-4">
-          {note && (
-            <div className="mb-3 flex items-start gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              <Info size={12} className="mt-0.5 flex-shrink-0" />
-              <span>{note}</span>
-            </div>
-          )}
-          {bucket.lines.length === 0 ? (
-            <div className="text-xs text-ink-light italic py-2">{emptyNote || "No items."}</div>
-          ) : groupByCategory ? (
-            <div className="space-y-3">
-              {groupLinesByCategory(bucket.lines).map((grp) => (
-                <div key={grp.key}>
-                  <div className="flex items-center justify-between gap-2 pb-1 mb-0.5 border-b border-slate-200">
-                    <span className="text-[13px] font-bold text-navy">{grp.label}</span>
-                    <div className="flex items-center gap-4 flex-shrink-0">
-                      <span className="font-mono text-sm font-bold text-navy w-24 text-right">{fmtMoney(grp.subtotal)}</span>
-                      <span className="text-xs font-semibold text-teal-dark w-10 text-right">
-                        {grp.pct >= 0.5 ? `${Math.round(grp.pct)}%` : "—"}
-                      </span>
-                      <span className="w-[26px]" aria-hidden />
-                      <span className="w-[21px] hidden sm:block" aria-hidden />
-                    </div>
-                  </div>
-                  <div className="divide-y divide-slate-100 pl-1">
-                    {grp.lines.map((l, i) => renderLine(l, i))}
-                  </div>
-                </div>
-              ))}
-            </div>
+          {section.rows.length === 0 ? (
+            <div className="text-xs text-ink-light italic py-2">No accounts with a balance.</div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {bucket.lines.map((l, i) => renderLine(l, i))}
-            </div>
-          )}
-          {bucket.lines.length > 0 && (
-            <div className="flex items-center justify-between gap-2 pt-2 mt-2 border-t-2 border-slate-200">
-              <span className="text-sm font-bold text-navy">Total {bucket.label}</span>
-              <div className="flex items-center gap-4 flex-shrink-0">
-                <span className="font-mono text-sm font-bold text-navy w-24 text-right">{fmtMoney(bucket.total)}</span>
-                <span className="text-xs font-semibold text-ink-slate w-10 text-right">
-                  {bucket.pctOfIncome > 0 ? `${Math.round(bucket.pctOfIncome)}%` : "—"}
-                </span>
-                <span className="w-[26px]" aria-hidden />
-                <span className="w-[21px] hidden sm:block" aria-hidden />
-              </div>
+              {section.rows.map((r, i) => renderRow(r, i))}
             </div>
           )}
         </div>
@@ -566,32 +511,63 @@ function BucketSection({
     </div>
   );
 
-  function renderLine(l: PlLine, i: number) {
-    const drillable = !!l.account_id;
+  function renderRow(r: PLHierRow, i: number) {
+    const isParentHeader = r.hasChildren && !r.isTotalRow;
+    const drillable = !r.isTotalRow && !r.hasChildren && !!r.accountId;
+    const pad = { paddingLeft: r.depth * 18 };
+    const rowPct = income > 0 ? (Math.abs(r.total) / income) * 100 : 0;
+
+    // Parent header — name only; its amount lives on the "Total …" row (QBO).
+    if (isParentHeader) {
+      return (
+        <div key={`${r.accountId || r.name}-${i}`} className="flex items-center gap-2 py-1.5" style={pad}>
+          <span className="text-sm font-bold text-navy truncate">{r.name}</span>
+        </div>
+      );
+    }
+
+    // "Total <parent>" subtotal row.
+    if (r.isTotalRow) {
+      return (
+        <div key={`${r.accountId || r.name}-${i}`} className="flex items-center justify-between gap-2 py-1.5 bg-slate-50/40" style={pad}>
+          <span className="text-sm font-semibold text-ink-slate truncate">{r.name}</span>
+          <div className="flex items-center gap-4 flex-shrink-0">
+            <span className="font-mono text-sm font-semibold text-navy w-24 text-right">{fmtMoney(r.total)}</span>
+            <span className="text-xs text-teal w-10 text-right font-mono hidden sm:block">
+              {rowPct >= 0.5 ? `${rowPct.toFixed(1)}%` : "—"}
+            </span>
+            <span className="w-[26px]" aria-hidden />
+            <span className="w-[21px] hidden sm:block" aria-hidden />
+          </div>
+        </div>
+      );
+    }
+
+    // Leaf account row — full affordances.
     return (
-      <div key={i} className="flex items-center justify-between gap-2 py-1.5 group">
+      <div key={`${r.accountId || r.name}-${i}`} className="flex items-center justify-between gap-2 py-1.5 group" style={pad}>
         <button
           type="button"
-          onClick={drillable ? () => onDrill({ label: l.label, account_id: l.account_id!, amount: l.amount }) : undefined}
+          onClick={drillable ? () => onDrill({ label: r.name, account_id: r.accountId!, amount: r.total }) : undefined}
           disabled={!drillable}
           className={`flex items-center gap-1 text-sm text-left min-w-0 ${
             drillable ? "cursor-pointer hover:text-teal-dark" : "cursor-default"
           }`}
         >
           {drillable && <ChevronRight size={11} className="text-ink-light group-hover:text-teal-dark flex-shrink-0" />}
-          <span className="text-ink-slate truncate">{l.label}</span>
+          <span className="text-ink-slate truncate">{r.name}</span>
         </button>
         <div className="flex items-center gap-4 flex-shrink-0">
-          <span className="font-mono text-sm text-navy w-24 text-right">{fmtMoney(l.amount)}</span>
+          <span className="font-mono text-sm text-navy w-24 text-right">{fmtMoney(r.total)}</span>
           <span className="text-xs text-teal w-10 text-right font-mono hidden sm:block">
-            {l.pctOfIncome >= 0.5 ? `${l.pctOfIncome.toFixed(1)}%` : "—"}
+            {rowPct >= 0.5 ? `${rowPct.toFixed(1)}%` : "—"}
           </span>
           <AskAboutButton
-            kind={kind}
-            label={l.label}
-            amount={l.amount}
+            kind="pl_line"
+            label={r.name}
+            amount={r.total}
             period={periodLabel}
-            context={{ section: bucket.label, account_id: l.account_id, pct_of_income: Math.round(l.pctOfIncome * 10) / 10 }}
+            context={{ section: section.title, account_id: r.accountId, pct_of_income: Math.round(rowPct * 10) / 10 }}
             variant="icon"
           />
           {drillable && (
@@ -600,8 +576,8 @@ function BucketSection({
               onClick={(e) => {
                 e.stopPropagation();
                 onReclass({
-                  source_account_qbo_id: l.account_id!,
-                  source_account_name: l.label,
+                  source_account_qbo_id: r.accountId!,
+                  source_account_name: r.name,
                   period_label: range.label,
                   period_start: range.start,
                   period_end: range.end,

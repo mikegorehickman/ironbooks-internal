@@ -46,6 +46,7 @@ import type {
   ProgressStage,
 } from "@/lib/internal-client-profile";
 import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
+import { buildPLHierarchy, type PLHierSection as PLHierSectionData } from "@/lib/pl-hierarchy";
 import { ClientDetailsCard } from "./client-details-card";
 import { ResendLoginLink } from "./resend-login-link";
 import { StatementsCard } from "./statements-card";
@@ -1478,6 +1479,14 @@ function PLTab({
   const totalAccounts = allRows.length;
   const populatedAccounts = allRows.filter((r) => Math.abs(r.amount) >= 0.005).length;
 
+  // Parent→sub hierarchy for the statement body — structure from the COA,
+  // amounts from the report. Honors the same zero-balance toggle.
+  const hier = buildPLHierarchy(
+    (pl.lineItems || []) as any,
+    (allAccounts || []) as any,
+    { showZeros }
+  );
+
   // Detection: deleted/inactive accounts that still carry a balance. QBO appends
   // "(deleted)" to an inactive account's name; if transactions landed in it
   // (usually a memorized/recurring txn in QBO posting to an old account) it
@@ -1572,23 +1581,20 @@ function PLTab({
             <MarginBadge label="Net margin" pct={netMarginPct} band="10–35%" flag={netFlag} />
           </div>
 
-          <PLSection title="Income" rows={incomeRows} total={pl.totalIncome} income={pl.totalIncome} onDrill={onDrill} />
-          {cogsRows.length > 0 && (
-            <>
-              <PLSection
-                title="Cost of Goods Sold (COGS)"
-                rows={cogsRows}
-                total={cogsTotal}
-                income={pl.totalIncome}
-                onDrill={onDrill}
-              />
-              {/* Gross Profit subtotal band — mirrors QBO + the client portal
-                  (Income − COGS). Was only visible via KPI/margin chips before,
-                  not as a statement line. */}
-              <PLResultBand label="Gross Profit" amount={grossProfit} pct={grossMarginPct} />
-            </>
-          )}
-          <PLSection title="Operating Expenses" rows={expenseRows} total={pl.totalExpenses} income={pl.totalIncome} onDrill={onDrill} />
+          {/* Parent→sub hierarchy, mirroring QBO. Each section renders its
+              accounts nested (parent header, subs indented, "Total parent"),
+              with the Gross Profit band right after COGS and Net Profit at the
+              end. Amounts come from the report; structure from the COA. */}
+          {hier.sections.map((s) => (
+            <div key={s.key}>
+              <PLHierSection section={s} income={pl.totalIncome} onDrill={onDrill} />
+              {s.key === "cogs" && (
+                <div className="mt-2">
+                  <PLResultBand label="Gross Profit" amount={grossProfit} pct={grossMarginPct} />
+                </div>
+              )}
+            </div>
+          ))}
           {/* Net Profit band — the bottom line, same figure the client sees. */}
           <PLResultBand label="Net Profit" amount={pl.netIncome} pct={netMarginPct} strong />
         </>
@@ -1628,6 +1634,62 @@ function PLResultBand({
           {formatCurrency(amount)}
         </span>
       </span>
+    </div>
+  );
+}
+
+/** One P&L section rendered as a QBO-style parent→sub tree: parent header (no
+ *  amount), sub-accounts indented, then a "Total <parent>" subtotal row. Leaf
+ *  rows are clickable to drill. */
+function PLHierSection({
+  section,
+  onDrill,
+}: {
+  section: PLHierSectionData;
+  income: number;
+  onDrill: (accountId: string, accountName: string) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
+        <span className="text-sm font-bold text-navy">{section.title}</span>
+        <span className="text-sm font-mono font-semibold text-navy">{formatCurrency(section.total)}</span>
+      </div>
+      <div className="divide-y divide-gray-50">
+        {section.rows.map((r, i) => {
+          const isParentHeader = r.hasChildren && !r.isTotalRow;
+          const canDrill = !r.isTotalRow && !r.hasChildren && !!r.accountId;
+          return (
+            <div
+              key={`${r.accountId || r.name}-${i}`}
+              className={`flex items-center justify-between px-4 py-1.5 ${
+                r.isTotalRow ? "bg-gray-50/50" : ""
+              }`}
+              style={{ paddingLeft: 16 + r.depth * 20 }}
+            >
+              {canDrill ? (
+                <button
+                  type="button"
+                  onClick={() => onDrill(r.accountId!, r.name)}
+                  className="text-left text-sm text-navy hover:text-teal hover:underline"
+                >
+                  {r.name}
+                </button>
+              ) : (
+                <span className={`text-sm ${r.isTotalRow ? "font-semibold text-ink-slate" : isParentHeader ? "font-semibold text-navy" : "text-navy"}`}>
+                  {r.name}
+                </span>
+              )}
+              {/* Parent header carries no amount (it's on the Total row). */}
+              {!isParentHeader && (
+                <span className={`text-sm font-mono whitespace-nowrap ${r.isTotalRow ? "font-semibold text-navy" : r.total < 0 ? "text-red-600" : "text-navy"}`}>
+                  {formatCurrency(r.total)}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import { fetchProfitAndLoss } from "@/lib/qbo-reports";
+import { fetchAllAccountsIncludingInactive } from "@/lib/qbo";
 import {
   resolveClosedPeriodWithRevenue,
   lastYearRange,
@@ -64,6 +65,14 @@ export default async function ProfitLossPage() {
     safeFetch(() => fetchProfitAndLoss(ctx.qboRealmId, ctx.accessToken, lastYear.start, lastYear.end)),
   ]);
 
+  // Chart of accounts — the parent/sub STRUCTURE so the P&L nests accounts the
+  // way QuickBooks does (report amounts alone carry no hierarchy). Stable across
+  // ranges, so fetched once and reused. Includes inactive accounts that still
+  // carry a balance. Best-effort: [] falls back to the flat report.
+  const accountsPromise = safeFetch(() =>
+    fetchAllAccountsIncludingInactive(ctx.qboRealmId, ctx.accessToken)
+  );
+
   const closed = await closedPromise;
 
   // No reconciled month → show the "being prepared" state instead of any
@@ -79,6 +88,7 @@ export default async function ProfitLossPage() {
   }
 
   const [thisMonthPL, quarterPL, ytdPL, lastYearPL] = await othersPromise;
+  const accounts = (await accountsPromise) || [];
 
   const ranges: Record<string, DateRange> = {
     lastMonth: { ...closed.effectiveMonth, label: `Last month (${closed.effectiveMonth.label})` },
@@ -100,6 +110,7 @@ export default async function ProfitLossPage() {
           ytd: ytdPL,
           lastYear: lastYearPL,
         }}
+        accounts={accounts as any}
         closedSource={closed.base.source}
       />
       {ctx.impersonating && (
