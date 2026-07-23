@@ -9,7 +9,7 @@
  * lib/coa-reclass-je.ts reclassAccountViaJournalEntry (per-month 2-line JE),
  * invoked as a merge sweep in lib/executor.ts.
  */
-import { qboRequest } from "@/lib/qbo";
+import { qboRequest, fetchJournalEntry, deleteJournalEntry } from "@/lib/qbo";
 import { normalizeAccountName } from "@/lib/account-name";
 
 /** Memo/description fingerprints the merge engine stamped on its JEs, across
@@ -168,3 +168,67 @@ export async function scanClientForMergeJEs(
 }
 
 export { isExcludedClient };
+
+/** Parse the "SRC" → "TGT" account pair out of a merge JE memo. */
+export function parseMergePair(privateNote: string): { source: string; target: string } | null {
+  const m = String(privateNote || "").match(/"([^"]+)"\s*(?:→|->|to)\s*"([^"]+)"/);
+  if (!m) return null;
+  return { source: m[1], target: m[2] };
+}
+
+export interface ReverseResult {
+  jeId: string;
+  deleted: boolean;
+  skipped?: string; // reason skipped (not a merge JE / not 2026 / already gone)
+  mergePair?: { source: string; target: string } | null;
+  error?: string;
+}
+
+/**
+ * Reverse (DELETE) the given merge JEs — the destructive step. Guardrails:
+ * every JE is re-fetched and re-verified server-side (must fingerprint as a
+ * merge JE AND fall in `year`) before deletion — a client-supplied id that
+ * isn't a real merge JE is skipped, never deleted. Per Mike's call, deletes
+ * regardless of closed period. Returns per-JE results + the native-QBO-merge
+ * instruction pairs (the API can't merge accounts, so the bookkeeper finishes
+ * that step in QBO to restore the per-transaction detail).
+ */
+export async function reverseMergeJEs(
+  realmId: string,
+  accessToken: string,
+  jeIds: string[],
+  opts: { year?: number } = {}
+): Promise<{ results: ReverseResult[]; mergePairs: { source: string; target: string }[] }> {
+  const year = opts.year ?? 2026;
+  const results: ReverseResult[] = [];
+  const pairSet = new Map<string, { source: string; target: string }>();
+
+  for (const jeId of jeIds) {
+    try {
+      const je = await fetchJournalEntry(realmId, accessToken, jeId);
+      if (!je) {
+        results.push({ jeId, deleted: false, skipped: "already gone" });
+        continue;
+      }
+      const note = je.PrivateNote || "";
+      const lineDescs = (je.Line || []).map((l: any) => l.Description || "").join(" ");
+      if (!fingerprintHit(note) && !fingerprintHit(lineDescs)) {
+        results.push({ jeId, deleted: false, skipped: "not a merge JE (fingerprint mismatch) — not touched" });
+        continue;
+      }
+      if (!String(je.TxnDate || "").startsWith(String(year))) {
+        results.push({ jeId, deleted: false, skipped: `not ${year} (dated ${je.TxnDate})` });
+        continue;
+      }
+      const pair = parseMergePair(note);
+      if (pair) pairSet.set(`${pair.source}→${pair.target}`, pair);
+
+      await deleteJournalEntry(realmId, accessToken, jeId, je.SyncToken);
+      results.push({ jeId, deleted: true, mergePair: pair });
+    } catch (e: any) {
+      results.push({ jeId, deleted: false, error: String(e?.message || e).slice(0, 200) });
+    }
+  }
+
+  return { results, mergePairs: [...pairSet.values()] };
+}

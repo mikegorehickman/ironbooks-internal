@@ -25,6 +25,8 @@ export function CoaJeAuditClient() {
   const [results, setResults] = useState<Record<string, ScanResult | { error: string }>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [scanAll, setScanAll] = useState(false);
+  const [reversing, setReversing] = useState<string | null>(null);
+  const [mergeInstructions, setMergeInstructions] = useState<Record<string, { source: string; target: string }[]>>({});
 
   useEffect(() => {
     fetch("/api/admin/coa-je-audit")
@@ -57,6 +59,32 @@ export function CoaJeAuditClient() {
       await scan(c.id); // sequential — QBO rate limits + keeps it gentle
     }
     setScanAll(false);
+  }
+
+  async function reverse(id: string, clientName: string) {
+    const r = results[id] as ScanResult;
+    if (!r || "error" in r || r.rows.length === 0) return;
+    const ok = window.confirm(
+      `DELETE ${r.rows.length} merge journal entr${r.rows.length === 1 ? "y" : "ies"} for ${clientName} in QuickBooks?\n\n` +
+      `This is a live, destructive change. After deleting, you'll get a checklist to finish each consolidation with a native QBO account merge (which restores the transaction detail).`
+    );
+    if (!ok) return;
+    setReversing(id);
+    try {
+      const res = await fetch("/api/admin/coa-je-audit", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientLinkId: id, jeIds: r.rows.map((x: JeRow) => x.jeId), confirm: true }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "delete failed");
+      setMergeInstructions((m) => ({ ...m, [id]: j.mergePairs || [] }));
+      await scan(id); // re-scan to show what's left
+    } catch (e: any) {
+      alert(e?.message || "delete failed");
+    } finally {
+      setReversing(null);
+    }
   }
 
   const done = clients.filter((c) => results[c.id]);
@@ -131,6 +159,35 @@ export function CoaJeAuditClient() {
                   </button>
                 </div>
               </div>
+              {isOpen && r && !("error" in r) && r.rows.length > 0 && (
+                <div className="px-4 pb-2 flex justify-end">
+                  <button
+                    onClick={() => reverse(c.id, c.client_name)}
+                    disabled={reversing === c.id}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {reversing === c.id ? <Loader2 size={12} className="animate-spin" /> : null}
+                    Delete these {r.rows.length} merge JE{r.rows.length === 1 ? "" : "s"}
+                  </button>
+                </div>
+              )}
+              {isOpen && mergeInstructions[c.id] && mergeInstructions[c.id].length > 0 && (
+                <div className="px-4 pb-3">
+                  <div className="rounded-lg border border-teal/40 bg-teal-light/30 px-3 py-2">
+                    <div className="text-xs font-bold text-navy mb-1">
+                      Finish in QuickBooks — native account merge (restores transaction detail):
+                    </div>
+                    <ul className="text-xs text-ink-slate space-y-0.5 list-disc pl-4">
+                      {mergeInstructions[c.id].map((p, i) => (
+                        <li key={i}>Merge <strong>{p.source}</strong> into <strong>{p.target}</strong></li>
+                      ))}
+                    </ul>
+                    <p className="text-[11px] text-ink-light mt-1">
+                      QBO UI: rename the source to the target&apos;s exact name (same type) → QBO merges them, moving every transaction with full detail. The API can&apos;t do this step.
+                    </p>
+                  </div>
+                </div>
+              )}
               {isOpen && r && !("error" in r) && r.rows.length > 0 && (
                 <div className="px-4 pb-3 overflow-x-auto">
                   <table className="w-full text-xs">
