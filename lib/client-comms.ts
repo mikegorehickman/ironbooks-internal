@@ -334,6 +334,12 @@ export async function emailPortalUsersAboutMessage(
     portalPath?: string;
     /** CTA button label (default "Log in to reply"). */
     ctaLabel?: string;
+    /** Replace the whole email subject (else "Ironbooks sent you a … in SNAP …"). */
+    subjectOverride?: string;
+    /** Suppress the body preview in the EMAIL (security — e.g. financial
+     *  statements). The portal copy still has the full body; the email only
+     *  nudges them to log in. */
+    hideBody?: boolean;
     /**
      * When set, the send is TRACKED: it goes through the Resend id-returning
      * path and a client_email_log row is written (so the Resend webhook can
@@ -367,12 +373,15 @@ export async function emailPortalUsersAboutMessage(
       params.body.length > snippetMax ? `${params.body.slice(0, snippetMax)}…` : params.body;
     const link = `${params.portalOrigin}${params.portalPath || "/portal/messages"}`;
     const cta = params.ctaLabel || "Log in to reply";
+    const hideBody = params.hideBody === true;
+    // When the body is hidden (statements), the email says nothing but "log in".
+    const nudge = "Log in to your portal to view it securely.";
 
     // Plain-text fallback for clients whose mail app blocks HTML
     const text = [
       `Ironbooks has sent you a ${noun} in SNAP!`,
       ``,
-      snippet,
+      hideBody ? nudge : snippet,
       ``,
       `${cta}: ${link}`,
       ``,
@@ -392,9 +401,11 @@ export async function emailPortalUsersAboutMessage(
     <div style="padding:28px;">
       <h2 style="margin:0 0 6px;color:#0F1F2E;font-size:18px;">Ironbooks has sent you a ${noun} in SNAP!</h2>
       ${params.subject ? `<div style="color:#0F1F2E;font-size:14px;font-weight:600;margin:0 0 12px;">${esc(params.subject)}</div>` : ""}
-      <div style="background:#F8FAFA;border:1px solid #E5E7EB;border-left:3px solid #1A9B8F;border-radius:8px;padding:14px 16px;margin:14px 0 22px;color:#33414E;font-size:14px;line-height:1.55;">
+      ${hideBody
+        ? `<p style="margin:6px 0 22px;color:#33414E;font-size:14px;line-height:1.55;">${nudge}</p>`
+        : `<div style="background:#F8FAFA;border:1px solid #E5E7EB;border-left:3px solid #1A9B8F;border-radius:8px;padding:14px 16px;margin:14px 0 22px;color:#33414E;font-size:14px;line-height:1.55;">
         ${esc(snippet)}
-      </div>
+      </div>`}
       <a href="${link}" style="display:inline-block;background:#1A9B8F;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;">${cta}</a>
       <p style="color:#8A94A0;font-size:12px;margin:24px 0 0;line-height:1.5;">
         Do not reply to this email — replies aren't monitored.<br/>
@@ -407,7 +418,7 @@ export async function emailPortalUsersAboutMessage(
   </div>
 </div>`;
 
-    const emailSubject = `Ironbooks sent you a ${noun} in SNAP${params.subject ? ` — ${params.subject}` : ""}`;
+    const emailSubject = params.subjectOverride || `Ironbooks sent you a ${noun} in SNAP${params.subject ? ` — ${params.subject}` : ""}`;
     const replyTo = process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com";
 
     // Tracked path: capture the Resend message id + write client_email_log so
