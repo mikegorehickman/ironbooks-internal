@@ -81,11 +81,30 @@ export function OnboardingWizard({
   async function ackDocs() { if (await post({ action: "ack_docs" })) { setDocsDone(true); await finish(); } }
   async function finish() { if (await post({ action: "complete" })) router.push("/portal"); }
 
+  // "I'll do this later" — snooze the welcome sequence for THIS browser session
+  // only (a session cookie, no expiry). They drop into the portal; the sequence
+  // greets them again at the start of their next visit, and the nag banner
+  // keeps a way back in the meantime. Not persisted, so nothing is marked done.
+  function doLater() {
+    document.cookie = "snap_ob_snoozed=1; path=/; samesite=lax";
+    router.push("/portal");
+  }
+
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-navy">Welcome to Ironbooks, {clientName.split(/[ ,]/)[0]} 👋</h1>
-        <p className="text-sm text-ink-slate mt-1">A quick 3-step setup so we can get your books right. Takes about 5 minutes.</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-navy">Welcome to Ironbooks, {clientName.split(/[ ,]/)[0]} 👋</h1>
+          <p className="text-sm text-ink-slate mt-1">A quick 3-step setup so we can get your books right. Takes about 5 minutes.</p>
+        </div>
+        <button
+          type="button"
+          onClick={doLater}
+          className="flex-shrink-0 mt-1 text-sm font-semibold text-ink-slate hover:text-navy whitespace-nowrap"
+          title="Skip for now — we'll show this again next time you sign in"
+        >
+          I&apos;ll do this later
+        </button>
       </div>
 
       {/* Stepper */}
