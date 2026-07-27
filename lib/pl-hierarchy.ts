@@ -223,15 +223,16 @@ export function buildPLHierarchy(
     }
   };
 
-  for (const r of roots) {
-    const s = sectionByKey.get(r.section)!;
-    emit(r, 0, s.rows);
-  }
-  // Sort top-level groupings within a section by magnitude (stable-ish): we
-  // emitted roots in account order; re-sort section rows is complex with
-  // nesting, so leave insertion order (roots already reasonable). Compute totals.
+  // Emit each section's top-level entries sorted by magnitude (largest first),
+  // matching how children sort. Otherwise roots come out in QBO account order
+  // (~alphabetical), stranding a tiny standalone leaf like "Bank Charges" ($42)
+  // at the top while the real drivers sit buried mid-list.
   for (const s of sections) {
-    s.total = roots.filter((r) => r.section === s.key).reduce((sum, r) => sum + r.total, 0);
+    const sectionRoots = roots
+      .filter((r) => r.section === s.key)
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+    for (const r of sectionRoots) emit(r, 0, s.rows);
+    s.total = sectionRoots.reduce((sum, r) => sum + r.total, 0);
   }
 
   const totalIncome = (sectionByKey.get("income")!.total) + (sectionByKey.get("other_income")!.total);
