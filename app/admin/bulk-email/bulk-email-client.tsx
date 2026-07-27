@@ -6,13 +6,15 @@ import { wrapBrandedEmail, applyMergeFields } from "@/lib/bulk-email";
 import { renderUserSignature, type SignatureUser } from "@/lib/user-signature";
 import {
   Mail, Send, Loader2, Search, Users, AlertTriangle, CheckCircle2, Save, FileText, Clock,
-  Bold, Italic, Underline, Link2, List, ListOrdered,
+  Bold, Italic, Underline, Link2, List, ListOrdered, Palette, Trash2, X, RotateCcw,
 } from "lucide-react";
 
 interface Recipient {
   client_link_id: string;
   client_name: string;
   first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
   email: string | null;
   login_email: string | null;
   has_portal: boolean;
@@ -25,7 +27,7 @@ interface Recipient {
 }
 type Kind = "operational" | "normal" | "resubscribe";
 interface Template { id: string; name: string; subject: string; body_html: string; kind: Kind }
-interface Campaign { id: string; subject: string; kind: string; status: string; recipient_count: number; sent_count: number; failed_count: number; created_at: string }
+interface Campaign { id: string; subject: string; body_html?: string; kind: string; status: string; recipient_count: number; sent_count: number; failed_count: number; created_at: string }
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const escAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -37,6 +39,15 @@ const escAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").
  * validated href on <a>. Safe-by-construction: no arbitrary HTML/attrs survive.
  */
 const ALLOWED = new Set(["B", "STRONG", "I", "EM", "U", "A", "P", "DIV", "BR", "UL", "OL", "LI"]);
+/** Validate a CSS color from a color <span>/<font> — hex or rgb() only, so no
+ *  arbitrary style survives. Returns a normalized color string or null. */
+function safeColor(raw: string): string | null {
+  const v = (raw || "").trim().toLowerCase();
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/.test(v)) return v;
+  const m = v.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/);
+  if (m && m.slice(1, 4).every((n) => Number(n) <= 255)) return `rgb(${m[1]}, ${m[2]}, ${m[3]})`;
+  return null;
+}
 const TAG_MAP: Record<string, string> = { B: "strong", I: "em" };
 // Fixed inline spacing on block tags so sent lists/paragraphs render consistently
 // across email clients (which otherwise apply their own defaults). Not user input.
@@ -55,6 +66,13 @@ function serializeNode(node: Node): string {
     const tag = el.tagName;
     if (tag === "SCRIPT" || tag === "STYLE") return;           // drop entirely
     if (tag === "BR") { out += "<br>"; return; }
+    if (tag === "SPAN" || tag === "FONT") {
+      // Keep ONLY a validated text color (from the color picker); drop the rest.
+      const color = safeColor(tag === "FONT" ? (el.getAttribute("color") || "") : (el.style?.color || ""));
+      const inner = serializeNode(el);
+      out += color ? `<span style="color:${color};">${inner}</span>` : inner;
+      return;
+    }
     if (!ALLOWED.has(tag)) { out += serializeNode(el); return; } // unwrap unknown tag
     if (tag === "A") {
       const href = (el.getAttribute("href") || "").trim();
@@ -94,6 +112,7 @@ function RichTextEditor({
   initialHtml, onChange,
 }: { initialHtml: string; onChange: (html: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [colorOpen, setColorOpen] = useState(false);
 
   useEffect(() => {
     if (ref.current) ref.current.innerHTML = initialHtml || "";
@@ -104,6 +123,15 @@ function RichTextEditor({
   const emit = () => { if (ref.current) onChange(sanitizeEmailHtml(ref.current.innerHTML)); };
   const focusEmit = () => { ref.current?.focus(); emit(); };
   const exec = (cmd: string, val?: string) => { document.execCommand(cmd, false, val); focusEmit(); };
+  // Color needs CSS mode so it emits <span style="color:…"> (kept by the
+  // serializer); we flip styleWithCSS on just for this, then back off so
+  // bold/italic keep emitting <b>/<i> tags.
+  const applyColor = (color: string) => {
+    try { document.execCommand("styleWithCSS", false, "true"); } catch { /* noop */ }
+    document.execCommand("foreColor", false, color);
+    try { document.execCommand("styleWithCSS", false, "false"); } catch { /* noop */ }
+    focusEmit();
+  };
   const addLink = () => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed) { alert("Select the text you want to turn into a link first."); return; }
@@ -139,6 +167,27 @@ function RichTextEditor({
         <Btn title="Add link" onClick={addLink}><Link2 size={14} /></Btn>
         <Btn title="Bulleted list" onClick={() => exec("insertUnorderedList")}><List size={14} /></Btn>
         <Btn title="Numbered list" onClick={() => exec("insertOrderedList")}><ListOrdered size={14} /></Btn>
+        <div className="relative">
+          <Btn title="Text color" onClick={() => setColorOpen((o) => !o)}><Palette size={14} /></Btn>
+          {colorOpen && (
+            <div
+              className="absolute z-20 mt-1 left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 grid grid-cols-5 gap-1.5 w-max"
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              {["#0F1F2E", "#1F5D58", "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#2563EB", "#7C3AED", "#DB2777", "#64748B"].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  title={c}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { applyColor(c); setColorOpen(false); }}
+                  className="w-5 h-5 rounded-full border border-gray-200 hover:scale-110 transition-transform"
+                  style={{ background: c }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
         <span className="w-px h-5 bg-gray-200 mx-1" />
         <span className="text-[10px] text-ink-light font-semibold mr-0.5">Insert:</span>
         <Chip token="#firstname#" />
@@ -178,6 +227,9 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [manageTemplatesOpen, setManageTemplatesOpen] = useState(false);
+  const [sigTitle, setSigTitle] = useState(senderSignature.title || "");
+  const [savingSig, setSavingSig] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -242,12 +294,43 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
     else setMsg({ tone: "err", text: "Couldn't save template." });
   }
 
+  async function deleteTemplate(id: string) {
+    if (!confirm("Delete this template? This can't be undone.")) return;
+    const res = await fetch(`/api/admin/email-templates?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (res.ok) { setTemplates((ts) => ts.filter((t) => t.id !== id)); setMsg({ tone: "ok", text: "Template deleted." }); }
+    else setMsg({ tone: "err", text: "Couldn't delete template." });
+  }
+
+  // Save the (possibly edited) signature title back to my profile. Sends the
+  // full signature field set so a title-only save doesn't wipe phone/booking.
+  async function saveSigTitle() {
+    setSavingSig(true); setMsg(null);
+    try {
+      const res = await fetch("/api/me/profile", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: sigTitle, phone: senderSignature.phone, booking_url: senderSignature.booking_url, signature_enabled: true }),
+      });
+      setMsg(res.ok ? { tone: "ok", text: "Signature title saved to your profile." } : { tone: "err", text: "Couldn't save title." });
+    } catch { setMsg({ tone: "err", text: "Network error saving title." }); }
+    finally { setSavingSig(false); }
+  }
+
+  // Load a past campaign back into the composer to send again / tweak.
+  function reuseCampaign(c: Campaign) {
+    setSubject(c.subject);
+    setBodyHtml(sanitizeEmailHtml(c.body_html || ""));
+    setDocKey((k) => k + 1);
+    if (["operational", "normal", "resubscribe"].includes(c.kind)) setKind(c.kind as Kind);
+    setMsg({ tone: "ok", text: `Loaded “${c.subject}” into the composer.` });
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   async function sendTest() {
     if (!subject || !htmlToPlain(bodyHtml)) { setMsg({ tone: "err", text: "Add a subject and body first." }); return; }
     setBusy("test"); setMsg(null);
     const res = await fetch("/api/admin/bulk-email/send", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, body_html: bodyHtml, kind, test_email: senderEmail, include_signature: includeSignature }),
+      body: JSON.stringify({ subject, body_html: bodyHtml, kind, test_email: senderEmail, include_signature: includeSignature, signature_title: sigTitle }),
     });
     setBusy(null);
     setMsg(res.ok ? { tone: "ok", text: `Test sent to ${senderEmail}.` } : { tone: "err", text: "Test send failed." });
@@ -268,7 +351,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
     setBusy("send"); setMsg(null);
     const res = await fetch("/api/admin/bulk-email/send", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, body_html: bodyHtml, kind, client_ids: selectedEligible, also_portal: alsoPortal, reply_to_mode: replyMode, include_signature: includeSignature }),
+      body: JSON.stringify({ subject, body_html: bodyHtml, kind, client_ids: selectedEligible, also_portal: alsoPortal, reply_to_mode: replyMode, include_signature: includeSignature, signature_title: sigTitle }),
     });
     const d = await res.json();
     setBusy(null);
@@ -283,11 +366,21 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
         .filter(Boolean) as Recipient[])
     : [];
 
+  // Flag incomplete client records (missing name / phone) up front, so they can
+  // be fixed before send instead of being discovered in the send preview.
+  const missingFields = (r: Recipient): string[] => {
+    const m: string[] = [];
+    if (!(r.first_name || "").trim()) m.push("first name");
+    if (!(r.last_name || "").trim()) m.push("last name");
+    if (!(r.phone || "").trim()) m.push("phone");
+    return m;
+  };
   const counts = {
     eligible: eligibleFiltered.length,
     unsub: filtered.filter((r) => !r.subscribed && r.email && !r.bounced).length,
     bounced: filtered.filter((r) => r.bounced).length,
     noEmail: filtered.filter((r) => !r.email).length,
+    missingInfo: filtered.filter((r) => missingFields(r).length > 0).length,
   };
 
   return (
@@ -325,7 +418,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
           <div className="flex items-center gap-3 mb-2 text-[11px]">
             <button onClick={selectAll} className="font-semibold text-teal hover:underline">Select all eligible ({counts.eligible})</button>
             <button onClick={selectNone} className="font-semibold text-ink-slate hover:underline">Clear</button>
-            <span className="ml-auto text-ink-light">{counts.unsub} unsub · {counts.bounced} bounced · {counts.noEmail} no email</span>
+            <span className="ml-auto text-ink-light">{counts.unsub} unsub · {counts.bounced} bounced · {counts.noEmail} no email{counts.missingInfo > 0 && <span className="text-amber-700 font-semibold"> · {counts.missingInfo} missing info</span>}</span>
           </div>
           {loading ? (
             <div className="py-8 text-center text-sm text-ink-slate"><Loader2 size={16} className="animate-spin inline text-teal" /> Loading clients…</div>
@@ -334,12 +427,24 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
               {filtered.map((r) => {
                 const elig = isEligible(r);
                 const reason = !r.email ? "no email" : r.bounced ? "bounced" : (!r.subscribed && kind === "normal") ? "unsubscribed" : "";
+                const missing = missingFields(r);
                 return (
                   <li key={r.client_link_id} className={`flex items-center gap-2 px-3 py-2 ${elig ? "" : "opacity-50"}`}>
                     <input type="checkbox" disabled={!elig} checked={selected.has(r.client_link_id)} onChange={() => toggle(r.client_link_id)} className="rounded border-gray-300 text-teal" />
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-navy truncate">{r.client_name}{r.jurisdiction && <span className="text-[10px] text-ink-light ml-1.5">{r.jurisdiction}</span>}</div>
-                      <div className="text-[11px] text-ink-light truncate">{r.email || "no email on file"}</div>
+                      <div className="text-sm font-medium text-navy truncate flex items-center gap-1">
+                        <span className="truncate">{r.client_name}</span>
+                        {r.jurisdiction && <span className="text-[10px] text-ink-light">{r.jurisdiction}</span>}
+                        {missing.length > 0 && (
+                          <span title={`Missing on this client's profile: ${missing.join(", ")}`} className="inline-flex items-center flex-shrink-0">
+                            <AlertTriangle size={11} className="text-amber-500" />
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-ink-light truncate">
+                        {r.email || "no email on file"}
+                        {missing.length > 0 && <span className="text-amber-600"> · no {missing.join(", no ")}</span>}
+                      </div>
                     </div>
                     {reason && <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 flex-shrink-0">{reason}</span>}
                   </li>
@@ -353,7 +458,12 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
         {/* Composer */}
         <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
           <div className="flex items-center gap-2"><Mail size={15} className="text-teal" /><h3 className="text-sm font-bold text-navy">Compose</h3>
-            {templates.length > 0 && <select onChange={(e) => e.target.value && loadTemplate(e.target.value)} className="ml-auto text-[11px] rounded-md border border-gray-200 px-2 py-1" defaultValue=""><option value="">Load template…</option>{templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
+            {templates.length > 0 && (
+              <div className="ml-auto flex items-center gap-1.5">
+                <select onChange={(e) => e.target.value && loadTemplate(e.target.value)} className="text-[11px] rounded-md border border-gray-200 px-2 py-1" defaultValue=""><option value="">Load template…</option>{templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+                <button type="button" onClick={() => setManageTemplatesOpen(true)} title="View and delete saved templates" className="text-[11px] font-semibold text-ink-slate border border-gray-200 rounded-md px-2 py-1 hover:border-gray-300 hover:text-navy">Manage</button>
+              </div>
+            )}
           </div>
           <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" />
           <RichTextEditor key={docKey} initialHtml={bodyHtml} onChange={setBodyHtml} />
@@ -365,6 +475,26 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
               <select value={replyMode} onChange={(e) => setReplyMode(e.target.value as any)} className="rounded-md border border-gray-200 px-1.5 py-0.5"><option value="bookkeeper">Assigned preparer</option><option value="support">admin@ironbooks.com</option></select>
             </label>
           </div>
+          {includeSignature && (
+            <div className="flex items-center gap-2 flex-wrap text-xs bg-slate-50 border border-gray-100 rounded-lg px-3 py-2">
+              <span className="text-ink-light font-semibold">Signature title:</span>
+              <input
+                value={sigTitle}
+                onChange={(e) => setSigTitle(e.target.value)}
+                placeholder="e.g. Executive Director/CFO"
+                className="flex-1 min-w-[160px] rounded-md border border-gray-200 px-2 py-1 text-navy"
+              />
+              <button
+                type="button"
+                onClick={saveSigTitle}
+                disabled={savingSig}
+                title="Save this title to your profile so it's the default next time"
+                className="inline-flex items-center gap-1 font-semibold border border-gray-200 rounded-md px-2 py-1 hover:border-gray-300 hover:text-navy disabled:opacity-50"
+              >
+                {savingSig ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} Save to my profile
+              </button>
+            </div>
+          )}
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-ink-light mb-1">Preview · branded Ironbooks template (sample merge)</div>
             <div className="rounded-lg border border-gray-200 overflow-auto max-h-[420px]"
@@ -373,7 +503,7 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
                   bodyHtml: applyMergeFields(
                     bodyHtml || "<p style=\"color:#94A3B8;\">Your message goes here. The Ironbooks header, logo, and footer are added automatically.</p>",
                     { firstName: "Daniel", businessName: "Acme Painting", loginEmail: "daniel@acmepainting.com" }
-                  ) + (includeSignature ? renderUserSignature({ ...senderSignature, signature_enabled: true }) : ""),
+                  ) + (includeSignature ? renderUserSignature({ ...senderSignature, title: sigTitle, signature_enabled: true }) : ""),
                   footerHtml: kind === "normal"
                     ? "You're receiving this because you're an Ironbooks client. <span style=\"color:#1F5D58;font-weight:600;\">Unsubscribe</span> from updates like this."
                     : kind === "resubscribe"
@@ -404,23 +534,85 @@ export function BulkEmailClient({ senderEmail, senderName, senderSignature }: { 
         />
       )}
 
-      {/* History */}
-      {campaigns.length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <div className="flex items-center gap-2 mb-3"><Clock size={15} className="text-teal" /><h3 className="text-sm font-bold text-navy">Recent campaigns</h3></div>
-          <div className="divide-y divide-gray-50">
+      {/* History — every past campaign (newest first); "Reuse" loads one back
+          into the composer. */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock size={15} className="text-teal" />
+          <h3 className="text-sm font-bold text-navy">Recent campaigns</h3>
+          <span className="ml-auto text-[11px] text-ink-light">{campaigns.length} sent</span>
+        </div>
+        {campaigns.length === 0 ? (
+          <div className="py-6 text-center text-xs text-ink-light italic">No campaigns sent yet.</div>
+        ) : (
+          <div className="divide-y divide-gray-50 max-h-[340px] overflow-y-auto">
             {campaigns.map((c) => (
               <div key={c.id} className="flex items-center gap-3 py-2 text-sm">
                 <span className="flex-1 min-w-0 truncate text-navy">{c.subject}</span>
                 <span className="text-[10px] uppercase font-semibold text-ink-light">{c.kind}</span>
-                <span className="text-xs text-ink-slate">{c.sent_count}/{c.recipient_count} sent{c.failed_count > 0 && <span className="text-red-600"> · {c.failed_count} failed</span>}</span>
+                <span className="text-xs text-ink-slate whitespace-nowrap">{c.sent_count}/{c.recipient_count} sent{c.failed_count > 0 && <span className="text-red-600"> · {c.failed_count} failed</span>}</span>
                 {c.status === "sent" ? <CheckCircle2 size={14} className="text-emerald-600" /> : c.status === "sending" ? <Loader2 size={14} className="animate-spin text-teal" /> : <AlertTriangle size={14} className="text-amber-500" />}
                 <span className="text-[10px] text-ink-light w-20 text-right">{new Date(c.created_at).toLocaleDateString()}</span>
+                <button
+                  type="button"
+                  onClick={() => reuseCampaign(c)}
+                  title="Load this campaign's subject and body back into the composer"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal-dark border border-teal/20 bg-teal-lighter rounded-md px-2 py-0.5 hover:bg-teal-light flex-shrink-0"
+                >
+                  <RotateCcw size={11} /> Reuse
+                </button>
               </div>
             ))}
           </div>
-        </div>
+        )}
+      </div>
+
+      {manageTemplatesOpen && (
+        <ManageTemplatesModal
+          templates={templates}
+          onLoad={(id) => { loadTemplate(id); setManageTemplatesOpen(false); }}
+          onDelete={deleteTemplate}
+          onClose={() => setManageTemplatesOpen(false)}
+        />
       )}
+    </div>
+  );
+}
+
+/** Modal to review saved templates and delete ones no longer needed. */
+function ManageTemplatesModal({
+  templates, onLoad, onDelete, onClose,
+}: {
+  templates: Template[];
+  onLoad: (id: string) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="text-base font-bold text-navy flex items-center gap-2"><FileText size={16} className="text-teal" /> Saved templates</h3>
+          <button onClick={onClose} className="text-ink-light hover:text-navy"><X size={16} /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 divide-y divide-gray-50">
+          {templates.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-ink-light italic">No saved templates.</div>
+          ) : templates.map((t) => (
+            <div key={t.id} className="flex items-center gap-3 px-5 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-navy truncate">{t.name}</div>
+                <div className="text-[11px] text-ink-light truncate">{t.subject} · <span className="uppercase">{t.kind}</span></div>
+              </div>
+              <button onClick={() => onLoad(t.id)} className="text-[11px] font-semibold text-teal-dark border border-teal/20 bg-teal-lighter rounded-md px-2 py-1 hover:bg-teal-light flex-shrink-0">Load</button>
+              <button onClick={() => onDelete(t.id)} title="Delete this template" className="inline-flex items-center p-1.5 rounded-md border border-gray-200 text-ink-light hover:text-red-600 hover:border-red-200 flex-shrink-0"><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
+        <div className="px-5 py-3 border-t border-gray-100 text-right">
+          <button onClick={onClose} className="text-sm font-semibold border border-gray-200 px-3 py-2 rounded-lg hover:border-gray-300">Done</button>
+        </div>
+      </div>
     </div>
   );
 }
