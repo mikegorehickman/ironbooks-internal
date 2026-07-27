@@ -136,6 +136,119 @@ export function purchasePstRate(
 /** Memo stamped on every transaction the apply step edits (idempotency). */
 export const GST_EXTRACTION_MEMO = "SNAP GST/HST extraction";
 
+// ── Analysis window resolution ───────────────────────────────────────────────
+
+/** Add days to a YYYY-MM-DD date (UTC, no timezone drift). */
+function addDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** Same calendar day one year earlier. */
+function minusOneYear(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y - 1, m - 1, d)).toISOString().slice(0, 10);
+}
+
+export interface WindowResolution {
+  start: string;
+  end: string;
+  /** Plain-English explanation of why this window — shown next to the client. */
+  reason: string;
+  /** Window would have reached further back but was clamped to one year. */
+  cappedByOneYear: boolean;
+  /** Window would have reached into books closed in QBO. */
+  cappedByClosingDate: boolean;
+  /** Start picked up where a previous separation left off (no work redone). */
+  resumedFromPriorRun: boolean;
+}
+
+/**
+ * Resolve the window to analyze for one client.
+ *
+ * Rules (Mike 2026-07-27 — "YTD, or the last time GST/HST/PST was separated,
+ * but at most 1 year"):
+ *   - Default to year-to-date (Jan 1 of the current year → today).
+ *   - If tax was already separated through some date, resume the day after it
+ *     so nothing already done is re-examined — even when that reaches back
+ *     before Jan 1.
+ *   - Never reach back more than ONE YEAR from today.
+ *   - Never reach into a period closed in QBO (those writes would be rejected
+ *     anyway, and a filed period shouldn't move).
+ * An explicit start/end always wins — this only supplies the default.
+ */
+export function resolveExtractionWindow(opts: {
+  today: string;
+  /** Last date through which GST/HST/PST is already separated, if known. */
+  lastSeparatedThrough?: string | null;
+  /** QBO books-closed-through date, if set. */
+  closingDate?: string | null;
+  explicitStart?: string | null;
+  explicitEnd?: string | null;
+}): WindowResolution {
+  const { today, lastSeparatedThrough, closingDate, explicitStart, explicitEnd } = opts;
+  const end = explicitEnd || today;
+
+  if (explicitStart) {
+    return {
+      start: explicitStart,
+      end,
+      reason: `Custom window ${explicitStart} → ${end}`,
+      cappedByOneYear: false,
+      cappedByClosingDate: false,
+      resumedFromPriorRun: false,
+    };
+  }
+
+  const yearStart = `${today.slice(0, 4)}-01-01`;
+  const oneYearFloor = minusOneYear(today);
+  const closedFloor = closingDate ? addDays(closingDate, 1) : null;
+
+  // Where we'd like to start: after the last separation, else the start of the year.
+  const resumed = !!lastSeparatedThrough;
+  let start = resumed ? addDays(lastSeparatedThrough!, 1) : yearStart;
+  const wanted = start;
+
+  // Apply the floors — the latest floor wins.
+  let cappedByOneYear = false;
+  let cappedByClosingDate = false;
+  if (start < oneYearFloor) {
+    start = oneYearFloor;
+    cappedByOneYear = true;
+  }
+  if (closedFloor && start < closedFloor) {
+    start = closedFloor;
+    cappedByClosingDate = true;
+  }
+
+  // A resume point in the future of `end` means there's nothing left to do.
+  if (start > end) {
+    return {
+      start,
+      end,
+      reason: `Nothing to analyze — already separated through ${lastSeparatedThrough}`,
+      cappedByOneYear,
+      cappedByClosingDate,
+      resumedFromPriorRun: resumed,
+    };
+  }
+
+  let reason: string;
+  if (resumed && start === wanted) {
+    reason = `Resumes the day after ${lastSeparatedThrough}, the last date tax was separated`;
+  } else if (cappedByClosingDate) {
+    reason = `Starts after the QBO closing date (${closingDate}) — closed books aren't touched`;
+  } else if (cappedByOneYear) {
+    reason = "Clamped to one year back — the furthest this tool will reach";
+  } else {
+    reason = `Year to date — no earlier tax separation found`;
+  }
+
+  return { start, end, reason, cappedByOneYear, cappedByClosingDate, resumedFromPriorRun: resumed };
+}
+
 const r2 = (n: number) => Math.round((n || 0) * 100) / 100;
 
 export interface ProvinceRates {

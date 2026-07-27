@@ -17,6 +17,7 @@
  */
 
 import { qboRequest, fetchAllAccounts, createAccount, type QBOAccount } from "./qbo";
+import { getCompanyClosingDate } from "./qbo-reclass";
 import { fetchPLDetailAll, fetchProfitAndLoss } from "./qbo-reports";
 import { incomeAccountNamesFromSummary } from "./crm-invoice-revenue";
 import {
@@ -24,14 +25,105 @@ import {
   classifyAccountKind,
   normalizeAccountKey,
   taxAccountNamesFor,
+  resolveExtractionWindow,
+  ALL_TAX_ACCOUNT_NAMES,
   GST_EXTRACTION_MEMO,
   type ExtractionPlan,
   type GstInputKind,
   type DepositLinePlan,
   type ExpenseLinePlan,
+  type WindowResolution,
 } from "./gst-extraction";
 
 const r2 = (n: number) => Math.round((n || 0) * 100) / 100;
+
+// ── 0. Shared analysis-window resolver ───────────────────────────────────────
+
+export interface ResolvedWindow extends WindowResolution {
+  /** Total balance sitting in the client's tax accounts right now. Non-zero
+   *  means tax has been separated at some point — used to warn when we have no
+   *  record of who did it or through when. */
+  taxAccountBalance: number;
+  /** Tax accounts that already exist in the client's QBO. */
+  existingTaxAccounts: string[];
+  /** True when tax is clearly already being separated but we have no prior run
+   *  of our own to resume from — the window may overlap already-done work. */
+  priorSeparationUnverified: boolean;
+}
+
+/**
+ * Resolve the analysis window for one client, used by BOTH preview and apply so
+ * they can never disagree about what's in scope.
+ *
+ * Signals, cheapest first:
+ *   - our own completed (non-dry-run) applies in audit_log → the precise date
+ *     we already separated through, so a re-run resumes instead of redoing;
+ *   - the QBO closing date → never reach into closed/filed books;
+ *   - a one-year floor → the furthest back this tool will ever look;
+ *   - the tax accounts' current balance (free with the account list) → tells us
+ *     tax has been separated before even when we didn't do it, which we surface
+ *     as a warning rather than guessing a date.
+ */
+export async function resolveAnalysisWindow(
+  service: any,
+  clientLinkId: string,
+  realmId: string,
+  token: string,
+  opts?: { explicitStart?: string | null; explicitEnd?: string | null; today?: string }
+): Promise<ResolvedWindow> {
+  const today = opts?.today || new Date().toISOString().slice(0, 10);
+
+  // 1. The last date WE separated through (completed runs only).
+  let lastSeparatedThrough: string | null = null;
+  try {
+    const { data } = await service
+      .from("audit_log")
+      .select("request_payload")
+      .eq("event_type", "gst_extraction_apply")
+      .eq("request_payload->>client_link_id", clientLinkId)
+      .order("occurred_at", { ascending: false })
+      .limit(50);
+    for (const row of (data as any[]) || []) {
+      const p = row?.request_payload || {};
+      // Only completed, real (non-dry-run) passes count as separated.
+      if (p.dry_run === true || !p.done) continue;
+      const end = p?.window?.end;
+      if (typeof end === "string" && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
+        if (!lastSeparatedThrough || end > lastSeparatedThrough) lastSeparatedThrough = end;
+      }
+    }
+  } catch {
+    /* audit_log unavailable — fall through to the year-to-date default */
+  }
+
+  // 2. Closed books + 3. existing tax accounts (one account-list call).
+  const [closingDate, accounts] = await Promise.all([
+    getCompanyClosingDate(realmId, token).catch(() => null),
+    fetchAllAccounts(realmId, token).catch(() => [] as QBOAccount[]),
+  ]);
+
+  const taxNames = new Set(ALL_TAX_ACCOUNT_NAMES.map((n) => normalizeAccountKey(n)));
+  const existing = accounts.filter((a) => taxNames.has(normalizeAccountKey(a.Name)));
+  const taxAccountBalance = r2(
+    existing.reduce((sum, a) => sum + Math.abs(Number((a as any).CurrentBalance) || 0), 0)
+  );
+
+  const base = resolveExtractionWindow({
+    today,
+    lastSeparatedThrough,
+    closingDate,
+    explicitStart: opts?.explicitStart,
+    explicitEnd: opts?.explicitEnd,
+  });
+
+  return {
+    ...base,
+    taxAccountBalance,
+    existingTaxAccounts: existing.map((a) => a.Name),
+    // Tax is demonstrably being tracked, but nothing of ours says through when.
+    priorSeparationUnverified: taxAccountBalance > 0 && !lastSeparatedThrough && !opts?.explicitStart,
+  };
+}
 
 // ── 1. Shared context resolver ───────────────────────────────────────────────
 

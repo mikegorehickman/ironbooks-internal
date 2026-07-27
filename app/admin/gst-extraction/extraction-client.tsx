@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   Loader2, AlertTriangle, ChevronDown, ChevronRight, ExternalLink,
-  CheckCircle2, Eye, Play, ShieldCheck,
+  CheckCircle2, Eye, Play, ShieldCheck, CalendarRange,
 } from "lucide-react";
 
 interface ClientRow {
@@ -31,6 +31,16 @@ interface Preview {
     expenseGross: number;
     itcTotal: number;
   };
+  window_reason?: string;
+  window_flags?: {
+    resumed_from_prior_run: boolean;
+    capped_by_one_year: boolean;
+    capped_by_closing_date: boolean;
+    prior_separation_unverified: boolean;
+  };
+  tax_account_balance?: number;
+  existing_tax_accounts?: string[];
+  nothing_to_do?: boolean;
   accounts: any;
   heuristic_kinds?: HeuristicKind[];
   vendor_itc_summary?: VendorItc[];
@@ -103,9 +113,11 @@ export function GstExtractionClient({ clients }: { clients: ClientRow[] }) {
         ? money(pv?.totals?.gstHstCollected)
         : money(pv?.totals?.itcTotal);
       const label = side === "income" ? "sales tax out of revenue" : "ITCs out of expenses";
+      const period = pv?.window ? `${pv.window.start} → ${pv.window.end}` : "the analysed period";
       const okGo = window.confirm(
         `WRITE TO QUICKBOOKS for ${name}?\n\n` +
-        `This splits ${label} across 2026-YTD transactions (about ${amount}).\n\n` +
+        `Period: ${period}\n` +
+        `This splits ${label} across that period (about ${amount}).\n\n` +
         `Transaction totals never change. Every edit is snapshotted first and re-runs are safe.\n\n` +
         `Continue?`
       );
@@ -193,6 +205,11 @@ export function GstExtractionClient({ clients }: { clients: ClientRow[] }) {
             idempotent (each edited transaction is memo-stamped), so a second click can&apos;t double-split.
           </li>
           <li>
+            <strong>Period analysed:</strong> year-to-date by default. If tax was already separated through some
+            date, it picks up the day after so nothing is redone — reaching back <strong>at most one year</strong>,
+            and never into books closed in QuickBooks. The exact period is shown per client on Preview.
+          </li>
+          <li>
             Closed periods are skipped automatically. <strong>Preview and Dry run never write anything.</strong>
           </li>
         </ul>
@@ -203,7 +220,7 @@ export function GstExtractionClient({ clients }: { clients: ClientRow[] }) {
           {clients.length} Canadian client{clients.length === 1 ? "" : "s"} with a QuickBooks connection
           {previewed.length > 0 && <> · {previewed.length} previewed</>}
         </div>
-        <div className="text-xs text-ink-light">Window: 2026-01-01 → today</div>
+        <div className="text-xs text-ink-light">Period is resolved per client on Preview</div>
       </div>
 
       <div className="rounded-xl border border-cardline bg-white overflow-hidden divide-y divide-hairline">
@@ -239,7 +256,10 @@ export function GstExtractionClient({ clients }: { clients: ClientRow[] }) {
                   )}
                   {p && (
                     <span className="text-[11px] text-ink-slate flex-shrink-0 tabular-nums">
-                      · {money(p.totals?.gstHstCollected)} tax · {money(p.totals?.itcTotal)} ITCs
+                      · {p.window.start} → {p.window.end}
+                      {p.nothing_to_do
+                        ? " · nothing to do"
+                        : ` · ${money(p.totals?.gstHstCollected)} tax · ${money(p.totals?.itcTotal)} ITCs`}
                     </span>
                   )}
                   {pv && "error" in pv && (
@@ -264,6 +284,52 @@ export function GstExtractionClient({ clients }: { clients: ClientRow[] }) {
               {/* Detail */}
               {isOpen && p && (
                 <div className="px-4 pb-4 space-y-4 bg-canvas/40">
+                  {/* Analysed timeframe — always stated, with the reason for it */}
+                  <div className="rounded-lg border border-cardline bg-white px-3 py-2">
+                    <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-1.5">
+                        <CalendarRange size={13} className="text-teal-dark flex-shrink-0" />
+                        <span className="font-brand text-[10px] uppercase tracking-[0.1em] text-ink-light">
+                          Analysed period
+                        </span>
+                        <span className="text-sm font-bold text-navy tabular-nums">
+                          {p.window.start} → {p.window.end}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {p.window_flags?.resumed_from_prior_run && <Chip tone="teal">Resumed</Chip>}
+                        {p.window_flags?.capped_by_one_year && <Chip tone="gold">1-year cap</Chip>}
+                        {p.window_flags?.capped_by_closing_date && <Chip tone="gold">Closed books</Chip>}
+                      </div>
+                    </div>
+                    {p.window_reason && (
+                      <div className="text-[11.5px] text-ink-slate mt-1">{p.window_reason}</div>
+                    )}
+                  </div>
+
+                  {p.nothing_to_do && (
+                    <div className="rounded-lg border border-teal-border bg-teal-lighter px-3 py-2 text-xs text-teal-dark">
+                      <strong>Nothing to extract.</strong> Tax is already separated through the end of this
+                      period, so there&apos;s no work to do for this client right now.
+                    </div>
+                  )}
+
+                  {/* Tax already tracked but we don't know through when — the
+                      double-extraction risk if the window overlaps prior work. */}
+                  {p.window_flags?.prior_separation_unverified && (
+                    <div className="rounded-lg border border-gold-border bg-gold-tint px-3 py-2 text-xs text-gold-deep">
+                      <strong>Check before applying:</strong> this client&apos;s tax accounts already hold{" "}
+                      <strong>{money(p.tax_account_balance)}</strong>
+                      {p.existing_tax_accounts && p.existing_tax_accounts.length > 0 && (
+                        <> ({p.existing_tax_accounts.join(", ")})</>
+                      )}
+                      , so tax has been separated at some point — but SNAP has no record of doing it, which means
+                      it was done by hand or by QuickBooks&apos; own sales tax. If any transaction inside this
+                      period was already split, extracting again would double-count it. Confirm where the manual
+                      work stopped, then narrow the period if needed.
+                    </div>
+                  )}
+
                   {/* Planned totals */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <Stat label="Revenue in scope" value={money(p.totals?.incomeGross)} sub={`${p.deposit_count} deposit lines`} />
@@ -464,5 +530,14 @@ function ActionBtn({
       {kind === "live" ? <Play size={12} /> : <Eye size={12} />}
       {children}
     </button>
+  );
+}
+
+function Chip({ tone, children }: { tone: "teal" | "gold"; children: React.ReactNode }) {
+  const cls = tone === "teal"
+    ? "bg-teal-light text-teal-dark border-teal-border"
+    : "bg-gold-tint text-gold-deep border-gold-border";
+  return (
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${cls}`}>{children}</span>
   );
 }

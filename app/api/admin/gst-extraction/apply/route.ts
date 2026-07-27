@@ -4,6 +4,7 @@ import { getValidToken, fetchAllAccounts } from "@/lib/qbo";
 import { getCompanyClosingDate } from "@/lib/qbo-reclass";
 import { normalizeAccountKey } from "@/lib/gst-extraction";
 import {
+  resolveAnalysisWindow,
   resolveExtractionContext,
   ensureTaxAccounts,
   groupDepositPlans,
@@ -55,9 +56,8 @@ export async function POST(request: Request) {
   if (!clientLinkId) return NextResponse.json({ error: "client_link_id required" }, { status: 400 });
   const dryRun = body.dry_run !== false; // default TRUE
   const side: "income" | "expenses" | "both" = ["income", "expenses"].includes(body.side) ? body.side : "both";
-  const year = new Date().getFullYear();
-  const start = /^\d{4}-\d{2}-\d{2}$/.test(body.start || "") ? body.start : `${year}-01-01`;
-  const end = /^\d{4}-\d{2}-\d{2}$/.test(body.end || "") ? body.end : new Date().toISOString().slice(0, 10);
+  const explicitStart = /^\d{4}-\d{2}-\d{2}$/.test(body.start || "") ? body.start : null;
+  const explicitEnd = /^\d{4}-\d{2}-\d{2}$/.test(body.end || "") ? body.end : null;
 
   const { data: client } = await (service as any)
     .from("client_links")
@@ -80,6 +80,23 @@ export async function POST(request: Request) {
     const excludeVendors: string[] = Array.isArray(body.exclude_vendors)
       ? body.exclude_vendors.map(String)
       : [];
+
+    // Same window the preview showed: year-to-date, or resuming after the last
+    // date tax was separated, capped at one year and never inside closed books.
+    // Shared resolver so preview and apply can't disagree about scope.
+    const win = await resolveAnalysisWindow(service, clientLinkId, realm, token, {
+      explicitStart,
+      explicitEnd,
+    });
+    const { start, end } = win;
+    if (start > end) {
+      return NextResponse.json({
+        dry_run: dryRun, side, window: { start, end }, window_reason: win.reason,
+        nothing_to_do: true, done: true, remaining: 0,
+        deposits: { planned_txns: 0, split: 0, would_split: 0, failed: 0, skipped_already: 0, skipped_closed: 0, skipped_stale: 0 },
+        expenses: { planned_txns: 0, split: 0, would_split: 0, failed: 0, skipped_already: 0, skipped_closed: 0, skipped_stale: 0 },
+      });
+    }
     const ctx = await resolveExtractionContext(service, client as any, token, start, end, excludeVendors);
     if ("error" in ctx) return NextResponse.json({ error: ctx.error }, { status: 400 });
     const { plan } = ctx;

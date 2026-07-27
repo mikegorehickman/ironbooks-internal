@@ -12,6 +12,7 @@ import {
   classifyAccountKind,
   normalizeAccountKey,
   taxAccountNamesFor,
+  resolveExtractionWindow,
 } from "../lib/gst-extraction";
 
 let pass = 0, fail = 0;
@@ -146,6 +147,65 @@ ok("unknown → null", classifyAccountKind("Zzz Unmapped") === null);
 ok("normalizeAccountKey folds dashes/ampersands",
   normalizeAccountKey("Subcontractors – Painting") === normalizeAccountKey("subcontractors & painting".replace("&", "-")) ||
   normalizeAccountKey("Repairs & Maintenance") === "repairs and maintenance");
+
+// ── Window resolution: YTD, or resume after last separation, max 1 year ────
+const TODAY = "2026-07-27";
+{
+  // Nothing separated before → year to date.
+  const w = resolveExtractionWindow({ today: TODAY });
+  ok("no prior separation → YTD", w.start === "2026-01-01" && w.end === TODAY);
+  ok("YTD reason states no earlier separation", /year to date/i.test(w.reason));
+  ok("YTD is not a resume", !w.resumedFromPriorRun);
+}
+{
+  // Separated through March → resume April 1, skipping work already done.
+  const w = resolveExtractionWindow({ today: TODAY, lastSeparatedThrough: "2026-03-31" });
+  ok("resumes the day after the last separation", w.start === "2026-04-01");
+  ok("resume is flagged", w.resumedFromPriorRun && /2026-03-31/.test(w.reason));
+}
+{
+  // Separated through Sept 2025 → reaching back before Jan 1 is allowed…
+  const w = resolveExtractionWindow({ today: TODAY, lastSeparatedThrough: "2025-09-30" });
+  ok("resume may reach before Jan 1", w.start === "2025-10-01" && !w.cappedByOneYear);
+}
+{
+  // …but never more than a year back.
+  const w = resolveExtractionWindow({ today: TODAY, lastSeparatedThrough: "2023-12-31" });
+  ok("clamped to one year back", w.start === "2025-07-27" && w.cappedByOneYear);
+  ok("one-year clamp is explained", /one year/i.test(w.reason));
+}
+{
+  // Closed books win over both — a filed period must not move.
+  const w = resolveExtractionWindow({
+    today: TODAY, lastSeparatedThrough: "2025-09-30", closingDate: "2026-04-30",
+  });
+  ok("closing date floors the window", w.start === "2026-05-01" && w.cappedByClosingDate);
+  ok("closing-date clamp is explained", /closing date/i.test(w.reason));
+}
+{
+  // Closing date earlier than the natural start changes nothing.
+  const w = resolveExtractionWindow({ today: TODAY, closingDate: "2025-12-31" });
+  ok("closing date before YTD start is a no-op", w.start === "2026-01-01" && !w.cappedByClosingDate);
+}
+{
+  // Already fully separated → nothing to do.
+  const w = resolveExtractionWindow({ today: TODAY, lastSeparatedThrough: TODAY });
+  ok("already current → nothing to analyze", w.start > w.end && /nothing to analyze/i.test(w.reason));
+}
+{
+  // Explicit dates always win.
+  const w = resolveExtractionWindow({
+    today: TODAY, explicitStart: "2026-02-01", explicitEnd: "2026-02-28",
+    lastSeparatedThrough: "2026-06-30", closingDate: "2026-05-31",
+  });
+  ok("explicit window overrides every rule", w.start === "2026-02-01" && w.end === "2026-02-28");
+  ok("explicit window is labelled custom", /custom/i.test(w.reason));
+}
+{
+  // Leap-year safety on the one-year floor.
+  const w = resolveExtractionWindow({ today: "2028-02-29", lastSeparatedThrough: "2020-01-01" });
+  ok("leap-day one-year floor is a valid date", /^\d{4}-\d{2}-\d{2}$/.test(w.start) && w.start === "2027-02-28" || w.start === "2027-03-01");
+}
 
 console.log(`\ngst-extraction: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
