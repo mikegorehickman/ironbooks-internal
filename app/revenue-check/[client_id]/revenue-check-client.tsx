@@ -53,11 +53,15 @@ export function RevenueCheckClient({
   const [payrollRunning, setPayrollRunning] = useState(false);
   const [payrollError, setPayrollError] = useState<string | null>(null);
   const [payroll, setPayroll] = useState<any>(null);
+  const [arRunning, setArRunning] = useState(false);
+  const [arError, setArError] = useState<string | null>(null);
+  const [ar, setAr] = useState<any>(null);
 
   async function run() {
     setRunning(true);
     setError(null);
     runPayroll(); // independent — one check failing must not hide the other
+    runAr();
     try {
       const res = await fetch("/api/admin/crm-invoice-pairs", {
         method: "POST",
@@ -92,6 +96,24 @@ export function RevenueCheckClient({
       setPayrollError(e?.message || "Payroll check failed");
     } finally {
       setPayrollRunning(false);
+    }
+  }
+
+  // A/R integrity — is the open A/R real, or invoices that were collected but
+  // never matched to their deposits? Independent of the date range (A/R is a
+  // point-in-time balance), so it doesn't re-run when the range changes.
+  async function runAr() {
+    setArRunning(true);
+    setArError(null);
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/ar-integrity`, { method: "POST" });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setAr(j.report);
+    } catch (e: any) {
+      setArError(e?.message || "A/R check failed");
+    } finally {
+      setArRunning(false);
     }
   }
 
@@ -344,6 +366,136 @@ export function RevenueCheckClient({
         );
       })()}
 
+      {/* A/R integrity — the third gate on this step. Phantom receivables are
+          the flip side of the double-count: the deposit went to revenue
+          instead of being applied to its invoice, so the invoice never closed. */}
+      {(() => {
+        const tone = arRunning || (!ar && !arError)
+          ? "border-gray-200 bg-white"
+          : arError
+          ? "border-red-200 bg-red-50"
+          : ar?.verdict === "unreliable"
+          ? "border-red-300 bg-red-50"
+          : ar?.verdict === "suspect"
+          ? "border-amber-300 bg-amber-50"
+          : "border-emerald-200 bg-emerald-50";
+        const bad = ar?.verdict === "unreliable";
+        const mid = ar?.verdict === "suspect";
+        return (
+          <div className={`rounded-2xl border-2 p-4 ${tone}`}>
+            <div className="flex items-start gap-2.5">
+              {arRunning ? (
+                <Loader2 size={18} className="animate-spin text-ink-slate shrink-0 mt-0.5" />
+              ) : bad || mid ? (
+                <AlertTriangle size={18} className={`shrink-0 mt-0.5 ${bad ? "text-red-600" : "text-amber-600"}`} />
+              ) : (
+                <CheckCircle2 size={18} className={`shrink-0 mt-0.5 ${arError ? "text-red-400" : "text-emerald-600"}`} />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className={`font-bold text-sm ${bad ? "text-red-900" : mid ? "text-amber-900" : arError ? "text-red-900" : "text-emerald-900"}`}>
+                  A/R integrity
+                  {arRunning
+                    ? " — checking…"
+                    : bad
+                    ? " — receivables are not trustworthy"
+                    : mid
+                    ? " — receivables look questionable"
+                    : arError
+                    ? ""
+                    : " — clean"}
+                </div>
+                {arError && <p className="text-xs mt-0.5 text-red-800">{arError}</p>}
+                {ar && !arRunning && (
+                  <>
+                    <p className={`text-xs mt-0.5 ${bad ? "text-red-800" : mid ? "text-amber-800" : "text-emerald-800"}`}>
+                      {ar.reason}
+                    </p>
+                    <div className="flex flex-wrap gap-4 mt-2 text-xs">
+                      <span>Open A/R: <strong className="font-mono">{fmt(ar.totalOpen)}</strong> ({ar.totalCount} invoices)</span>
+                      {ar.oldestDays != null && <span>Oldest: <strong className="font-mono">{Number(ar.oldestDays).toLocaleString()}d</strong></span>}
+                      <span>Over 90 days: <strong className="font-mono">{Math.round(ar.pctOver90)}%</strong></span>
+                      {ar.arToMonthlyRevenue != null && (
+                        <span>vs monthly revenue: <strong className="font-mono">{ar.arToMonthlyRevenue}×</strong></span>
+                      )}
+                    </div>
+                    {ar.flagged && (
+                      <>
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                          <div className="rounded-lg bg-white/70 border border-black/5 px-2.5 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-ink-light">Closed years</div>
+                            <div className="font-mono font-semibold">{fmt(ar.priorYearTotal)}</div>
+                            <div className="text-[10px] text-ink-slate">{ar.priorYearCount} invoices · before {ar.fiscalYearStart}</div>
+                          </div>
+                          <div className="rounded-lg bg-white/70 border border-black/5 px-2.5 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-ink-light">This year, over 90d</div>
+                            <div className="font-mono font-semibold">{fmt(ar.staleTotal)}</div>
+                            <div className="text-[10px] text-ink-slate">{ar.staleCount} invoices · try to match</div>
+                          </div>
+                          <div className="rounded-lg bg-white/70 border border-black/5 px-2.5 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-ink-light">Recent (≤90d)</div>
+                            <div className="font-mono font-semibold">{fmt(ar.recentTotal)}</div>
+                            <div className="text-[10px] text-ink-slate">{ar.recentCount} invoices · likely real</div>
+                          </div>
+                        </div>
+                        <div className={`mt-2 text-xs rounded-lg px-2.5 py-1.5 border ${bad ? "bg-white/60 border-red-200 text-red-900" : "bg-white/60 border-amber-200 text-amber-900"}`}>
+                          <strong>These are unmatched invoices, not bad debt.</strong> Don&apos;t write them
+                          off — that says &ldquo;never collected&rdquo; and hits the current period. Current-year
+                          items: match the deposit to the invoice in the UF / A/R Reconciler. Closed-year
+                          items: prior-period adjustment to equity, with CPA sign-off.
+                        </div>
+                        {ar.topCustomers?.length > 0 && (
+                          <details className="mt-2 group">
+                            <summary className="cursor-pointer select-none text-xs font-semibold text-ink-slate hover:text-navy list-none">
+                              ▸ Worst customers ({ar.topCustomers.length})
+                            </summary>
+                            <div className="mt-1.5 overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-left text-[10px] uppercase tracking-wide text-ink-light border-b border-black/10">
+                                    <th className="py-1 pr-3">Customer</th>
+                                    <th className="py-1 pr-3 text-right">Open</th>
+                                    <th className="py-1 pr-3 text-right">Invoices</th>
+                                    <th className="py-1 text-right">Oldest</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {ar.topCustomers.map((c: any) => (
+                                    <tr key={c.name} className="border-b border-black/5 last:border-0">
+                                      <td className="py-1 pr-3">{c.name}</td>
+                                      <td className="py-1 pr-3 text-right font-mono">{fmt(c.total)}</td>
+                                      <td className="py-1 pr-3 text-right">{c.count}</td>
+                                      <td className="py-1 text-right font-mono">{Number(c.oldestDays).toLocaleString()}d</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </details>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <Link
+                            href={`/balance-sheet/${clientLinkId}/ufar-recon`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-black/10 bg-white px-2.5 py-1 text-xs font-semibold text-navy hover:border-teal"
+                          >
+                            Open UF / A/R Reconciler <ArrowRight size={11} />
+                          </Link>
+                          <Link
+                            href={`/balance-sheet/${clientLinkId}/uf-audit`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-black/10 bg-white px-2.5 py-1 text-xs font-semibold text-navy hover:border-teal"
+                          >
+                            UF Audit <ArrowRight size={11} />
+                          </Link>
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* QBO ledger fix — void the duplicate invoices. Senior-only, and only
           worth showing once we've flagged a real double-count. */}
       {isSenior && s?.flagged && (
@@ -358,10 +510,10 @@ export function RevenueCheckClient({
       {/* Step navigation */}
       <div className="flex items-center justify-between pt-2">
         <p className="text-xs text-ink-slate max-w-lg">
-          {verdictClean && payroll?.labor_duplication && !payroll.labor_duplication.flagged
+          {verdictClean && payroll?.labor_duplication && !payroll.labor_duplication.flagged && ar && !ar.flagged
             ? "Nothing to fix here — continue to Bank Rules."
-            : s?.flagged || payroll?.labor_duplication?.flagged
-            ? "Resolve (or consciously accept) the flags above before books go out — the month-end verification re-checks both and will hold the send."
+            : s?.flagged || payroll?.labor_duplication?.flagged || ar?.flagged
+            ? "Resolve (or consciously accept) the flags above before books go out — the month-end verification re-checks these and will hold the send."
             : ""}
         </p>
         <Link
