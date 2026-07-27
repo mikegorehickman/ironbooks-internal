@@ -109,39 +109,28 @@ export function ProfitLossClient({
 
   return (
     <div className="space-y-6">
-      {/* ── Gradient hero ───────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
-        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Profit & Loss</div>
-            <h1 className="text-3xl font-bold mt-1">How you made money</h1>
-            <div className="text-sm text-white/70 mt-1">{periodLabel}</div>
-          </div>
-          <div className="flex bg-white/10 backdrop-blur rounded-lg p-0.5 flex-wrap self-start">
-            {(["lastMonth", "thisMonth", "quarter", "ytd", "lastYear", "custom"] as RangeKey[]).map((k) => (
-              <button
-                key={k}
-                onClick={() => setActiveRange(k)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors inline-flex items-center gap-1 ${
-                  activeRange === k ? "bg-white text-navy" : "text-white/75 hover:bg-white/10"
-                }`}
-              >
-                {k === "custom" && <CalendarRange size={12} />}
-                {shortLabel(k, ranges)}
-              </button>
-            ))}
-          </div>
+      {/* ── Header — quiet, light; no dark hero ─────────────────────── */}
+      <header className="flex items-end justify-between gap-5 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark">Profit &amp; Loss</div>
+          <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">How you made money</h1>
+          <div className="text-sm text-ink-slate mt-2">{periodLabel}</div>
         </div>
-      </div>
-
-      {/* Notice to Reader — cash-basis framing so clients read the numbers right */}
-      <div className="rounded-xl border border-cardline bg-canvas px-4 py-3 text-xs text-ink-slate leading-relaxed">
-        <span className="font-semibold text-navy">Notice to Reader:</span> These figures are prepared on a
-        cash basis from your QuickBooks data — they don&apos;t reflect accounts receivable, accounts payable,
-        or your full cash-flow cycle, and haven&apos;t been audited or reviewed. For a true read on your
-        business, look at trends over at least a 90-day period rather than any single month.
-      </div>
+        <div className="inline-flex gap-0.5 bg-white border border-cardline rounded-xl p-1 flex-wrap">
+          {(["lastMonth", "thisMonth", "quarter", "ytd", "lastYear", "custom"] as RangeKey[]).map((k) => (
+            <button
+              key={k}
+              onClick={() => setActiveRange(k)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1 ${
+                activeRange === k ? "bg-teal text-white" : "text-ink-slate hover:bg-hairline"
+              }`}
+            >
+              {k === "custom" && <CalendarRange size={12} />}
+              {shortLabel(k, ranges)}
+            </button>
+          ))}
+        </div>
+      </header>
 
       {/* In-progress warning */}
       {isThisMonth && (
@@ -270,12 +259,12 @@ export function ProfitLossClient({
         </>
       )}
 
-      <div className="bg-canvas border border-cardline rounded-xl p-4 text-xs text-ink-slate">
-        <strong className="text-navy">Tip:</strong> Click any line to see the underlying transactions —
-        vendor, date, amount, memo. Each line also has buttons to ask your Ironbooks team a question
-        about it or suggest it should be in a different category. For an instant explanation,{" "}
-        <a href="/portal/ask-ai" className="text-teal-dark font-semibold underline">ask the AI</a>.
-      </div>
+      <p className="text-[11.5px] text-ink-light leading-relaxed px-1">
+        <span className="font-semibold text-ink-slate">Notice to Reader:</span> Prepared on a cash basis from
+        your QuickBooks data; not audited or reviewed. For a true read, look at trends over at least 90 days
+        rather than any single month. Tip: click any line for the underlying transactions, or{" "}
+        <a href="/portal/ask-ai" className="text-teal-dark font-semibold hover:underline">ask the AI</a>.
+      </p>
 
       {drillLine && range && (
         <DrillDownDrawer
@@ -364,29 +353,37 @@ function InsightCard({ c, range, periodLabel }: { c: PortalPl; range: { label: s
 // ─── MONEY-FLOW STRIP ───────────────────────────────────────────────────
 
 function FlowStrip({ c }: { c: PortalPl }) {
-  const steps = [
-    { label: "Income", value: c.totalIncome, op: "", tone: "teal" as const },
-    { label: c.costSplitEstimated ? "COGS*" : "COGS", value: -c.totalVariable, op: "−", tone: "amber" as const },
-    { label: "Gross Profit", value: c.grossProfit, op: "=", tone: "navy" as const, strong: true },
-    { label: "Operating expenses", value: -c.totalFixed, op: "−", tone: "orange" as const },
-    { label: "Net Profit", value: c.netProfit, op: "=", tone: c.netProfit >= 0 ? ("emerald" as const) : ("red" as const), strong: true },
+  // Income − COGS = Gross − Overhead = Net, as one connected strip with
+  // hairline cell dividers and quiet operator glyphs. Subtracted figures read
+  // in rust; only Net (the answer) carries the teal accent.
+  const cells = [
+    { label: "Income", value: c.totalIncome, op: "", sub: "for the period", neg: false, net: false },
+    { label: c.costSplitEstimated ? "Cost of goods*" : "Cost of goods", value: c.totalVariable, op: "−", sub: `${Math.round((c.totalVariable / (c.totalIncome || 1)) * 100)}% of income`, neg: true, net: false },
+    { label: "Gross profit", value: c.grossProfit, op: "=", sub: `${Math.round(c.grossMarginPct)}% margin`, neg: false, net: false },
+    { label: "Operating exp.", value: c.totalFixed, op: "−", sub: `${Math.round((c.totalFixed / (c.totalIncome || 1)) * 100)}% of income`, neg: true, net: false },
+    { label: "Net profit", value: c.netProfit, op: "=", sub: `${Math.round(c.netMarginPct)}% margin`, neg: c.netProfit < 0, net: true },
   ];
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-      {steps.map((s, i) => (
+    <div className="grid grid-cols-2 md:grid-cols-5 rounded-2xl border border-cardline bg-white overflow-hidden">
+      {cells.map((s, i) => (
         <div
           key={s.label}
-          className={`relative rounded-xl border p-3 ${flowTileClass(s.tone)} ${s.strong ? "ring-1 ring-inset ring-current/10" : ""}`}
+          className={`relative px-4 py-4 border-t border-hairline md:border-t-0 md:border-l first:border-l-0 md:[&:nth-child(-n+5)]:border-t-0 ${
+            i < 2 ? "border-t-0" : ""
+          } ${s.net ? "bg-teal-lighter" : ""}`}
         >
           {s.op && (
-            <div className="absolute -left-2 top-1/2 -translate-y-1/2 hidden md:flex w-4 h-4 items-center justify-center text-ink-light text-sm font-bold bg-[#FAFAF7] rounded-full">
+            <span className="hidden md:flex absolute -left-[9px] top-1/2 -translate-y-1/2 w-[18px] h-[18px] items-center justify-center rounded-full bg-canvas border border-cardline text-ink-light text-[11px] font-bold z-10">
               {s.op}
-            </div>
+            </span>
           )}
-          <div className="text-[10px] uppercase tracking-wider font-semibold opacity-70">{s.label}</div>
-          <div className={`text-lg font-bold mt-0.5 ${flowValueClass(s.tone)}`}>
-            {s.value < 0 ? `(${fmtMoney(Math.abs(s.value))})` : fmtMoney(s.value)}
+          <div className={`font-brand text-[10px] uppercase tracking-[0.1em] ${s.net ? "text-teal-dark" : "text-ink-light"}`}>
+            {s.label}
           </div>
+          <div className={`text-[22px] font-bold mt-2 tabular-nums leading-none ${s.net ? "text-teal-dark" : s.neg ? "text-rust" : "text-navy"}`}>
+            {fmtMoney(s.value)}
+          </div>
+          <div className="text-[11.5px] text-ink-slate mt-1.5">{s.sub}</div>
         </div>
       ))}
     </div>
@@ -404,20 +401,21 @@ function ProportionBar({ c }: { c: PortalPl }) {
 
   return (
     <div className="bg-white border border-cardline rounded-2xl p-5">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-bold text-navy">Where each $1 of income goes</h3>
         <span className="text-xs text-ink-light">per dollar earned</span>
       </div>
-      <div className="flex h-6 rounded-full overflow-hidden bg-slate-100">
-        {varPct > 0 && <div className="bg-amber-400 h-full" style={{ width: `${varPct}%` }} title={`COGS ${Math.round(varPct)}¢`} />}
-        {fixedPct > 0 && <div className="bg-orange-500 h-full" style={{ width: `${fixedPct}%` }} title={`Operating expenses ${Math.round(fixedPct)}¢`} />}
-        {!loss && netPct > 0 && <div className="bg-emerald-500 h-full" style={{ width: `${netPct}%` }} title={`Net profit ${Math.round(netPct)}¢`} />}
+      {/* Muted brand ramp: costs neutral, overhead gold ("watch this"), kept = teal. */}
+      <div className="flex h-3 rounded-full overflow-hidden bg-hairline">
+        {varPct > 0 && <div className="bg-ink-slate h-full" style={{ width: `${varPct}%` }} title={`Cost of goods ${Math.round(varPct)}¢`} />}
+        {fixedPct > 0 && <div className="bg-gold h-full" style={{ width: `${fixedPct}%` }} title={`Operating expenses ${Math.round(fixedPct)}¢`} />}
+        {!loss && netPct > 0 && <div className="bg-teal h-full" style={{ width: `${netPct}%` }} title={`Net profit ${Math.round(netPct)}¢`} />}
       </div>
-      <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs">
-        <Legend color="bg-amber-400" label="COGS" value={`${Math.round(varPct)}¢`} />
-        <Legend color="bg-orange-500" label="Operating expenses" value={`${Math.round(fixedPct)}¢`} />
+      <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 text-xs">
+        <Legend color="bg-ink-slate" label="Cost of goods" value={`${Math.round(varPct)}¢`} />
+        <Legend color="bg-gold" label="Operating expenses" value={`${Math.round(fixedPct)}¢`} />
         <Legend
-          color={loss ? "bg-red-500" : "bg-emerald-500"}
+          color={loss ? "bg-rust" : "bg-teal"}
           label={loss ? "Loss" : "Net profit"}
           value={loss ? `(${Math.round(Math.abs(c.netMarginPct))}¢)` : `${Math.round(netPct)}¢`}
         />
@@ -614,29 +612,32 @@ function ResultBand({
   tone: "emerald" | "red";
   emphasize?: boolean;
 }) {
-  const grad = emphasize
-    ? tone === "emerald"
-      ? "from-emerald-600 to-teal-dark text-white"
-      : "from-red-600 to-red-700 text-white"
-    : tone === "emerald"
-    ? "from-emerald-50 to-white text-navy border border-emerald-200"
-    : "from-red-50 to-white text-navy border border-rust-border";
-  const amountColor = emphasize ? "text-white" : tone === "emerald" ? "text-emerald-700" : "text-rust";
-  const subColor = emphasize ? "text-white/80" : "text-ink-slate";
+  // Net Profit (emphasize) is the finale — a solid navy band, echoing the rail.
+  // Gross Profit is a quiet teal-lighter panel. Neither uses a gradient.
+  const shell = emphasize
+    ? "bg-navy"
+    : "bg-teal-lighter border border-teal-border";
+  const amountColor = emphasize
+    ? (tone === "emerald" ? "text-white" : "text-white")
+    : (tone === "emerald" ? "text-teal-dark" : "text-rust");
+  const titleColor = emphasize ? "text-white" : "text-navy";
+  const subColor = emphasize ? "text-white/65" : "text-ink-slate";
+  const marginColor = emphasize ? "text-gold font-semibold" : "text-ink-slate";
+  const Icon = tone === "emerald" ? TrendingUp : TrendingDown;
 
   return (
-    <div className={`rounded-2xl bg-gradient-to-r ${grad} px-6 py-5`}>
+    <div className={`rounded-2xl ${shell} px-6 ${emphasize ? "py-5" : "py-4"}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            {tone === "emerald" ? <TrendingUp size={16} className={emphasize ? "text-white" : "text-emerald-700"} /> : <TrendingDown size={16} className={emphasize ? "text-white" : "text-rust"} />}
-            <div className={`font-bold ${emphasize ? "text-white text-lg" : "text-navy"}`}>{title}</div>
+            <Icon size={16} className={emphasize ? "text-white/80" : tone === "emerald" ? "text-teal-dark" : "text-rust"} />
+            <div className={`font-bold ${emphasize ? "text-lg" : "text-sm"} ${titleColor}`}>{title}</div>
           </div>
           <div className={`text-xs mt-0.5 ${subColor}`}>{subtitle}</div>
         </div>
         <div className="text-right flex-shrink-0">
-          <div className={`font-bold ${emphasize ? "text-3xl" : "text-2xl"} ${amountColor}`}>{fmtMoney(amount)}</div>
-          <div className={`text-xs ${subColor}`}>{Math.round(marginPct)}% {marginNoun}</div>
+          <div className={`font-bold tabular-nums ${emphasize ? "text-3xl" : "text-lg"} ${amountColor}`}>{fmtMoney(amount)}</div>
+          <div className={`text-xs ${marginColor}`}>{Math.round(marginPct)}% {marginNoun}</div>
         </div>
       </div>
     </div>
@@ -739,28 +740,6 @@ function formatDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   const date = new Date(y, m - 1, d);
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-function flowTileClass(tone: "teal" | "amber" | "orange" | "navy" | "emerald" | "red"): string {
-  return {
-    teal: "border-teal/30 bg-teal/5",
-    amber: "border-gold-border bg-gold-tint",
-    orange: "border-orange-200 bg-orange-50",
-    navy: "border-cardline bg-canvas",
-    emerald: "border-emerald-200 bg-emerald-50",
-    red: "border-rust-border bg-rust-tint",
-  }[tone];
-}
-
-function flowValueClass(tone: "teal" | "amber" | "orange" | "navy" | "emerald" | "red"): string {
-  return {
-    teal: "text-teal-dark",
-    amber: "text-gold-deep",
-    orange: "text-orange-700",
-    navy: "text-navy",
-    emerald: "text-emerald-700",
-    red: "text-rust",
-  }[tone];
 }
 
 function marginText(tone: "emerald" | "teal" | "amber" | "red"): string {
