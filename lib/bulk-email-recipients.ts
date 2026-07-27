@@ -5,6 +5,8 @@ export interface RecipientRow {
   client_link_id: string;
   client_name: string;
   first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
   email: string | null;          // resolved: portal email → contact email
   login_email: string | null;    // portal login (auth) email only; null if no portal user
   has_portal: boolean;
@@ -25,7 +27,7 @@ export interface RecipientRow {
 export async function loadBulkRecipients(service: SupabaseClient): Promise<RecipientRow[]> {
   const { data: clients } = await service
     .from("client_links")
-    .select("id, client_name, contact_first_name, client_email, jurisdiction, assigned_bookkeeper_id, daily_recon_enabled, marketing_subscribed, email_hard_bounced")
+    .select("id, client_name, contact_first_name, contact_last_name, client_phone, client_email, jurisdiction, assigned_bookkeeper_id, daily_recon_enabled, marketing_subscribed, email_hard_bounced")
     .eq("is_active", true)
     .order("client_name");
   const rows = (clients as any[]) || [];
@@ -65,6 +67,8 @@ export async function loadBulkRecipients(service: SupabaseClient): Promise<Recip
       client_link_id: c.id,
       client_name: c.client_name,
       first_name: c.contact_first_name ?? null,
+      last_name: c.contact_last_name ?? null,
+      phone: (c.client_phone ?? null) || null,
       email: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
       login_email: loginEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail) ? loginEmail : null,
       has_portal: !!portal,

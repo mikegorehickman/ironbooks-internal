@@ -54,8 +54,13 @@ export async function POST(request: Request) {
   // Append the sender's branded signature when requested. The composer toggle
   // is authoritative for this send, so render even if their default is off.
   const a = (actor as any) || {};
+  // Optional per-send title override from the composer (e.g. "Executive
+  // Director/CFO" for this campaign) — falls back to the sender's saved title.
+  const sigTitle = typeof body.signature_title === "string" && body.signature_title.trim()
+    ? body.signature_title.trim().slice(0, 200)
+    : a.title;
   const signature = body.include_signature
-    ? renderUserSignature({ full_name: a.full_name, email: a.email, title: a.title, phone: a.phone, booking_url: a.booking_url, avatar_url: a.avatar_url, signature_enabled: true })
+    ? renderUserSignature({ full_name: a.full_name, email: a.email, title: sigTitle, phone: a.phone, booking_url: a.booking_url, avatar_url: a.avatar_url, signature_enabled: true })
     : "";
   const bodyHtml = rawBody + signature;
 

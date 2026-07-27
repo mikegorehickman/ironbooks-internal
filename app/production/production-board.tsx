@@ -579,7 +579,7 @@ function BoardCard({
           </div>
           {client.contact_name && (
             <button onClick={onSelect} className="text-left w-full">
-              <div className="text-[11px] text-gray-400 truncate">{client.contact_name}</div>
+              <div className="text-xs font-medium text-ink-slate truncate hover:text-navy">{client.contact_name}</div>
             </button>
           )}
         </div>

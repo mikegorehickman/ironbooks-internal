@@ -15,7 +15,7 @@ export async function GET() {
   }
   const { data } = await service
     .from("bulk_email_campaigns")
-    .select("id, subject, kind, status, recipient_count, sent_count, failed_count, created_at, sent_at")
+    .select("id, subject, body_html, kind, status, recipient_count, sent_count, failed_count, created_at, sent_at")
     .order("created_at", { ascending: false })
     .limit(50);
   return NextResponse.json({ campaigns: data || [] });

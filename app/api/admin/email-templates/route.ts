@@ -39,3 +39,14 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ id: (data as any).id });
 }
+
+/** DELETE ?id= — remove a saved template. */
+export async function DELETE(request: Request) {
+  const g = await gate();
+  if (!g.ok) return g.res;
+  const id = new URL(request.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  const { error } = await (g.service as any).from("email_templates").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
