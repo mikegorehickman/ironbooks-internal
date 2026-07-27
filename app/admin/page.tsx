@@ -7,7 +7,7 @@ import { AdminSearch } from "./admin-search";
 import {
   Users, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Repeat,
   Landmark, ReceiptText, CheckCheck, ListChecks, Copy, TrendingUp, Unplug, Flag,
-  XCircle, Timer,
+  XCircle, Timer, CalendarCheck,
 } from "lucide-react";
 
 /**
@@ -285,6 +285,7 @@ export default async function AdminOverviewPage() {
         {/* Admin tools — everything that used to have its own sidebar row. */}
         <div className="space-y-2">
           {[
+            { href: "/admin/close-coverage", icon: CalendarCheck, title: "Close coverage", desc: "Every client × month — the date they received their completed books · gaps flagged" },
             { href: "/admin/billing", icon: CreditCard, title: "Billing", desc: "Subscription revenue — Stripe-synced + manual entries · MRR, dunning, reconciliation banner" },
             { href: "/admin/daily-recon", icon: Repeat, title: "Daily recon engine", desc: "Enroll / dry-run / pause clients · nightly run history · run all now" },
             { href: "/admin/bulk-email", icon: Mail, title: "Bulk email", desc: "Email some or all clients · rich text · unsubscribe-aware" },
