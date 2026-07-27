@@ -41,6 +41,20 @@ export interface LifecycleInput {
   month_done?: boolean | null;            // current monthly_rec_run complete (sent)
   month_review?: boolean | null;          // current run pending manager review
   month_waiting_client?: boolean | null;  // current run board_status = waiting_client
+  /** client_links.latest_closed_period (period_end date, "YYYY-MM-DD") — the
+   *  authoritative "month closed & statements delivered" marker set by the
+   *  package-delivery path. Honored as month_done when it covers the current
+   *  close period, so a fast-close (or cleanup-graduation) month still reads as
+   *  "Done" even when no production_me run row exists for it. */
+  latest_closed_period?: string | null;
+}
+
+/** True when latest_closed_period covers the current close month (the previous
+ *  calendar month) or later. */
+function monthClosedByLatest(latest?: string | null): boolean {
+  if (!latest) return false;
+  const closed = String(latest).slice(0, 7); // "YYYY-MM"
+  return closed >= previousMonthPeriod().period;
 }
 
 /**
@@ -66,7 +80,10 @@ export const MACRO_STAGE_META: Record<MacroStage, { label: string; tone: string;
  * stage-ambiguous by looking at daily_recon + cleanup_completed).
  */
 export function deriveMacroStage(c: LifecycleInput): MacroStage {
-  if (c.daily_recon_enabled && c.cleanup_completed_at) return "production";
+  // Daily recon on = the client is LIVE, full stop. cleanup_completed_at is no
+  // longer required (some promoted clients legitimately lack it — see
+  // deriveLifecycleStatus), and requiring both stranded live clients in cleanup.
+  if (c.daily_recon_enabled) return "production";
   if (c.cleanup_completed_at) return "cleanup"; // signed off, awaiting promotion
   // Onboarding = genuinely pre-work: not connected AND no cleanup activity yet.
   // The moment they connect or any COA/reclass work exists, they're in Cleanup.
@@ -114,8 +131,15 @@ export const LIFECYCLE_META: Record<LifecycleStatus, { label: string; tone: stri
  */
 export function deriveLifecycleStatus(c: LifecycleInput): LifecycleStatus {
   // ── Live states (production) — reflect the month-end board for the period ──
-  if (c.daily_recon_enabled && c.cleanup_completed_at) {
-    if (c.month_done) return "done";
+  // Keyed on daily_recon_enabled ALONE: a client with daily recon on is live,
+  // even if cleanup_completed_at was never stamped (legacy promotions). Gating
+  // on both previously stranded such clients in a cleanup sub-status, where no
+  // production-board action (waiting / review / close) could take effect.
+  if (c.daily_recon_enabled) {
+    // "Done" = a complete run row for the period OR the delivered-&-closed
+    // marker (latest_closed_period) covering it — so a fast-close or a
+    // cleanup-graduation month reads as Done even without a production_me run.
+    if (c.month_done || monthClosedByLatest(c.latest_closed_period)) return "done";
     if (c.month_review) return "ready_for_review";
     if (c.month_waiting_client) return "waiting_on_client";
     return "in_production";
@@ -160,6 +184,7 @@ type ClientLifecycleRow = {
   cleanup_review_state?: string | null;
   daily_recon_enabled?: boolean | null;
   bs_enabled?: boolean | null;
+  latest_closed_period?: string | null;
 };
 
 /**
@@ -187,13 +212,17 @@ export async function gatherLifecycleInput(
   let month_done = false;
   let month_review = false;
   let month_waiting = false;
-  if (client.daily_recon_enabled && client.cleanup_completed_at) {
+  // Query the month-end run whenever daily recon is on (not gated on
+  // cleanup_completed_at, which some live clients lack). Don't filter on
+  // kind — the current period's run is unique per (client, period), and a
+  // cleanup-graduation month is a kind='cleanup' row that still represents a
+  // real close/waiting/review state for that period.
+  if (client.daily_recon_enabled) {
     try {
       const { data } = await (service as any)
         .from("monthly_rec_runs")
         .select("status, board_status")
         .eq("client_link_id", id)
-        .eq("kind", "production_me")
         .eq("period", previousMonthPeriod().period)
         .maybeSingle();
       if ((data as any)?.status === "complete") month_done = true;
@@ -232,6 +261,7 @@ export async function gatherLifecycleInput(
     month_done,
     month_review,
     month_waiting_client: month_waiting,
+    latest_closed_period: client.latest_closed_period ?? null,
   };
 }
 

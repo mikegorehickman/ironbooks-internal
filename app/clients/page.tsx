@@ -74,7 +74,7 @@ export default async function ClientsPage({
     supabase
       .from("client_links")
       .select(
-        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required, qbo_realm_id, qbo_refresh_token, daily_recon_enabled"
+        "id, double_client_name, stripe_connection_status, due_date, cleanup_completed_at, cleanup_completed_by, cleanup_range_start, cleanup_range_end, cleanup_completion_note, cleanup_review_state, cleanup_review_submitted_at, cleanup_review_submitted_by, ask_client_email_created_at, ask_client_email_sent_at, ask_client_email_body, stripe_request_sent_confirmed_at, cleanup_pdf_sent_at, stripe_not_required, qbo_realm_id, qbo_refresh_token, daily_recon_enabled, latest_closed_period"
       ),
     // Bookkeepers dropdown — must use service client (RLS on `users` limits
     // self-reads, which would otherwise return only the current user and
@@ -223,6 +223,12 @@ export default async function ClientsPage({
   );
   const dailyReconById = new Map<string, boolean>(
     linksData.map((l) => [l.id, !!(l as any).daily_recon_enabled])
+  );
+  // The authoritative "month closed & delivered" marker (period_end date).
+  // Fed into the lifecycle so a fast-close / cleanup-graduation month reads as
+  // "Done" even when no production_me run row exists for it.
+  const latestClosedPeriodById = new Map<string, string | null>(
+    linksData.map((l) => [l.id, (l as any).latest_closed_period ?? null])
   );
   const stripeStatusById = new Map<string, string | null>(
     linksData.map((l) => [l.id, (l as any).stripe_connection_status ?? null])
@@ -509,12 +515,14 @@ export default async function ClientsPage({
   const currentPeriod = previousMonthPeriod().period;
   if (prodIds.length) {
     try {
-      // Pull ALL production_me runs (every period) so we can derive both the
-      // current-close status and the last-closed period in one query.
+      // Pull ALL month-end runs (every period, ANY kind) so we can derive both
+      // the current-close status and the last-closed period in one query. We do
+      // NOT filter kind='production_me' — a cleanup-graduation month is a
+      // kind='cleanup' row that still represents a real close for that period,
+      // and over-filtering left those clients stuck at "In production".
       const { data: runs } = await (service as any)
         .from("monthly_rec_runs")
         .select("client_link_id, period, status, board_status")
-        .eq("kind", "production_me")
         .in("client_link_id", prodIds);
       const byClient = new Map<string, any[]>();
       for (const r of (runs as any[]) || []) {
@@ -526,12 +534,20 @@ export default async function ClientsPage({
       for (const cid of prodIds) {
         const arr = byClient.get(cid) || [];
         const cur = arr.find((r) => r.period === currentPeriod);
-        if (cur?.status === "complete") { monthDone.add(cid); currentMEById.set(cid, "done"); }
+        // latest_closed_period ("YYYY-MM-DD") covering the current close month
+        // is an authoritative "delivered & closed" signal independent of runs.
+        const closedByMarker =
+          (latestClosedPeriodById.get(cid) || "").slice(0, 7) >= currentPeriod &&
+          !!latestClosedPeriodById.get(cid);
+        if (cur?.status === "complete" || closedByMarker) { monthDone.add(cid); currentMEById.set(cid, "done"); }
         else if (cur?.status === "pending_review") { monthReview.add(cid); currentMEById.set(cid, "in_review"); }
         else if (cur?.board_status === "waiting_client") { monthWaiting.add(cid); currentMEById.set(cid, "waiting"); }
         else if (cur) currentMEById.set(cid, "in_progress");
         else currentMEById.set(cid, "not_started");
-        const closed = arr.filter((r) => r.status === "complete").map((r) => r.period as string).sort();
+        const closed = arr.filter((r) => r.status === "complete").map((r) => r.period as string);
+        const marker = latestClosedPeriodById.get(cid);
+        if (marker) closed.push(String(marker).slice(0, 7));
+        closed.sort();
         if (closed.length) lastClosedById.set(cid, closed[closed.length - 1]);
       }
     } catch (e: any) {
@@ -560,6 +576,7 @@ export default async function ClientsPage({
         month_done: monthDone.has(c.id),
         month_review: monthReview.has(c.id),
         month_waiting_client: monthWaiting.has(c.id),
+        latest_closed_period: latestClosedPeriodById.get(c.id) ?? null,
       });
       return {
         id: c.id,
@@ -574,7 +591,9 @@ export default async function ClientsPage({
         // BS actions only meaningful while still in cleanup (not completed/production).
         in_cleanup_phase: !cleanupCompleted && !c.daily_recon_enabled,
         // Production clients get a Month-end deep link to finish the close.
-        is_production: !!c.daily_recon_enabled && cleanupCompleted,
+        // Keyed on daily recon alone — a live client without a cleanup_completed_at
+        // stamp is still in production and needs the month-end controls.
+        is_production: !!c.daily_recon_enabled,
         // Month-end columns: current close status + last closed period (YYYY-MM).
         current_month_end: c.daily_recon_enabled ? (currentMEById.get(c.id) ?? "not_started") : null,
         current_month_end_period: c.daily_recon_enabled ? currentPeriod : null,
