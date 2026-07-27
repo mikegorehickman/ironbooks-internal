@@ -101,16 +101,21 @@ export default async function CloseCoveragePage() {
     }
   }
 
-  // Column range: earliest month seen → current month (inclusive).
+  // Column range: always span the full 2026 calendar year (Jan–Dec), plus any
+  // earlier history that exists and anything past 2026 (future-proof). Later
+  // months in the year show as empty columns until those closes are delivered.
   const now = new Date();
   const currentYm = ymKey(now.getUTCFullYear(), now.getUTCMonth() + 1);
+  monthsPresent.add("2026-01");
+  monthsPresent.add("2026-12");
   monthsPresent.add(currentYm);
   const sorted = [...monthsPresent].sort();
-  const startYm = sorted[0] || currentYm;
+  const startYm = sorted[0];
+  const endYm = sorted[sorted.length - 1];
   const months: string[] = [];
   {
     let [y, m] = startYm.split("-").map(Number);
-    const [ey, em] = currentYm.split("-").map(Number);
+    const [ey, em] = endYm.split("-").map(Number);
     while (y < ey || (y === ey && m <= em)) {
       months.push(ymKey(y, m));
       m += 1; if (m > 12) { m = 1; y += 1; }
