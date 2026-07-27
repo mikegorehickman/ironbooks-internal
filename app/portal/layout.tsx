@@ -183,12 +183,20 @@ export default async function PortalLayout({ children }: { children: React.React
       )}
       {needsOnboarding && <OnboardingNagBanner />}
       <div className="flex">
-        <aside className="w-60 bg-[#0F1F2E] text-white min-h-screen flex flex-col">
+        <aside className="w-60 bg-rail text-white min-h-screen flex flex-col">
           <div className="px-5 py-5 border-b border-white/10">
-            <div className="font-bold text-base truncate" title={clientName}>
+            <div className="flex items-center gap-2 mb-3">
+              <img src="/logo.png" alt="Ironbooks" className="w-7 h-7 object-contain flex-shrink-0" />
+              <span className="font-brand font-medium text-[13px] tracking-[0.14em] uppercase text-white/90">
+                Ironbooks
+              </span>
+            </div>
+            <div className="font-bold text-base truncate text-white" title={clientName}>
               {clientName}
             </div>
-            <div className="text-xs text-white/50 mt-0.5">via Ironbooks</div>
+            <div className="text-[11px] text-[#7E99B3] mt-0.5 tracking-[0.08em] uppercase">
+              Client portal
+            </div>
           </div>
 
           {/* Grouped so the portal reads as a few clear sections instead of a
@@ -252,7 +260,7 @@ export default async function PortalLayout({ children }: { children: React.React
 /** Small uppercase divider label that groups the nav into sections. */
 function NavSection({ label }: { label: string }) {
   return (
-    <div className="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-white/30">
+    <div className="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-wider text-[#8FA9C2]">
       {label}
     </div>
   );
@@ -290,14 +298,14 @@ function NavLink({
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-white/75 hover:bg-white/5 hover:text-white"
+      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[#B9CBDC] hover:bg-white/5 hover:text-white transition-colors"
     >
       <Icon size={16} />
       <span className="flex-1">{label}</span>
       {badge && (
         <span
           className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded ${
-            badgeTone === "alert" ? "bg-red-500 rounded-full min-w-[18px] text-center" : "bg-teal"
+            badgeTone === "alert" ? "bg-rust rounded-full min-w-[18px] text-center" : "bg-teal"
           }`}
         >
           {badge}
@@ -320,16 +328,16 @@ function NavLink({
 function BillingHoldState({ clientName }: { clientName: string }) {
   return (
     <div className="min-h-screen bg-[var(--app-canvas)] flex items-center justify-center px-4 py-12">
-      <div className="max-w-lg w-full bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-        <div className="bg-[#0F1F2E] px-7 py-5 text-white">
-          <div className="text-xs uppercase tracking-widest text-[#8CD3CC]">Ironbooks</div>
+      <div className="max-w-lg w-full bg-white rounded-2xl shadow-lg border border-cardline overflow-hidden">
+        <div className="bg-rail px-7 py-5 text-white">
+          <div className="text-xs uppercase tracking-widest text-teal-light">Ironbooks</div>
           <h1 className="text-xl font-bold mt-1">Your account is on hold</h1>
         </div>
-        <div className="px-7 py-6 text-[15px] text-[#33414E] leading-relaxed">
+        <div className="px-7 py-6 text-[15px] text-ink leading-relaxed">
           <p>Hi {clientName} — access to your portal is paused because your account is past due.</p>
           <p className="mt-3">To restore access right away, please update your payment, or reach us and we'll sort it out:</p>
-          <a href="mailto:admin@ironbooks.com" className="mt-4 inline-block bg-[#1A9B8F] text-white font-semibold text-sm px-5 py-2.5 rounded-lg">Email admin@ironbooks.com</a>
-          <p className="mt-4 text-xs text-[#8A94A0]">Once your balance is settled, your books and reports come right back — nothing is lost.</p>
+          <a href="mailto:admin@ironbooks.com" className="mt-4 inline-block bg-teal hover:bg-teal-dark transition-colors text-white font-semibold text-sm px-5 py-2.5 rounded-lg">Email admin@ironbooks.com</a>
+          <p className="mt-4 text-xs text-ink-light">Once your balance is settled, your books and reports come right back — nothing is lost.</p>
         </div>
       </div>
     </div>
