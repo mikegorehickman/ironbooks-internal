@@ -116,25 +116,22 @@ export function WhosPayingClient({
   return (
     <div className="space-y-6">
       {/* ── Gradient hero ───────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
-        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Outstanding invoices</div>
-            <h1 className="text-3xl font-bold mt-1">Who owes you money</h1>
-            <div className="text-sm text-white/70 mt-1">
-              Across {customers.length} customer{customers.length === 1 ? "" : "s"}
-            </div>
-          </div>
-          <div className="flex-shrink-0 bg-white/10 backdrop-blur rounded-xl px-5 py-3 border border-white/15">
-            <div className="text-[10px] uppercase tracking-wider font-semibold text-white/60">Total owed to you</div>
-            <div className="text-3xl font-bold mt-0.5 text-white">{fmtMoney(aging.totalAmount)}</div>
-            {overdueTotal > 0 && (
-              <div className="text-xs text-amber-200 mt-0.5">{fmtMoney(overdueTotal)} past due</div>
-            )}
+      <header className="flex items-end justify-between gap-5 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark">Outstanding invoices</div>
+          <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">Who owes you money</h1>
+          <div className="text-sm text-ink-slate mt-2">
+            Across {customers.length} customer{customers.length === 1 ? "" : "s"}
           </div>
         </div>
-      </div>
+        <div className="text-right flex-shrink-0">
+          <div className="font-brand text-[10px] uppercase tracking-[0.1em] text-ink-light">Total owed to you</div>
+          <div className="text-[26px] font-bold text-navy tabular-nums leading-none mt-1">{fmtMoney(aging.totalAmount)}</div>
+          {overdueTotal > 0 && (
+            <div className="text-xs text-gold-deep mt-1">{fmtMoney(overdueTotal)} past due</div>
+          )}
+        </div>
+      </header>
 
       {/* Health metrics row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

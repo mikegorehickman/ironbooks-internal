@@ -97,25 +97,22 @@ export default async function WhatsDuePage() {
   return (
     <div className="space-y-6">
       {/* ── Gradient hero ───────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-amber-300/15 blur-2xl" />
-        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Bills & obligations</div>
-            <h1 className="text-3xl font-bold mt-1">What you owe vendors</h1>
-            <div className="text-sm text-white/70 mt-1">
-              {fmtMoney(dueSoonTotal)} due in the next 30 days
-            </div>
-          </div>
-          <div className="flex-shrink-0 bg-white/10 backdrop-blur rounded-xl px-5 py-3 border border-white/15">
-            <div className="text-[10px] uppercase tracking-wider font-semibold text-white/60">Total owed to vendors</div>
-            <div className="text-3xl font-bold mt-0.5 text-white">{fmtMoney(aging.totalAmount)}</div>
-            <div className="text-xs text-white/70 mt-0.5">
-              {vendors.length} vendor{vendors.length === 1 ? "" : "s"}
-            </div>
+      <header className="flex items-end justify-between gap-5 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark">Bills &amp; obligations</div>
+          <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">What you owe vendors</h1>
+          <div className="text-sm text-ink-slate mt-2">
+            {fmtMoney(dueSoonTotal)} due in the next 30 days
           </div>
         </div>
-      </div>
+        <div className="text-right flex-shrink-0">
+          <div className="font-brand text-[10px] uppercase tracking-[0.1em] text-ink-light">Total owed to vendors</div>
+          <div className="text-[26px] font-bold text-navy tabular-nums leading-none mt-1">{fmtMoney(aging.totalAmount)}</div>
+          <div className="text-xs text-ink-slate mt-1">
+            {vendors.length} vendor{vendors.length === 1 ? "" : "s"}
+          </div>
+        </div>
+      </header>
 
       {bills.length === 0 ? (
         <div className="bg-white border border-cardline rounded-2xl p-8 text-center text-sm text-ink-slate">
