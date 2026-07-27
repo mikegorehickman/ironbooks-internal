@@ -85,7 +85,7 @@ export function CategorizeClient({
 
   if (open.length === 0 && answered.length === 0) {
     return (
-      <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center">
+      <div className="bg-white border border-cardline rounded-2xl p-10 text-center">
         <CheckCircle2 size={28} className="mx-auto text-emerald-500" />
         <div className="text-sm font-semibold text-navy mt-3">Nothing to categorize</div>
         <p className="text-xs text-ink-slate mt-1.5 max-w-sm mx-auto">
@@ -105,20 +105,20 @@ export function CategorizeClient({
         </div>
       )}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+        <div className="bg-rust-tint border border-rust-border rounded-xl p-4 text-sm text-rust">
           {error}
         </div>
       )}
       {accountsError && open.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-800">
+        <div className="bg-gold-tint border border-gold-border rounded-xl p-4 text-xs text-gold-deep">
           We couldn&apos;t load your account list just now, so the dropdowns are limited — you can
           still answer with a note on each transaction.
         </div>
       )}
 
       {open.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between gap-3">
+        <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-hairline flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-bold text-navy">
                 Needs your answer ({open.length})
@@ -162,7 +162,7 @@ export function CategorizeClient({
                           value={pick}
                           onChange={(e) => setPicks((p) => ({ ...p, [r.id]: e.target.value }))}
                           className={`w-full appearance-none border rounded-lg px-3 py-2 pr-8 text-sm bg-white ${
-                            pick ? "border-teal text-navy" : "border-gray-300 text-ink-slate"
+                            pick ? "border-teal text-navy" : "border-cardline text-ink-slate"
                           }`}
                         >
                           <option value="">What was this for?</option>
@@ -205,8 +205,8 @@ export function CategorizeClient({
                         maxLength={500}
                         className={`w-full border rounded-lg px-3 py-2 text-sm ${
                           pick === OTHER && !(notes[r.id] || "").trim()
-                            ? "border-amber-300 bg-amber-50/50"
-                            : "border-gray-200"
+                            ? "border-amber-300 bg-gold-tint/50"
+                            : "border-cardline"
                         }`}
                       />
                     </div>
@@ -219,7 +219,7 @@ export function CategorizeClient({
       )}
 
       {answered.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+        <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
           <button
             onClick={() => setShowAnswered((s) => !s)}
             className="w-full px-5 py-3.5 flex items-center justify-between text-left"
@@ -233,7 +233,7 @@ export function CategorizeClient({
             />
           </button>
           {showAnswered && (
-            <ul className="divide-y divide-gray-100 border-t border-gray-100">
+            <ul className="divide-y divide-gray-100 border-t border-hairline">
               {answered.map((r) => (
                 <li key={r.id} className="px-5 py-3 flex items-start justify-between gap-3 text-sm">
                   <div className="min-w-0">

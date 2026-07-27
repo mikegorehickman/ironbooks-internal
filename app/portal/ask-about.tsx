@@ -258,7 +258,7 @@ function AskAboutModal({
           ) : (
             <>
               {/* Snapshot of what's being asked about */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <div className="bg-canvas border border-cardline rounded-xl p-3">
                 <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate mb-1">
                   You're asking about
                 </div>
@@ -307,7 +307,7 @@ function AskAboutModal({
                   maxLength={4000}
                   rows={4}
                   autoFocus
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-teal/50 focus:outline-none"
+                  className="mt-1 w-full px-3 py-2 text-sm border border-cardline rounded-lg focus:border-teal/50 focus:outline-none"
                 />
                 <div className="text-[11px] text-ink-light mt-1">
                   Your team sees this question plus the item details above.
@@ -315,7 +315,7 @@ function AskAboutModal({
               </div>
 
               {error && (
-                <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">
+                <div className="p-2 bg-rust-tint border border-rust-border rounded text-xs text-rust">
                   {error}
                 </div>
               )}
@@ -324,7 +324,7 @@ function AskAboutModal({
                 <button
                   onClick={onClose}
                   disabled={submitting}
-                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold text-ink-slate hover:bg-slate-50 disabled:opacity-50"
+                  className="px-3 py-1.5 border border-cardline rounded-lg text-sm font-semibold text-ink-slate hover:bg-canvas disabled:opacity-50"
                 >
                   Cancel
                 </button>

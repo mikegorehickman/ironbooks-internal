@@ -56,7 +56,7 @@ export function DismissBillButton({ bill }: { bill: DismissibleBill }) {
       onClick={dismiss}
       disabled={busy}
       title="Not actually owed? Dismiss it — your bookkeeper is notified and it stays hidden from what you owe"
-      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border border-slate-200 text-ink-slate hover:text-red-700 hover:border-red-300 hover:bg-red-50 transition-all disabled:opacity-40"
+      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border border-cardline text-ink-slate hover:text-rust hover:border-red-300 hover:bg-rust-tint transition-all disabled:opacity-40"
     >
       {busy ? <Loader2 size={11} className="animate-spin" /> : <><EyeOff size={11} /> Dismiss</>}
     </button>
@@ -90,7 +90,7 @@ export function DismissedBillsSection({ dismissed }: { dismissed: DismissibleBil
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+    <div className="bg-white border border-cardline rounded-2xl p-5">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 text-sm font-semibold text-ink-slate hover:text-navy"

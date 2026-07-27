@@ -102,7 +102,7 @@ export function SupportWidget({
       )}
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-50 w-[360px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+        <div className="fixed bottom-5 right-5 z-50 w-[360px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
           {/* Header */}
           <div
             className="px-5 py-4 text-white flex items-center justify-between"
@@ -138,15 +138,15 @@ export function SupportWidget({
                 <CheckCircle2 className="text-emerald-600" size={24} />
               </div>
               <div className="font-bold text-slate-900 text-sm">Message sent</div>
-              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+              <p className="text-xs text-ink-slate mt-2 leading-relaxed">
                 We've got it. Someone will reach out to{" "}
-                <span className="font-medium text-slate-800">{userEmail}</span> soon.
+                <span className="font-medium text-navy">{userEmail}</span> soon.
               </p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="px-5 py-4 space-y-3">
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-ink-light mb-1.5">
                   Subject (optional)
                 </label>
                 <input
@@ -156,12 +156,12 @@ export function SupportWidget({
                   placeholder="e.g. Question about my P&L"
                   maxLength={120}
                   disabled={submitting}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-teal focus:ring-1 focus:ring-teal/30 outline-none transition-colors disabled:bg-slate-50"
+                  className="w-full px-3 py-2 text-sm border border-cardline rounded-lg focus:border-teal focus:ring-1 focus:ring-teal/30 outline-none transition-colors disabled:bg-canvas"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-ink-light mb-1.5">
                   How can we help?
                 </label>
                 <textarea
@@ -173,15 +173,15 @@ export function SupportWidget({
                   maxLength={4000}
                   required
                   disabled={submitting}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-teal focus:ring-1 focus:ring-teal/30 outline-none transition-colors resize-none disabled:bg-slate-50"
+                  className="w-full px-3 py-2 text-sm border border-cardline rounded-lg focus:border-teal focus:ring-1 focus:ring-teal/30 outline-none transition-colors resize-none disabled:bg-canvas"
                 />
-                <div className="text-[10px] text-slate-400 mt-1 text-right">
+                <div className="text-[10px] text-ink-light mt-1 text-right">
                   {message.length}/4000
                 </div>
               </div>
 
               {status === "error" && errorMsg && (
-                <div className="flex items-start gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800">
+                <div className="flex items-start gap-2 px-3 py-2 bg-rust-tint border border-rust-border rounded-lg text-xs text-rust">
                   <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
                   <span>{errorMsg}</span>
                 </div>
@@ -201,10 +201,10 @@ export function SupportWidget({
                 )}
               </button>
 
-              <p className="text-[10px] text-slate-400 text-center leading-relaxed pt-1">
-                Sending as <span className="font-medium text-slate-600">{userEmail}</span>
+              <p className="text-[10px] text-ink-light text-center leading-relaxed pt-1">
+                Sending as <span className="font-medium text-ink-slate">{userEmail}</span>
                 <br />
-                Client: <span className="font-medium text-slate-600">{clientName}</span>
+                Client: <span className="font-medium text-ink-slate">{clientName}</span>
               </p>
             </form>
           )}

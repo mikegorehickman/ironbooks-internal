@@ -96,7 +96,7 @@ export function OnboardingWizard({
           return (
             <button key={i} onClick={() => setStep(i)}
               className={`flex-1 flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
-                active ? "border-teal bg-teal-lighter" : s.done ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-white"}`}>
+                active ? "border-teal bg-teal-lighter" : s.done ? "border-emerald-200 bg-emerald-50" : "border-cardline bg-white"}`}>
               <Icon size={16} className={s.done ? "text-emerald-600" : active ? "text-teal" : "text-ink-light"} />
               <span className={`text-xs font-bold ${active ? "text-teal" : s.done ? "text-emerald-700" : "text-ink-slate"}`}>
                 {i + 1}. {s.label}
@@ -106,9 +106,9 @@ export function OnboardingWizard({
         })}
       </div>
 
-      {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{error}</div>}
+      {error && <div className="mb-4 p-3 bg-rust-tint border border-rust-border rounded-lg text-sm text-rust">{error}</div>}
 
-      <div className="bg-white rounded-2xl border border-gray-100 p-6">
+      <div className="bg-white rounded-2xl border border-hairline p-6">
         {/* STEP 0 — video */}
         {step === 0 && (
           <div className="space-y-4">
@@ -140,7 +140,7 @@ export function OnboardingWizard({
               <div>
                 <Lbl>Entity type <span className="text-red-500">*</span></Lbl>
                 <select value={form.entity_type} onChange={(e) => set("entity_type", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-navy focus:border-teal outline-none">
+                  className="w-full px-3 py-2 rounded-lg border border-cardline text-sm text-navy focus:border-teal outline-none">
                   <option value="">Select…</option>
                   {entityOptions.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
                 </select>
@@ -157,7 +157,7 @@ export function OnboardingWizard({
               <Field label="Province / State" v={form.state_province} on={(x) => set("state_province", x)} />
             </div>
             <label className="flex items-start gap-2.5 bg-teal-lighter/60 border border-teal/15 rounded-xl px-3 py-3 cursor-pointer">
-              <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-2 border-gray-300 text-teal focus:ring-teal" />
+              <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-2 border-cardline text-teal focus:ring-teal" />
               <span className="text-xs text-navy leading-relaxed">I confirm the bank, credit-card, and loan accounts connected to my bookkeeping are <strong>all</strong> of my business accounts — there are no other accounts or loans we've missed.</span>
             </label>
             <div className="flex justify-between">
@@ -180,7 +180,7 @@ export function OnboardingWizard({
                 : "Your bookkeeper will request any documents they need shortly. You can finish setup now."}
             </p>
             {docRequests.length > 0 && (
-              <ul className="rounded-xl border border-gray-200 divide-y divide-gray-50">
+              <ul className="rounded-xl border border-cardline divide-y divide-gray-50">
                 {docRequests.map((d, i) => (
                   <li key={i} className="px-4 py-2.5 text-sm text-navy flex items-start gap-2">
                     <ClipboardList size={14} className="text-teal mt-0.5 flex-shrink-0" /> {d.label}
@@ -214,7 +214,7 @@ function Field({ label, v, on, placeholder, required }: { label: string; v: stri
     <div>
       <Lbl>{label}{required && <span className="text-red-500"> *</span>}</Lbl>
       <input value={v} onChange={(e) => on(e.target.value)} placeholder={placeholder}
-        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-navy focus:border-teal outline-none" />
+        className="w-full px-3 py-2 rounded-lg border border-cardline text-sm text-navy focus:border-teal outline-none" />
     </div>
   );
 }
@@ -223,7 +223,7 @@ function SelectField({ label, v, on, options }: { label: string; v: string; on: 
     <div>
       <Lbl>{label}</Lbl>
       <select value={v} onChange={(e) => on(e.target.value)}
-        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-navy focus:border-teal outline-none">
+        className="w-full px-3 py-2 rounded-lg border border-cardline text-sm text-navy focus:border-teal outline-none">
         <option value="">Select…</option>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>

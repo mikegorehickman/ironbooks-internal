@@ -38,7 +38,7 @@ export default async function FinancialStatementsHub() {
             <Link
               key={s.id}
               href={s.href}
-              className="group bg-white rounded-2xl border border-gray-200 p-6 hover:border-teal hover:shadow-md transition-all flex flex-col"
+              className="group bg-white rounded-2xl border border-cardline p-6 hover:border-teal hover:shadow-md transition-all flex flex-col"
             >
               <div className="w-12 h-12 rounded-xl bg-teal-lighter flex items-center justify-center mb-4">
                 <Icon size={22} className="text-teal" />

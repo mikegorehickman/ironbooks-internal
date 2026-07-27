@@ -211,14 +211,14 @@ export function AskAiClient({ starters }: { starters: string[] }) {
           <button
             onClick={newChat}
             disabled={streaming}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-teal-dark hover:text-teal px-3 py-1.5 rounded-lg border border-slate-200 hover:border-teal/40 bg-white disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-teal-dark hover:text-teal px-3 py-1.5 rounded-lg border border-cardline hover:border-teal/40 bg-white disabled:opacity-50"
           >
             <Plus size={14} /> New chat
           </button>
           <div className="relative">
             <button
               onClick={() => setShowHistory((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-slate hover:text-navy px-3 py-1.5 rounded-lg border border-slate-200 hover:border-teal/40 bg-white"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-slate hover:text-navy px-3 py-1.5 rounded-lg border border-cardline hover:border-teal/40 bg-white"
             >
               {loadingConv ? <Loader2 size={14} className="animate-spin" /> : <History size={14} />}
               History
@@ -227,7 +227,7 @@ export function AskAiClient({ starters }: { starters: string[] }) {
               )}
             </button>
             {showHistory && (
-              <div className="absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-1">
+              <div className="absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto bg-white border border-cardline rounded-xl shadow-lg z-20 p-1">
                 {conversations.length === 0 ? (
                   <div className="px-3 py-4 text-sm text-ink-slate text-center">
                     No past conversations yet.
@@ -237,7 +237,7 @@ export function AskAiClient({ starters }: { starters: string[] }) {
                     <button
                       key={c.id}
                       onClick={() => loadConversation(c.id)}
-                      className={`w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 ${
+                      className={`w-full text-left px-3 py-2 rounded-lg hover:bg-canvas ${
                         c.id === conversationId ? "bg-teal/5" : ""
                       }`}
                     >
@@ -263,7 +263,7 @@ export function AskAiClient({ starters }: { starters: string[] }) {
       {/* Chat / empty state */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto bg-white border border-slate-200 rounded-2xl p-5"
+        className="flex-1 overflow-y-auto bg-white border border-cardline rounded-2xl p-5"
       >
         {empty ? (
           <div className="h-full flex flex-col">
@@ -299,14 +299,14 @@ export function AskAiClient({ starters }: { starters: string[] }) {
       </div>
 
       {error && (
-        <div className="flex-shrink-0 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-start gap-2">
+        <div className="flex-shrink-0 p-3 bg-rust-tint border border-rust-border rounded-lg text-sm text-rust flex items-start gap-2">
           <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
           <div>{error}</div>
         </div>
       )}
 
       {/* Composer */}
-      <div className="flex-shrink-0 bg-white border-2 border-slate-200 rounded-2xl p-3 focus-within:border-teal/50 transition-colors">
+      <div className="flex-shrink-0 bg-white border-2 border-cardline rounded-2xl p-3 focus-within:border-teal/50 transition-colors">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -344,7 +344,7 @@ function StarterCard({ text, onClick, disabled }: { text: string; onClick: () =>
     <button
       onClick={onClick}
       disabled={disabled}
-      className="group flex items-start gap-2.5 text-left p-3 rounded-xl border border-slate-200 bg-white hover:border-teal/40 hover:bg-teal/5 disabled:opacity-50 transition-all"
+      className="group flex items-start gap-2.5 text-left p-3 rounded-xl border border-cardline bg-white hover:border-teal/40 hover:bg-teal/5 disabled:opacity-50 transition-all"
     >
       <span className="w-7 h-7 rounded-lg bg-teal/10 text-teal-dark flex items-center justify-center flex-shrink-0 group-hover:bg-teal/15">
         <Sparkles size={13} />
@@ -371,7 +371,7 @@ function AiBubble({ children, streaming }: { children: React.ReactNode; streamin
       <div className="w-8 h-8 rounded-full bg-teal-lighter-dark flex items-center justify-center flex-shrink-0 shadow-sm">
         <Sparkles size={14} className="text-white" />
       </div>
-      <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-navy max-w-[85%] leading-relaxed">
+      <div className="flex-1 bg-canvas border border-cardline rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-navy max-w-[85%] leading-relaxed">
         {children}
         {streaming && (
           <span className="inline-block w-2 h-4 bg-teal-dark animate-pulse ml-0.5 align-middle" />

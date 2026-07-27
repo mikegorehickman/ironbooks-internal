@@ -38,7 +38,7 @@ export function NoClosedPeriodState({
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3">
+      <div className="bg-white border border-cardline rounded-2xl p-8 text-center space-y-3">
         <div className="inline-flex w-14 h-14 rounded-full bg-teal/10 items-center justify-center">
           <Sparkles size={24} className="text-teal" />
         </div>

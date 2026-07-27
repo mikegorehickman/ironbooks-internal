@@ -72,7 +72,7 @@ export function CoachingCallBooking({
       </div>
 
       {/* Why this is a paid call + the free, faster alternatives to try first */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
+      <div className="rounded-2xl border border-cardline bg-white p-6 space-y-4">
         <div>
           <h2 className="text-sm font-bold text-navy">Why is this a paid call?</h2>
           <p className="text-sm text-ink-slate mt-1.5 leading-relaxed">
@@ -155,7 +155,7 @@ export function CoachingCallBooking({
                         )}
                         {trainingBusy ? "Signing you up…" : "Click here to sign up and get reminders"}
                       </button>
-                      {trainingErr && <p className="text-xs text-red-600 mt-1.5">{trainingErr}</p>}
+                      {trainingErr && <p className="text-xs text-rust mt-1.5">{trainingErr}</p>}
                     </>
                   )}
                 </div>
@@ -174,18 +174,18 @@ export function CoachingCallBooking({
           </ol>
         </div>
 
-        <p className="text-sm text-ink-slate leading-relaxed border-t border-slate-100 pt-4">
+        <p className="text-sm text-ink-slate leading-relaxed border-t border-hairline pt-4">
           If none of that solves your issue and you truly want a 1-on-1{" "}
           <strong className="text-navy">CFO or CGA consult</strong>, you can book one below.
         </p>
       </div>
 
       {impersonating ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-ink-slate italic">
+        <div className="rounded-2xl border border-cardline bg-white p-6 text-sm text-ink-slate italic">
           Payment actions are hidden while impersonating.
         </div>
       ) : enabled ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-5">
+        <div className="rounded-2xl border border-cardline bg-white p-6 space-y-5">
           <div>
             <div className="text-sm font-bold text-navy mb-2">Choose your coach</div>
             <div className="grid sm:grid-cols-2 gap-3">
@@ -196,7 +196,7 @@ export function CoachingCallBooking({
                     key={c.coach_key}
                     onClick={() => setCoachKey(c.coach_key)}
                     className={`text-left rounded-xl border-2 px-4 py-3 transition-colors ${
-                      active ? "border-teal bg-teal-lighter" : "border-slate-200 hover:border-slate-300"
+                      active ? "border-teal bg-teal-lighter" : "border-cardline hover:border-cardline"
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -210,7 +210,7 @@ export function CoachingCallBooking({
             </div>
           </div>
 
-          {err && <div className="text-sm text-red-600">{err}</div>}
+          {err && <div className="text-sm text-rust">{err}</div>}
 
           <div>
             <button
@@ -229,7 +229,7 @@ export function CoachingCallBooking({
           </div>
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        <div className="rounded-2xl border border-cardline bg-white p-6">
           <p className="text-sm text-ink-slate mb-4">Ready to book? Grab a time below.</p>
           <a
             href={fallbackLink || "mailto:admin@ironbooks.com?subject=Book%20a%20coaching%20call"}

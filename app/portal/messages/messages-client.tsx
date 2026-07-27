@@ -149,7 +149,7 @@ export function MessagesClient({ initialMessages }: { initialMessages: ClientCom
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+    <div className="bg-white rounded-2xl border border-cardline overflow-hidden">
       {/* Thread */}
       <div className="px-5 py-5 space-y-4 max-h-[55vh] overflow-y-auto">
         {messages.length === 0 && (
@@ -173,13 +173,13 @@ export function MessagesClient({ initialMessages }: { initialMessages: ClientCom
       </div>
 
       {/* Composer */}
-      <div className="border-t border-slate-200 px-5 py-4 space-y-3 bg-slate-50/60">
+      <div className="border-t border-cardline px-5 py-4 space-y-3 bg-canvas/60">
         {files.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {files.map((f, i) => (
               <span
                 key={`${f.name}-${i}`}
-                className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-full pl-3 pr-1.5 py-1 text-xs text-navy"
+                className="inline-flex items-center gap-1.5 bg-white border border-cardline rounded-full pl-3 pr-1.5 py-1 text-xs text-navy"
               >
                 <FileText size={12} className="text-teal" />
                 <span className="max-w-[180px] truncate">{f.name}</span>
@@ -207,7 +207,7 @@ export function MessagesClient({ initialMessages }: { initialMessages: ClientCom
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={sending}
-            className="flex-shrink-0 p-2.5 rounded-lg border border-slate-200 bg-white text-ink-slate hover:text-navy hover:border-slate-300 disabled:opacity-50"
+            className="flex-shrink-0 p-2.5 rounded-lg border border-cardline bg-white text-ink-slate hover:text-navy hover:border-cardline disabled:opacity-50"
             title="Attach statements or files"
           >
             <Paperclip size={16} />
@@ -220,7 +220,7 @@ export function MessagesClient({ initialMessages }: { initialMessages: ClientCom
             }}
             rows={2}
             placeholder="Write a message to your bookkeeper… (⌘+Enter to send)"
-            className="flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-navy placeholder:text-ink-light focus:outline-none focus:ring-2 focus:ring-teal/40"
+            className="flex-1 resize-none rounded-lg border border-cardline bg-white px-3 py-2.5 text-sm text-navy placeholder:text-ink-light focus:outline-none focus:ring-2 focus:ring-teal/40"
           />
           <button
             onClick={handleSend}
@@ -233,7 +233,7 @@ export function MessagesClient({ initialMessages }: { initialMessages: ClientCom
         </div>
 
         {status && <div className="text-xs text-ink-slate">{status}</div>}
-        {error && <div className="text-xs text-red-600">{error}</div>}
+        {error && <div className="text-xs text-rust">{error}</div>}
         <div className="text-[11px] text-ink-light">
           Attach bank or credit-card statements as PDF, CSV, Excel, or bank-export
           files (max 25MB each).
@@ -273,19 +273,19 @@ function MessageBubble({ m }: { m: ClientCommunication }) {
 
 function NotificationCard({ m }: { m: ClientCommunication }) {
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-      <div className="flex items-center gap-2 text-amber-800">
+    <div className="rounded-xl border border-gold-border bg-gold-tint px-4 py-3">
+      <div className="flex items-center gap-2 text-gold-deep">
         <Bell size={14} />
         <span className="text-xs font-bold uppercase tracking-wider">
           {m.subject || "Update from your bookkeeper"}
         </span>
       </div>
       {m.body && (
-        <div className="text-sm text-amber-900 mt-1.5 whitespace-pre-wrap leading-relaxed">
+        <div className="text-sm text-gold-deep mt-1.5 whitespace-pre-wrap leading-relaxed">
           {m.body}
         </div>
       )}
-      <div className="text-[10px] text-amber-700/70 mt-1.5">
+      <div className="text-[10px] text-gold-deep/70 mt-1.5">
         {m.sender_name ? `${m.sender_name} · ` : ""}
         {formatWhen(m.created_at)}
       </div>
@@ -305,7 +305,7 @@ function AttachmentList({ attachments, dark }: { attachments: CommAttachment[]; 
           className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${
             dark
               ? "bg-white/10 text-white hover:bg-white/20"
-              : "bg-white border border-slate-200 text-navy hover:border-teal"
+              : "bg-white border border-cardline text-navy hover:border-teal"
           }`}
         >
           <FileText size={13} className={dark ? "text-white/70" : "text-teal"} />

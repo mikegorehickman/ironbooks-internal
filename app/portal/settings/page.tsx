@@ -31,7 +31,7 @@ export default async function PortalSettings() {
         <h1 className="text-3xl font-bold text-navy mt-1">Settings</h1>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-2xl divide-y divide-slate-100">
+      <div className="bg-white border border-cardline rounded-2xl divide-y divide-slate-100">
         <Row icon={User} label="Name" value={ctx.userFullName || "—"} />
         <Row icon={Mail} label="Email" value={ctx.userEmail} />
         <Row icon={Briefcase} label="Business you can see" value={ctx.clientName} />
@@ -44,13 +44,13 @@ export default async function PortalSettings() {
         )}
       </div>
 
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-ink-slate">
+      <div className="bg-canvas border border-cardline rounded-xl p-4 text-xs text-ink-slate">
         <strong className="text-navy">How sign-in works:</strong> You sign in with a magic link to your
         email — no password to remember. To sign in from a new device, request a fresh magic link
         from the login page.
       </div>
 
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-ink-slate">
+      <div className="bg-canvas border border-cardline rounded-xl p-4 text-xs text-ink-slate">
         <strong className="text-navy">Need to update something?</strong> Email your Ironbooks
         bookkeeper to change your name or transfer access. We don't expose self-service for those
         yet — keeps your books safer.

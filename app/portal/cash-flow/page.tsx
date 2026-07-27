@@ -49,7 +49,7 @@ export default async function CashFlowPage({
     return (
       <div className="max-w-2xl">
         <h1 className="text-2xl font-bold text-navy">Cash Flow</h1>
-        <div className="mt-6 bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3">
+        <div className="mt-6 bg-white border border-cardline rounded-2xl p-8 text-center space-y-3">
           <div className="inline-flex w-14 h-14 rounded-full bg-teal/10 items-center justify-center">
             <Sparkles size={24} className="text-teal" />
           </div>
@@ -98,7 +98,7 @@ export default async function CashFlowPage({
     return (
       <div className="space-y-4">
         <StatementSwitcher active="cfs" />
-        <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center">
+        <div className="bg-white border border-cardline rounded-2xl p-10 text-center">
           <div className="text-sm font-semibold text-navy">
             Couldn&apos;t load your cash flow statement
           </div>
@@ -156,7 +156,7 @@ export default async function CashFlowPage({
             className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
               key === rangeKey
                 ? "bg-navy text-white border-navy"
-                : "bg-white text-ink-slate border-gray-200 hover:border-teal hover:text-teal-dark"
+                : "bg-white text-ink-slate border-cardline hover:border-teal hover:text-teal-dark"
             }`}
           >
             {r.label}
@@ -183,7 +183,7 @@ export default async function CashFlowPage({
                 </>
               ) : (
                 <>
-                  Your cash position <strong className="text-red-700">shrank by {fmtMoney(Math.abs(cf.netCashChange))}</strong>{" "}
+                  Your cash position <strong className="text-rust">shrank by {fmtMoney(Math.abs(cf.netCashChange))}</strong>{" "}
                   this period — from {fmtMoney(cf.cashAtStart)} down to{" "}
                   <strong>{fmtMoney(cf.cashAtEnd)}</strong>.
                 </>
@@ -219,11 +219,11 @@ export default async function CashFlowPage({
       />
 
       {/* ── Beginning → ending walk ─────────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-5">
+      <div className="bg-white rounded-2xl border border-cardline p-5">
         <div className="space-y-2 text-sm">
           <WalkRow label="Cash at beginning of period" value={cf.cashAtStart} />
           <WalkRow label="Net cash change" value={cf.netCashChange} signed />
-          <div className="border-t border-gray-100 pt-2 flex items-center justify-between font-bold text-navy">
+          <div className="border-t border-hairline pt-2 flex items-center justify-between font-bold text-navy">
             <span>Cash at end of period</span>
             <span>{fmtMoney(cf.cashAtEnd)}</span>
           </div>
@@ -242,15 +242,15 @@ export default async function CashFlowPage({
 function SectionCard({ section, subtitle }: { section: CashFlowSection; subtitle: string }) {
   const positive = section.total >= 0;
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between gap-3">
+    <div className="bg-white rounded-2xl border border-cardline overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-hairline flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-bold text-navy">{titleCase(section.title)}</div>
           <div className="text-xs text-ink-slate mt-0.5">{subtitle}</div>
         </div>
         <div
           className={`text-base font-bold flex-shrink-0 ${
-            positive ? "text-emerald-700" : "text-red-700"
+            positive ? "text-emerald-700" : "text-rust"
           }`}
         >
           {fmtSigned(section.total)}
@@ -261,7 +261,7 @@ function SectionCard({ section, subtitle }: { section: CashFlowSection; subtitle
           {section.items.map((item, i) => (
             <li key={`${item.label}-${i}`} className="px-5 py-2.5 flex items-center justify-between gap-3 text-sm">
               <span className="text-navy/85 min-w-0 truncate">{item.label}</span>
-              <span className={`flex-shrink-0 font-medium ${item.amount >= 0 ? "text-navy" : "text-red-700"}`}>
+              <span className={`flex-shrink-0 font-medium ${item.amount >= 0 ? "text-navy" : "text-rust"}`}>
                 {fmtSigned(item.amount)}
               </span>
             </li>
@@ -278,7 +278,7 @@ function WalkRow({ label, value, signed }: { label: string; value: number; signe
   return (
     <div className="flex items-center justify-between text-navy/85">
       <span>{label}</span>
-      <span className={`font-medium ${signed && value < 0 ? "text-red-700" : ""}`}>
+      <span className={`font-medium ${signed && value < 0 ? "text-rust" : ""}`}>
         {signed ? fmtSigned(value) : fmtMoney(value)}
       </span>
     </div>

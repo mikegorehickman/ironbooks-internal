@@ -16,9 +16,9 @@ const ACCOUNTANT_EMAIL = process.env.NEXT_PUBLIC_QBO_ACCOUNTANT_EMAIL || "";
 
 function Placeholder({ caption }: { caption: string }) {
   return (
-    <div className="rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Screenshot</div>
-      <div className="text-xs text-slate-500 mt-1">{caption}</div>
+    <div className="rounded-lg border-2 border-dashed border-cardline bg-canvas px-3 py-6 text-center">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-light">Screenshot</div>
+      <div className="text-xs text-ink-light mt-1">{caption}</div>
     </div>
   );
 }
@@ -50,7 +50,7 @@ const STEPS: { title: string; body: React.ReactNode; shot: string }[] = [
 
 export function ConnectQuickBooksCard() {
   return (
-    <section className="rounded-2xl border-2 border-teal/20 bg-gradient-to-br from-teal/5 to-white p-6">
+    <section className="rounded-2xl border border-teal-border bg-teal-lighter p-6">
       <div className="flex items-start gap-3">
         <div className="p-2 rounded-lg bg-teal/10 flex-shrink-0">
           <Link2 size={20} className="text-teal" />
@@ -65,7 +65,7 @@ export function ConnectQuickBooksCard() {
 
       <ol className="mt-5 grid gap-4 sm:grid-cols-2">
         {STEPS.map((s, i) => (
-          <li key={i} className="rounded-xl border border-slate-200 bg-white p-4">
+          <li key={i} className="rounded-xl border border-cardline bg-white p-4">
             <div className="flex items-center gap-2">
               <span className="inline-flex w-6 h-6 rounded-full bg-teal text-white text-xs font-bold items-center justify-center flex-shrink-0">{i + 1}</span>
               <span className="font-semibold text-navy text-sm">{s.title}</span>

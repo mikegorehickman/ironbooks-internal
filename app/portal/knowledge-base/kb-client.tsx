@@ -168,9 +168,9 @@ export function KnowledgeBaseClient({ categories }: { categories: KBCategory[] }
       </div>
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-start justify-between gap-2">
+        <div className="p-3 bg-rust-tint border border-rust-border rounded-lg text-sm text-rust flex items-start justify-between gap-2">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="text-red-600 hover:text-red-800">
+          <button onClick={() => setError(null)} className="text-rust hover:text-rust">
             <X size={14} />
           </button>
         </div>
@@ -178,7 +178,7 @@ export function KnowledgeBaseClient({ categories }: { categories: KBCategory[] }
 
       {/* AI answer */}
       {result && (
-        <div className="bg-white border-2 border-teal/30 rounded-2xl overflow-hidden">
+        <div className="bg-white border border-teal-border rounded-2xl overflow-hidden">
           <div className="px-5 py-3 bg-teal/5 border-b border-teal/20 flex items-center justify-between">
             <span className="text-sm font-bold text-teal-dark flex items-center gap-1.5">
               <Sparkles size={13} />
@@ -195,7 +195,7 @@ export function KnowledgeBaseClient({ categories }: { categories: KBCategory[] }
           <div className="px-5 py-4">
             <MdLite text={result.answer} />
             {result.sources.length > 0 && (
-              <div className="mt-4 pt-3 border-t border-gray-100">
+              <div className="mt-4 pt-3 border-t border-hairline">
                 <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate mb-1.5">
                   From these FAQs
                 </div>
@@ -227,7 +227,7 @@ export function KnowledgeBaseClient({ categories }: { categories: KBCategory[] }
                 ({cat.items.length})
               </span>
             </h3>
-            <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+            <div className="bg-white rounded-2xl border border-cardline divide-y divide-slate-100 overflow-hidden">
               {cat.items.map((item) => {
                 const open = openItems.has(item.id);
                 return (
@@ -239,7 +239,7 @@ export function KnowledgeBaseClient({ categories }: { categories: KBCategory[] }
                   >
                     <button
                       onClick={() => toggle(item.id)}
-                      className="w-full flex items-start gap-2.5 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+                      className="w-full flex items-start gap-2.5 px-4 py-3 text-left hover:bg-canvas transition-colors"
                     >
                       {open ? (
                         <ChevronDown size={15} className="text-teal flex-shrink-0 mt-0.5" />

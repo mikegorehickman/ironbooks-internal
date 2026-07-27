@@ -40,7 +40,7 @@ export default async function BalanceSheetPage() {
     return (
       <div className="max-w-2xl">
         <h1 className="text-2xl font-bold text-navy">Balance Sheet</h1>
-        <div className="mt-6 bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3">
+        <div className="mt-6 bg-white border border-cardline rounded-2xl p-8 text-center space-y-3">
           <div className="inline-flex w-14 h-14 rounded-full bg-teal/10 items-center justify-center">
             <Sparkles size={24} className="text-teal" />
           </div>
@@ -126,7 +126,7 @@ export default async function BalanceSheetPage() {
             <div className="text-xs font-bold text-teal-dark uppercase tracking-wider">In plain English</div>
             <p className="text-sm text-navy/85 leading-relaxed mt-1">
               If you sold everything today and paid off every debt, you'd have about{" "}
-              <strong className={netWorth >= 0 ? "text-emerald-700" : "text-red-700"}>{fmtMoney(netWorth)}</strong>{" "}
+              <strong className={netWorth >= 0 ? "text-emerald-700" : "text-rust"}>{fmtMoney(netWorth)}</strong>{" "}
               left over. That's your <strong>net worth</strong> as a business — built up from past
               profits, owner investments, and equity in your assets. You own{" "}
               <strong>{fmtMoney(bs.totalAssets)}</strong> and owe{" "}
@@ -193,7 +193,7 @@ export default async function BalanceSheetPage() {
       </div>
 
       {/* ── Balance equation ────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-gradient-to-r from-slate-50 to-white border border-slate-200 p-5 text-center text-sm text-ink-slate">
+      <div className="rounded-2xl bg-gradient-to-r from-slate-50 to-white border border-cardline p-5 text-center text-sm text-ink-slate">
         <strong className="text-navy">{fmtMoney(bs.totalAssets)}</strong> (you own) −{" "}
         <strong className="text-navy">{fmtMoney(bs.totalLiabilities)}</strong> (you owe) ={" "}
         <strong className="text-teal-dark">{fmtMoney(netWorth)}</strong> (yours) ✓
@@ -228,7 +228,7 @@ function Card({
 }) {
   const toneColors = {
     emerald: "text-emerald-700",
-    amber: "text-amber-700",
+    amber: "text-gold-deep",
     teal: "text-teal-dark",
   }[tone];
   const accentBar = {
@@ -238,10 +238,10 @@ function Card({
   }[tone];
   const iconChip = {
     emerald: "bg-emerald-50 text-emerald-700",
-    amber: "bg-amber-50 text-amber-700",
+    amber: "bg-gold-tint text-gold-deep",
     teal: "bg-teal/10 text-teal-dark",
   }[tone];
-  const borderClass = emphasize ? "border-2 border-teal/40" : "border border-slate-200";
+  const borderClass = emphasize ? "border-2 border-teal/40" : "border border-cardline";
   return (
     <div className={`relative bg-white ${borderClass} rounded-2xl p-5 overflow-hidden`}>
       <span className={`absolute left-0 top-0 h-full w-1 ${accentBar}`} />

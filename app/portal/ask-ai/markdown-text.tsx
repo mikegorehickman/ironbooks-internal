@@ -61,7 +61,7 @@ export function MarkdownText({ children }: { children: string }) {
                 <thead>
                   <tr>
                     {block.headers.map((h, j) => (
-                      <th key={j} className="border-b border-slate-300 px-2.5 py-1.5 font-semibold text-navy whitespace-nowrap">
+                      <th key={j} className="border-b border-cardline px-2.5 py-1.5 font-semibold text-navy whitespace-nowrap">
                         <Inline>{h}</Inline>
                       </th>
                     ))}
@@ -69,7 +69,7 @@ export function MarkdownText({ children }: { children: string }) {
                 </thead>
                 <tbody>
                   {block.rows.map((row, r) => (
-                    <tr key={r} className="border-b border-slate-100">
+                    <tr key={r} className="border-b border-hairline">
                       {row.map((cell, j) => (
                         <td key={j} className="px-2.5 py-1.5 align-top">
                           <Inline>{cell}</Inline>
