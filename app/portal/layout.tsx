@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import {
   Home, Wallet, Receipt, Sparkles,
   GraduationCap, Settings, FileCheck2, Mail, BookOpen, Tags, CreditCard, Phone,
+  FileQuestion,
 } from "lucide-react";
 import { MessagesNavLink } from "./messages-nav-link";
 import { FinancialStatementsNav } from "./financial-statements-nav";
@@ -131,6 +132,30 @@ export default async function PortalLayout({ children }: { children: React.React
     openCategorize = 0;
   }
 
+  // Unanswered invoice-check items (open ar_match_session) drive the badge
+  // on "Confirm invoices". Table ships with migration 142 — swallow errors
+  // so the portal renders even before it's applied.
+  let openInvoiceCheck = 0;
+  try {
+    const { data: openSession } = await (service as any)
+      .from("ar_match_sessions")
+      .select("id")
+      .eq("client_link_id", ctx.clientLinkId)
+      .eq("status", "open")
+      .limit(1)
+      .maybeSingle();
+    if (openSession) {
+      const { count } = await (service as any)
+        .from("ar_match_items")
+        .select("id", { count: "exact", head: true })
+        .eq("session_id", (openSession as any).id)
+        .is("answered_at", null);
+      openInvoiceCheck = count || 0;
+    }
+  } catch {
+    openInvoiceCheck = 0;
+  }
+
   // When impersonating, offer a quick-switch dropdown of every client that
   // has an active portal user — so a senior can hop between portals without
   // stopping + restarting from the clients list.
@@ -218,6 +243,17 @@ export default async function PortalLayout({ children }: { children: React.React
               badge={openCategorize > 0 ? String(openCategorize) : undefined}
               badgeTone="alert"
             />
+            {/* Only appears while there's an open invoice-check session —
+                a permanent empty page would just be nav noise. */}
+            {openInvoiceCheck > 0 && (
+              <NavLink
+                href="/portal/invoice-check"
+                icon={FileQuestion}
+                label="Confirm invoices"
+                badge={String(openInvoiceCheck)}
+                badgeTone="alert"
+              />
+            )}
             <NavLink href="/portal/cleanup-reports" icon={FileCheck2} label="Cleanup Reports" />
 
             <NavSection label="Help &amp; learning" />

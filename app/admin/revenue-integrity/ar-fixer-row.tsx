@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ChevronRight, Wrench, ExternalLink } from "lucide-react";
 import { QboRemediationPanel } from "@/components/QboRemediationPanel";
+import { ClientConfirmPanel } from "./client-confirm-panel";
 
 /**
  * One client row on the fleet integrity board, with the remediation tool
@@ -202,6 +203,10 @@ export function ArFixerRow({
               start={start}
               end={today}
             />
+
+            {/* The client-assisted leg: send the ambiguous residual to the
+                client to confirm, action their answers here. */}
+            <ClientConfirmPanel clientId={clientId} clientName={clientName} />
 
             <div className="mt-3 flex flex-wrap gap-3 text-[11px]">
               <Link
