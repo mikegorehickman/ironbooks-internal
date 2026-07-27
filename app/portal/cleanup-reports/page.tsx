@@ -175,7 +175,7 @@ export default async function PortalCleanupReportsPage() {
           {savedReports.map((r) => (
             <div
               key={r.path}
-              className="bg-white border border-gray-200 rounded-2xl p-4 md:p-5 flex items-center justify-between gap-4 flex-wrap hover:border-teal-light transition-colors"
+              className="bg-white border border-cardline rounded-2xl p-4 md:p-5 flex items-center justify-between gap-4 flex-wrap hover:border-teal-light transition-colors"
             >
               <div className="flex items-start gap-3 min-w-0 flex-1">
                 <div className="shrink-0 w-10 h-10 rounded-lg bg-teal-lighter flex items-center justify-center">
@@ -221,7 +221,7 @@ export default async function PortalCleanupReportsPage() {
           {bsReports.map((r) => (
             <div
               key={r.id}
-              className="bg-white border border-gray-200 rounded-2xl p-4 md:p-5"
+              className="bg-white border border-cardline rounded-2xl p-4 md:p-5"
             >
               <div className="flex items-start gap-3">
                 <div className="shrink-0 w-10 h-10 rounded-lg bg-teal-lighter flex items-center justify-center">
@@ -254,7 +254,7 @@ export default async function PortalCleanupReportsPage() {
       )}
 
       {periods.length === 0 && bsReports.length === 0 && savedReports.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center">
+        <div className="bg-white border border-cardline rounded-2xl p-10 text-center">
           <FileText size={32} className="mx-auto text-ink-slate mb-3" />
           <div className="text-sm font-semibold text-navy">
             No cleanup reports available yet
@@ -272,7 +272,7 @@ export default async function PortalCleanupReportsPage() {
             return (
               <div
                 key={`${p.start}_${p.end}`}
-                className="bg-white border border-gray-200 rounded-2xl p-4 md:p-5 flex items-center justify-between gap-4 flex-wrap hover:border-teal-light transition-colors"
+                className="bg-white border border-cardline rounded-2xl p-4 md:p-5 flex items-center justify-between gap-4 flex-wrap hover:border-teal-light transition-colors"
               >
                 <div className="flex items-start gap-3 min-w-0 flex-1">
                   <div className="shrink-0 w-10 h-10 rounded-lg bg-teal-lighter flex items-center justify-center">

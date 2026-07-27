@@ -58,7 +58,7 @@ export function DocumentsPanel({ initialDocuments }: { initialDocuments?: Portal
   const visible = showAll ? docs : docs.slice(0, INITIAL_VISIBLE);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5">
+    <div className="bg-white rounded-2xl border border-cardline p-5">
       <div className="flex items-start gap-3">
         <div className="p-2 rounded-lg bg-teal/10 flex-shrink-0">
           <FolderOpen size={18} className="text-teal" />
@@ -81,14 +81,14 @@ export function DocumentsPanel({ initialDocuments }: { initialDocuments?: Portal
           <Loader2 size={14} className="animate-spin text-teal" /> Loading your documents…
         </div>
       ) : docs.length === 0 ? (
-        <p className="mt-4 text-sm text-ink-slate bg-slate-50 border border-slate-200 rounded-lg px-3 py-3">
+        <p className="mt-4 text-sm text-ink-slate bg-canvas border border-cardline rounded-lg px-3 py-3">
           Nothing here yet — statements and files you upload above will be saved and listed for you.
         </p>
       ) : (
         <>
-          <div className="mt-4 border border-slate-200 rounded-lg overflow-hidden">
+          <div className="mt-4 border border-cardline rounded-lg overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50">
+              <thead className="bg-canvas">
                 <tr className="text-[11px] uppercase tracking-wide text-ink-slate">
                   <th className="text-left font-semibold px-3 py-2">File</th>
                   <th className="text-left font-semibold px-3 py-2">Account</th>
@@ -105,13 +105,13 @@ export function DocumentsPanel({ initialDocuments }: { initialDocuments?: Portal
                       ? [d.direction === "to_client" ? "From your bookkeeper" : "Sent by you", size].filter(Boolean).join(" · ")
                       : null;
                   return (
-                    <tr key={d.key} className="bg-white hover:bg-slate-50">
+                    <tr key={d.key} className="bg-white hover:bg-canvas">
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2 min-w-0">
                           {d.kind === "statement" ? (
                             <FileText size={16} className="text-teal flex-shrink-0" />
                           ) : (
-                            <Paperclip size={16} className="text-slate-400 flex-shrink-0" />
+                            <Paperclip size={16} className="text-ink-light flex-shrink-0" />
                           )}
                           <div className="min-w-0">
                             <div className="text-sm font-medium text-navy truncate max-w-[220px]">{d.name}</div>
@@ -122,14 +122,14 @@ export function DocumentsPanel({ initialDocuments }: { initialDocuments?: Portal
                       <td className="px-3 py-2.5">
                         {d.kind === "statement" ? (
                           d.needs_match ? (
-                            <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 font-semibold whitespace-nowrap">
+                            <span className="text-[11px] text-gold-deep bg-gold-tint border border-gold-border rounded px-1.5 py-0.5 font-semibold whitespace-nowrap">
                               needs account
                             </span>
                           ) : (
                             <span className="text-sm text-navy">{d.account || "—"}</span>
                           )
                         ) : (
-                          <span className="text-sm text-slate-400">—</span>
+                          <span className="text-sm text-ink-light">—</span>
                         )}
                       </td>
                       <td className="px-3 py-2.5 hidden sm:table-cell text-sm text-ink-slate whitespace-nowrap">
@@ -144,7 +144,7 @@ export function DocumentsPanel({ initialDocuments }: { initialDocuments?: Portal
                             href={`/api/client-files/download?path=${encodeURIComponent(d.path)}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-teal-dark hover:text-teal border border-slate-200 hover:border-teal/40 rounded-lg px-2.5 py-1.5"
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-teal-dark hover:text-teal border border-cardline hover:border-teal/40 rounded-lg px-2.5 py-1.5"
                           >
                             <Download size={13} /> View
                           </a>

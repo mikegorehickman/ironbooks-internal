@@ -38,8 +38,8 @@ const TIER_COLORS: Record<string, string> = {
 
 const STATUS_COLORS: Record<string, string> = {
   active:   "bg-emerald-50 text-emerald-700 border-emerald-200",
-  past_due: "bg-red-50 text-red-700 border-red-200",
-  canceled: "bg-slate-50 text-slate-600 border-slate-200",
+  past_due: "bg-rust-tint text-rust border-rust-border",
+  canceled: "bg-canvas text-ink-slate border-cardline",
 };
 
 function fmtMoney(n: number, currency = "USD") {
@@ -83,7 +83,7 @@ export function BillingClient({
         <div className="text-xs text-ink-slate uppercase tracking-wider font-semibold">Account</div>
         <h1 className="text-3xl font-bold text-navy mt-1">Billing & Plan</h1>
         {impersonating && (
-          <div className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block">
+          <div className="mt-1 text-xs text-gold-deep bg-gold-tint border border-gold-border rounded px-2 py-1 inline-block">
             Preview mode — payment actions disabled while impersonating
           </div>
         )}
@@ -152,7 +152,7 @@ function CurrentPlanCard({
 }) {
   if (!tier) {
     return (
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+      <div className="bg-white border border-cardline rounded-2xl p-6">
         <div className="flex items-center gap-2 mb-3">
           <Star size={16} className="text-ink-slate" />
           <h2 className="text-sm font-bold text-navy uppercase tracking-wider">Your plan</h2>
@@ -178,8 +178,8 @@ function CurrentPlanCard({
   const statusColor = STATUS_COLORS[subscriptionStatus ?? ""] || STATUS_COLORS.canceled;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+    <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-hairline flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Star size={16} className="text-ink-slate" />
           <h2 className="text-sm font-bold text-navy uppercase tracking-wider">Your plan</h2>
@@ -239,7 +239,7 @@ function CurrentPlanCard({
         </dl>
 
         {subscriptionStatus === "past_due" && (
-          <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-800 flex items-start gap-2">
+          <div className="rounded-lg bg-rust-tint border border-rust-border px-4 py-3 text-xs text-rust flex items-start gap-2">
             <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
             <span>
               Your subscription is past due. Please update your payment method to keep your account active.
@@ -251,7 +251,7 @@ function CurrentPlanCard({
         )}
 
         {tier.key === "insight" && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
+          <div className="rounded-lg bg-gold-tint border border-gold-border px-4 py-3 text-xs text-gold-deep">
             <strong>Tier 1 participation reminder:</strong> To keep Insight pricing available, promote
             Ironbooks once per quarter via email or social media using our templates. Send a link or
             screenshot to{" "}
@@ -267,8 +267,8 @@ function CurrentPlanCard({
 
 function WhatIsIncludedCard() {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+    <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-hairline flex items-center gap-2">
         <CheckCircle2 size={16} className="text-ink-slate" />
         <h2 className="text-sm font-bold text-navy uppercase tracking-wider">What's included</h2>
       </div>
@@ -326,8 +326,8 @@ function CoachingCallCard({
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+    <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-hairline flex items-center gap-2">
         <Phone size={16} className="text-ink-slate" />
         <h2 className="text-sm font-bold text-navy uppercase tracking-wider">Book a coaching call</h2>
       </div>
@@ -341,7 +341,7 @@ function CoachingCallCard({
             whatever matters most right now.
           </p>
         </div>
-        <div className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-xs text-ink-slate">
+        <div className="rounded-lg bg-canvas border border-cardline px-4 py-3 text-xs text-ink-slate">
           <strong className="text-navy">What to expect:</strong> Your coach reviews your most recent
           month before the call. Come with 2–3 questions, leave with a clear action plan.
         </div>
@@ -361,7 +361,7 @@ function CoachingCallCard({
                       className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 transition-colors ${
                         coachKey === c.coach_key
                           ? "border-teal bg-teal-lighter text-teal-dark"
-                          : "border-slate-200 text-ink-slate hover:border-slate-300"
+                          : "border-cardline text-ink-slate hover:border-cardline"
                       }`}
                     >
                       {c.coach_name}
@@ -370,7 +370,7 @@ function CoachingCallCard({
                 </div>
               </div>
             )}
-            {err && <div className="text-xs text-red-600">{err}</div>}
+            {err && <div className="text-xs text-rust">{err}</div>}
             <button
               onClick={book}
               disabled={busy || !coachKey}
@@ -426,13 +426,13 @@ function UpgradeCard({
   );
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+    <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-hairline flex items-center gap-2">
         <ArrowUpCircle size={16} className="text-ink-slate" />
         <h2 className="text-sm font-bold text-navy uppercase tracking-wider">Upgrade your plan</h2>
       </div>
       <div className="px-6 py-5 space-y-3">
-        <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 flex items-center justify-between gap-4">
+        <div className="rounded-xl bg-canvas border border-cardline p-4 flex items-center justify-between gap-4">
           <div>
             <div className="text-sm font-bold text-navy">{nextTier.name}</div>
             <div className="text-xs text-ink-slate mt-0.5">{nextTier.tagline}</div>
@@ -510,8 +510,8 @@ function ReceiptsCard({
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+    <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-hairline flex items-center justify-between">
         <div className="flex items-center gap-2">
           <FileText size={16} className="text-ink-slate" />
           <h2 className="text-sm font-bold text-navy uppercase tracking-wider">Receipts & invoices</h2>
@@ -520,7 +520,7 @@ function ReceiptsCard({
           <button
             onClick={openPortal}
             disabled={portalLoading}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-navy disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-cardline hover:bg-canvas text-navy disabled:opacity-50"
             title="Open Stripe billing portal to manage payment method"
           >
             {portalLoading ? <Loader2 size={11} className="animate-spin" /> : <CreditCard size={11} />}
@@ -531,7 +531,7 @@ function ReceiptsCard({
 
       <div className="px-6 py-5">
         {portalError && (
-          <p className="text-xs text-red-600 mb-3">{portalError}</p>
+          <p className="text-xs text-rust mb-3">{portalError}</p>
         )}
 
         {impersonating ? (
@@ -570,7 +570,7 @@ function InvoiceRow({ invoice }: { invoice: StripeInvoice }) {
     : fmtMonthYear(invoice.periodStart);
 
   return (
-    <div className="flex items-center justify-between gap-3 py-2.5 border-b border-slate-100 last:border-0">
+    <div className="flex items-center justify-between gap-3 py-2.5 border-b border-hairline last:border-0">
       <div className="flex items-center gap-3 min-w-0">
         <Calendar size={13} className="text-ink-light flex-shrink-0" />
         <div className="min-w-0">
@@ -647,8 +647,8 @@ function CancelRequestCard({
 
   if (submitted) {
     return (
-      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+      <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-hairline flex items-center gap-2">
           <XCircle size={16} className="text-ink-slate" />
           <h2 className="text-sm font-bold text-navy uppercase tracking-wider">Cancel request received</h2>
         </div>
@@ -674,8 +674,8 @@ function CancelRequestCard({
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+    <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-hairline flex items-center gap-2">
         <XCircle size={16} className="text-ink-slate" />
         <h2 className="text-sm font-bold text-navy uppercase tracking-wider">Cancel subscription</h2>
       </div>
@@ -686,7 +686,7 @@ function CancelRequestCard({
               Need to step away? Submit a cancel request and your Ironbooks manager will reach
               out within 1–2 business days to discuss options and next steps.
             </p>
-            <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800 flex items-start gap-2">
+            <div className="rounded-lg bg-gold-tint border border-gold-border px-4 py-3 text-xs text-gold-deep flex items-start gap-2">
               <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
               <span>
                 Submitting a request does not cancel your account or stop billing. Your
@@ -695,7 +695,7 @@ function CancelRequestCard({
             </div>
             <button
               onClick={() => setOpen(true)}
-              className="text-sm text-ink-slate hover:text-red-600 underline underline-offset-2"
+              className="text-sm text-ink-slate hover:text-rust underline underline-offset-2"
             >
               Request cancellation
             </button>
@@ -710,16 +710,16 @@ function CancelRequestCard({
               onChange={(e) => setNote(e.target.value)}
               placeholder="Optional: share what's behind this decision…"
               rows={4}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-navy placeholder:text-ink-light resize-none focus:outline-none focus:border-navy"
+              className="w-full rounded-lg border border-cardline px-3 py-2 text-sm text-navy placeholder:text-ink-light resize-none focus:outline-none focus:border-navy"
             />
-            <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800 flex items-start gap-2">
+            <div className="rounded-lg bg-gold-tint border border-gold-border px-4 py-3 text-xs text-gold-deep flex items-start gap-2">
               <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
               <span>
                 This notifies your manager. It does <strong>not</strong> cancel your account
                 or stop billing.
               </span>
             </div>
-            {error && <p className="text-xs text-red-600">{error}</p>}
+            {error && <p className="text-xs text-rust">{error}</p>}
             <div className="flex items-center gap-3">
               <button
                 onClick={submit}

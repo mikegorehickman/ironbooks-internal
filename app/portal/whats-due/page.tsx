@@ -118,7 +118,7 @@ export default async function WhatsDuePage() {
       </div>
 
       {bills.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-ink-slate">
+        <div className="bg-white border border-cardline rounded-2xl p-8 text-center text-sm text-ink-slate">
           No outstanding bills — you're all caught up.
         </div>
       ) : (
@@ -133,10 +133,10 @@ export default async function WhatsDuePage() {
               <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
                 cashHealthy ? "bg-emerald-100" : "bg-amber-100"
               }`}>
-                <Sparkles size={18} className={cashHealthy ? "text-emerald-700" : "text-amber-700"} />
+                <Sparkles size={18} className={cashHealthy ? "text-emerald-700" : "text-gold-deep"} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className={`text-xs font-bold uppercase tracking-wider ${cashHealthy ? "text-emerald-700" : "text-amber-700"}`}>
+                <div className={`text-xs font-bold uppercase tracking-wider ${cashHealthy ? "text-emerald-700" : "text-gold-deep"}`}>
                   Cash flow check
                 </div>
                 <p className="text-sm text-navy/85 leading-relaxed mt-1">
@@ -159,7 +159,7 @@ export default async function WhatsDuePage() {
           </div>
 
           {reviewBills.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
+            <div className="bg-white border border-cardline rounded-2xl p-5">
               <h3 className="font-bold text-navy">Bills to review</h3>
               <p className="text-xs text-ink-slate mb-3">
                 Overdue and due in the next 30 days — dismiss any that aren't actually owed.
@@ -189,7 +189,7 @@ export default async function WhatsDuePage() {
             </div>
           )}
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-5">
+          <div className="bg-white border border-cardline rounded-2xl p-5">
             <h3 className="font-bold text-navy mb-3">All outstanding bills by vendor</h3>
             <div className="divide-y divide-slate-100">
               {vendors.slice(0, 20).map((v, i) => (
@@ -243,16 +243,16 @@ function BillRow({
     ? `${due} · ${Math.abs(daysAway)} day${Math.abs(daysAway) === 1 ? "" : "s"} overdue`
     : `${due} · ${daysAway} day${daysAway === 1 ? "" : "s"} away`;
   return (
-    <div className={`flex items-center justify-between gap-2 p-3 rounded-lg ${urgent ? "bg-red-50 border border-red-200" : "bg-slate-50 border border-slate-100"}`}>
+    <div className={`flex items-center justify-between gap-2 p-3 rounded-lg ${urgent ? "bg-rust-tint border border-rust-border" : "bg-canvas border border-hairline"}`}>
       <div className="flex items-center gap-3 min-w-0">
-        <Calendar size={14} className={urgent ? "text-red-700 flex-shrink-0" : "text-ink-slate flex-shrink-0"} />
+        <Calendar size={14} className={urgent ? "text-rust flex-shrink-0" : "text-ink-slate flex-shrink-0"} />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-navy truncate">{payee}</span>
             {overdue ? (
-              <span className="text-[9px] font-bold bg-red-100 text-red-800 px-1 rounded flex-shrink-0">OVERDUE</span>
+              <span className="text-[9px] font-bold bg-red-100 text-rust px-1 rounded flex-shrink-0">OVERDUE</span>
             ) : urgent ? (
-              <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1 rounded flex-shrink-0">DUE SOON</span>
+              <span className="text-[9px] font-bold bg-amber-100 text-gold-deep px-1 rounded flex-shrink-0">DUE SOON</span>
             ) : null}
           </div>
           <div className="text-xs text-ink-slate">{timing}</div>

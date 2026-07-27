@@ -97,15 +97,15 @@ export function StatementReviewNotes({
     <div className="fixed bottom-4 right-4 z-[80] print:hidden">
       {open ? (
         <div className="w-80 max-h-[70vh] flex flex-col rounded-xl border border-amber-300 bg-white shadow-2xl">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-amber-200 bg-amber-50 rounded-t-xl">
-            <span className="text-sm font-bold text-amber-800 flex items-center gap-1.5">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-gold-border bg-gold-tint rounded-t-xl">
+            <span className="text-sm font-bold text-gold-deep flex items-center gap-1.5">
               <StickyNote size={14} /> Reviewer notes
             </span>
-            <button onClick={() => setOpen(false)} className="text-amber-700 hover:text-amber-900">
+            <button onClick={() => setOpen(false)} className="text-gold-deep hover:text-gold-deep">
               <X size={16} />
             </button>
           </div>
-          <div className="px-3 py-2 text-[11px] text-ink-slate border-b border-gray-100">
+          <div className="px-3 py-2 text-[11px] text-ink-slate border-b border-hairline">
             Internal only — not shown to {statementLabel ? "the client on this " + statementLabel : "the client"}.
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
@@ -117,7 +117,7 @@ export function StatementReviewNotes({
               notes.map((n) => (
                 <div
                   key={n.id}
-                  className={`rounded-lg border px-2.5 py-2 text-xs ${n.resolved_at ? "border-gray-200 bg-gray-50 opacity-70" : "border-amber-200 bg-amber-50/50"}`}
+                  className={`rounded-lg border px-2.5 py-2 text-xs ${n.resolved_at ? "border-cardline bg-gray-50 opacity-70" : "border-gold-border bg-gold-tint/50"}`}
                 >
                   <p className={`text-navy ${n.resolved_at ? "line-through" : ""}`}>{n.body}</p>
                   <div className="flex items-center justify-between mt-1">
@@ -128,7 +128,7 @@ export function StatementReviewNotes({
                       <button onClick={() => toggleResolved(n)} className="text-ink-slate hover:text-navy" title={n.resolved_at ? "Reopen" : "Resolve"}>
                         {n.resolved_at ? <RotateCcw size={12} /> : <Check size={12} />}
                       </button>
-                      <button onClick={() => remove(n)} className="text-ink-slate hover:text-red-600" title="Delete">
+                      <button onClick={() => remove(n)} className="text-ink-slate hover:text-rust" title="Delete">
                         <X size={12} />
                       </button>
                     </div>
@@ -137,15 +137,15 @@ export function StatementReviewNotes({
               ))
             )}
           </div>
-          <div className="px-3 py-2 border-t border-gray-100 space-y-1.5">
+          <div className="px-3 py-2 border-t border-hairline space-y-1.5">
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               rows={2}
               placeholder="Note for the reviewer / to fix before sending…"
-              className="w-full text-xs px-2 py-1.5 rounded border border-gray-200 outline-none focus:border-amber-400 text-navy"
+              className="w-full text-xs px-2 py-1.5 rounded border border-cardline outline-none focus:border-amber-400 text-navy"
             />
-            {err && <div className="text-[11px] text-red-600">{err}</div>}
+            {err && <div className="text-[11px] text-rust">{err}</div>}
             <button
               onClick={add}
               disabled={busy || !draft.trim()}
@@ -162,7 +162,7 @@ export function StatementReviewNotes({
         >
           <StickyNote size={15} /> Reviewer notes
           {openCount > 0 && (
-            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white text-amber-700 text-[10px] font-bold">
+            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white text-gold-deep text-[10px] font-bold">
               {openCount}
             </span>
           )}

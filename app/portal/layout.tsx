@@ -380,7 +380,7 @@ function QboDisconnectedState({
         </div>
       )}
       <div className="min-h-[calc(100vh-44px)] flex items-center justify-center px-4 py-12">
-        <div className="max-w-lg w-full bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+        <div className="max-w-lg w-full bg-white rounded-2xl shadow-lg border border-cardline overflow-hidden">
           <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-7 py-5 text-white">
             <div className="text-xs uppercase tracking-widest opacity-80">
               Action needed
@@ -390,7 +390,7 @@ function QboDisconnectedState({
             </h1>
           </div>
           <div className="px-7 py-6 space-y-5">
-            <p className="text-sm text-slate-700 leading-relaxed">
+            <p className="text-sm text-ink leading-relaxed">
               {impersonating ? (
                 <>
                   <span className="font-semibold">{clientName}</span>'s QuickBooks
@@ -406,8 +406,8 @@ function QboDisconnectedState({
               )}
             </p>
 
-            <div className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-xs text-slate-600">
-              <strong className="text-slate-800">Why this happened:</strong>{" "}
+            <div className="rounded-lg bg-canvas border border-cardline px-4 py-3 text-xs text-ink-slate">
+              <strong className="text-navy">Why this happened:</strong>{" "}
               QuickBooks refresh tokens expire after a period of inactivity, or
               when the connection is revoked from the QuickBooks Apps page.
               Re-authorizing restores access immediately.
@@ -424,14 +424,14 @@ function QboDisconnectedState({
               <form action="/api/admin/impersonate/stop" method="POST">
                 <button
                   type="submit"
-                  className="block w-full text-center px-5 py-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-medium transition-colors"
+                  className="block w-full text-center px-5 py-2.5 rounded-lg border border-cardline hover:bg-canvas text-ink text-sm font-medium transition-colors"
                 >
                   Exit portal view
                 </button>
               </form>
             )}
 
-            <p className="text-xs text-slate-500 text-center pt-2">
+            <p className="text-xs text-ink-light text-center pt-2">
               Questions? Email{" "}
               <a href="mailto:admin@ironbooks.com" className="text-blue-600 hover:underline">
                 admin@ironbooks.com

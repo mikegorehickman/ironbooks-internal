@@ -109,7 +109,7 @@ export function CreateReportButton() {
             value={start}
             onChange={(e) => setStart(e.target.value)}
             disabled={busy}
-            className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-teal/40"
+            className="rounded-lg border border-cardline px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-teal/40"
           />
         </label>
         <label className="text-xs text-ink-slate">
@@ -119,7 +119,7 @@ export function CreateReportButton() {
             value={end}
             onChange={(e) => setEnd(e.target.value)}
             disabled={busy}
-            className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-teal/40"
+            className="rounded-lg border border-cardline px-3 py-2 text-sm text-navy focus:outline-none focus:ring-2 focus:ring-teal/40"
           />
         </label>
         <button
@@ -145,7 +145,7 @@ export function CreateReportButton() {
           up to a minute. Keep this tab open.
         </div>
       )}
-      {error && <div className="text-xs text-red-600">{error}</div>}
+      {error && <div className="text-xs text-rust">{error}</div>}
     </div>
   );
 }
@@ -159,7 +159,7 @@ function PresetChip({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="px-2.5 py-1 rounded-full border border-gray-200 bg-white text-xs font-semibold text-ink-slate hover:border-teal hover:text-teal-dark transition-colors disabled:opacity-50"
+      className="px-2.5 py-1 rounded-full border border-cardline bg-white text-xs font-semibold text-ink-slate hover:border-teal hover:text-teal-dark transition-colors disabled:opacity-50"
     >
       {label}
     </button>

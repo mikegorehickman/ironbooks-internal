@@ -136,7 +136,7 @@ export function ProfitLossClient({
       </div>
 
       {/* Notice to Reader — cash-basis framing so clients read the numbers right */}
-      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-ink-slate leading-relaxed">
+      <div className="rounded-xl border border-cardline bg-canvas px-4 py-3 text-xs text-ink-slate leading-relaxed">
         <span className="font-semibold text-navy">Notice to Reader:</span> These figures are prepared on a
         cash basis from your QuickBooks data — they don&apos;t reflect accounts receivable, accounts payable,
         or your full cash-flow cycle, and haven&apos;t been audited or reviewed. For a true read on your
@@ -145,7 +145,7 @@ export function ProfitLossClient({
 
       {/* In-progress warning */}
       {isThisMonth && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 flex items-start gap-2">
+        <div className="bg-gold-tint border border-gold-border rounded-xl p-3 text-xs text-gold-deep flex items-start gap-2">
           <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
           <div>
             <strong>This month is still in progress.</strong> Numbers may shift as your bookkeeper
@@ -172,22 +172,22 @@ export function ProfitLossClient({
       )}
 
       {isCustom && customLoading ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-ink-slate">
+        <div className="bg-white border border-cardline rounded-2xl p-8 text-center text-sm text-ink-slate">
           <Loader2 size={20} className="animate-spin mx-auto mb-2 text-teal-dark" />
           Pulling your P&L for that range…
         </div>
       ) : isCustom && !customData ? (
-        <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-8 text-center text-sm text-ink-slate">
+        <div className="bg-white border border-dashed border-cardline rounded-2xl p-8 text-center text-sm text-ink-slate">
           Pick a start and end date above, then hit <strong>Run</strong> to see your P&amp;L for any
           period.
         </div>
       ) : !pl || !range ? (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
+        <div className="bg-gold-tint border border-gold-border rounded-xl p-4 text-sm text-gold-deep">
           We couldn't load the P&L for this range. Try a different range or refresh — if it keeps
           happening, let your bookkeeper know.
         </div>
       ) : !c || c.isEmpty ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-ink-slate">
+        <div className="bg-white border border-cardline rounded-2xl p-8 text-center text-sm text-ink-slate">
           No financial activity for this period.
         </div>
       ) : (
@@ -270,7 +270,7 @@ export function ProfitLossClient({
         </>
       )}
 
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-ink-slate">
+      <div className="bg-canvas border border-cardline rounded-xl p-4 text-xs text-ink-slate">
         <strong className="text-navy">Tip:</strong> Click any line to see the underlying transactions —
         vendor, date, amount, memo. Each line also has buttons to ask your Ironbooks team a question
         about it or suggest it should be in a different category. For an instant explanation,{" "}
@@ -302,7 +302,7 @@ function InsightCard({ c, range, periodLabel }: { c: PortalPl; range: { label: s
   const gm = marginVerdict(c.grossMarginPct);
   const nm = netMarginVerdict(c.netMarginPct);
   return (
-    <div className="relative overflow-hidden rounded-2xl border-2 border-teal/30 bg-gradient-to-br from-teal/10 via-white to-white p-5">
+    <div className="relative overflow-hidden rounded-2xl border border-teal-border bg-teal-lighter p-5">
       <div className="flex items-start gap-3">
         <div className="w-9 h-9 rounded-full bg-teal/15 flex items-center justify-center flex-shrink-0">
           <Sparkles size={18} className="text-teal-dark" />
@@ -318,7 +318,7 @@ function InsightCard({ c, range, periodLabel }: { c: PortalPl; range: { label: s
             {c.netProfit < 0 ? (
               <>
                 Overhead of <strong>{fmtMoney(c.totalFixed)}</strong> then put the period{" "}
-                <strong className="text-red-700">{fmtMoney(Math.abs(c.netProfit))}</strong> under breakeven, a{" "}
+                <strong className="text-rust">{fmtMoney(Math.abs(c.netProfit))}</strong> under breakeven, a{" "}
                 <span className={`font-semibold ${marginText(nm.tone)}`}>{Math.round(c.netMarginPct)}% net margin</span>.
                 A slower stretch happens in this line of work. If it keeps up, it's worth walking
                 through pricing or operating expenses with your bookkeeper.
@@ -403,7 +403,7 @@ function ProportionBar({ c }: { c: PortalPl }) {
   const loss = c.netProfit < 0;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+    <div className="bg-white border border-cardline rounded-2xl p-5">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-bold text-navy">Where each $1 of income goes</h3>
         <span className="text-xs text-ink-light">per dollar earned</span>
@@ -474,10 +474,10 @@ function HierSection({
   const sectionPct = income > 0 ? (Math.abs(section.total) / income) * 100 : 0;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+    <div className="bg-white border border-cardline rounded-2xl overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50/60 transition-colors"
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-canvas/60 transition-colors"
       >
         <div className="flex items-center gap-3 min-w-0">
           <span className={`w-1.5 h-8 rounded-full ${accentBar} flex-shrink-0`} />
@@ -529,7 +529,7 @@ function HierSection({
     // "Total <parent>" subtotal row.
     if (r.isTotalRow) {
       return (
-        <div key={`${r.accountId || r.name}-${i}`} className="flex items-center justify-between gap-2 py-1.5 bg-slate-50/40" style={pad}>
+        <div key={`${r.accountId || r.name}-${i}`} className="flex items-center justify-between gap-2 py-1.5 bg-canvas/40" style={pad}>
           <span className="text-sm font-semibold text-ink-slate truncate">{r.name}</span>
           <div className="flex items-center gap-4 flex-shrink-0">
             <span className="font-mono text-sm font-semibold text-navy w-24 text-right">{fmtMoney(r.total)}</span>
@@ -620,8 +620,8 @@ function ResultBand({
       : "from-red-600 to-red-700 text-white"
     : tone === "emerald"
     ? "from-emerald-50 to-white text-navy border border-emerald-200"
-    : "from-red-50 to-white text-navy border border-red-200";
-  const amountColor = emphasize ? "text-white" : tone === "emerald" ? "text-emerald-700" : "text-red-700";
+    : "from-red-50 to-white text-navy border border-rust-border";
+  const amountColor = emphasize ? "text-white" : tone === "emerald" ? "text-emerald-700" : "text-rust";
   const subColor = emphasize ? "text-white/80" : "text-ink-slate";
 
   return (
@@ -629,7 +629,7 @@ function ResultBand({
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            {tone === "emerald" ? <TrendingUp size={16} className={emphasize ? "text-white" : "text-emerald-700"} /> : <TrendingDown size={16} className={emphasize ? "text-white" : "text-red-700"} />}
+            {tone === "emerald" ? <TrendingUp size={16} className={emphasize ? "text-white" : "text-emerald-700"} /> : <TrendingDown size={16} className={emphasize ? "text-white" : "text-rust"} />}
             <div className={`font-bold ${emphasize ? "text-white text-lg" : "text-navy"}`}>{title}</div>
           </div>
           <div className={`text-xs mt-0.5 ${subColor}`}>{subtitle}</div>
@@ -674,7 +674,7 @@ function CustomRangePicker({
 }) {
   const today = new Date().toISOString().slice(0, 10);
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+    <div className="bg-white border border-cardline rounded-2xl p-5">
       <div className="flex items-center gap-2 mb-3">
         <CalendarRange size={16} className="text-teal-dark" />
         <h3 className="text-sm font-bold text-navy">Custom date range</h3>
@@ -692,7 +692,7 @@ function CustomRangePicker({
             value={start}
             max={end || today}
             onChange={(e) => onStart(e.target.value)}
-            className="w-full sm:w-44 px-3 py-2 text-sm border border-slate-200 rounded-lg text-navy focus:border-teal/50 focus:outline-none"
+            className="w-full sm:w-44 px-3 py-2 text-sm border border-cardline rounded-lg text-navy focus:border-teal/50 focus:outline-none"
           />
         </label>
         <label className="text-xs font-semibold text-ink-slate">
@@ -703,7 +703,7 @@ function CustomRangePicker({
             min={start || undefined}
             max={today}
             onChange={(e) => onEnd(e.target.value)}
-            className="w-full sm:w-44 px-3 py-2 text-sm border border-slate-200 rounded-lg text-navy focus:border-teal/50 focus:outline-none"
+            className="w-full sm:w-44 px-3 py-2 text-sm border border-cardline rounded-lg text-navy focus:border-teal/50 focus:outline-none"
           />
         </label>
         <button
@@ -716,7 +716,7 @@ function CustomRangePicker({
         </button>
       </div>
       {error && (
-        <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800 flex items-start gap-1.5">
+        <div className="mt-3 p-2 bg-rust-tint border border-rust-border rounded text-xs text-rust flex items-start gap-1.5">
           <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
           {error}
         </div>
@@ -744,22 +744,22 @@ function formatDate(iso: string): string {
 function flowTileClass(tone: "teal" | "amber" | "orange" | "navy" | "emerald" | "red"): string {
   return {
     teal: "border-teal/30 bg-teal/5",
-    amber: "border-amber-200 bg-amber-50",
+    amber: "border-gold-border bg-gold-tint",
     orange: "border-orange-200 bg-orange-50",
-    navy: "border-slate-300 bg-slate-50",
+    navy: "border-cardline bg-canvas",
     emerald: "border-emerald-200 bg-emerald-50",
-    red: "border-red-200 bg-red-50",
+    red: "border-rust-border bg-rust-tint",
   }[tone];
 }
 
 function flowValueClass(tone: "teal" | "amber" | "orange" | "navy" | "emerald" | "red"): string {
   return {
     teal: "text-teal-dark",
-    amber: "text-amber-700",
+    amber: "text-gold-deep",
     orange: "text-orange-700",
     navy: "text-navy",
     emerald: "text-emerald-700",
-    red: "text-red-700",
+    red: "text-rust",
   }[tone];
 }
 
@@ -767,8 +767,8 @@ function marginText(tone: "emerald" | "teal" | "amber" | "red"): string {
   return {
     emerald: "text-emerald-700",
     teal: "text-teal-dark",
-    amber: "text-amber-700",
-    red: "text-red-700",
+    amber: "text-gold-deep",
+    red: "text-rust",
   }[tone];
 }
 
@@ -853,7 +853,7 @@ function DrillDownDrawer({
         className="w-full max-w-2xl bg-white shadow-xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between bg-gradient-to-r from-teal/5 to-white">
+        <div className="px-5 py-4 border-b border-cardline flex items-start justify-between bg-gradient-to-r from-teal/5 to-white">
           <div className="min-w-0">
             <div className="text-xs text-ink-slate uppercase tracking-wider font-semibold">
               Transactions in
@@ -866,7 +866,7 @@ function DrillDownDrawer({
               )}
             </div>
             {!loading && totalCount > 0 && Math.abs(totalAmount - line.amount) > 1 && !truncated && (
-              <div className="text-[11px] text-amber-700 mt-1 flex items-center gap-1">
+              <div className="text-[11px] text-gold-deep mt-1 flex items-center gap-1">
                 <AlertTriangle size={11} />
                 Transactions sum to {fmtMoney(totalAmount)} — differs from P&L total by{" "}
                 {fmtMoney(line.amount - totalAmount)}. Ask your bookkeeper if this looks wrong.
@@ -880,14 +880,14 @@ function DrillDownDrawer({
 
         {/* Payee / vendor filter — "total paid to a specific person" */}
         {!loading && !error && transactions.length > 0 && (
-          <div className="px-5 py-2.5 border-b border-slate-100 bg-white flex items-center gap-3 flex-wrap">
+          <div className="px-5 py-2.5 border-b border-hairline bg-white flex items-center gap-3 flex-wrap">
             <div className="relative flex-1 min-w-[200px]">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-light" />
               <input
                 value={nameFilter}
                 onChange={(e) => setNameFilter(e.target.value)}
                 placeholder="Filter by payee / vendor name…"
-                className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-teal text-navy"
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-cardline rounded-lg outline-none focus:border-teal text-navy"
               />
               {nameFilter && (
                 <button
@@ -916,7 +916,7 @@ function DrillDownDrawer({
               Loading transactions…
             </div>
           ) : error ? (
-            <div className="m-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+            <div className="m-4 p-3 bg-rust-tint border border-rust-border rounded text-sm text-rust">
               {error}
             </div>
           ) : transactions.length === 0 ? (
@@ -930,7 +930,7 @@ function DrillDownDrawer({
             </div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-ink-slate sticky top-0">
+              <thead className="bg-canvas text-[10px] uppercase tracking-wider text-ink-slate sticky top-0">
                 <tr>
                   <th className="text-left px-4 py-2 font-semibold">Date</th>
                   <th className="text-left px-4 py-2 font-semibold">Type / #</th>
@@ -941,7 +941,7 @@ function DrillDownDrawer({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((t, i) => (
-                  <tr key={`${t.txn_id || i}`} className="hover:bg-slate-50">
+                  <tr key={`${t.txn_id || i}`} className="hover:bg-canvas">
                     <td className="px-4 py-2 text-xs text-ink-slate whitespace-nowrap">{t.date}</td>
                     <td className="px-4 py-2 text-xs">
                       <div className="text-navy font-medium">{t.txn_type || "—"}</div>
@@ -975,14 +975,14 @@ function DrillDownDrawer({
           )}
 
           {truncated && (
-            <div className="px-4 py-3 bg-amber-50 border-t border-amber-200 text-xs text-amber-900">
+            <div className="px-4 py-3 bg-gold-tint border-t border-gold-border text-xs text-gold-deep">
               Showing the most recent 500 transactions. {totalCount - 500} more not shown —
               ask your bookkeeper for a full export if you need them.
             </div>
           )}
         </div>
 
-        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50">
+        <div className="px-5 py-3 border-t border-cardline bg-canvas">
           <div className="text-[11px] text-ink-light">
             Want this line explained?{" "}
             <a href="/portal/ask-ai" className="text-teal-dark font-semibold underline">Ask the AI</a>{" "}
@@ -1146,7 +1146,7 @@ function FlagTransactionModal({
   return (
     <div className="fixed inset-0 z-[60] bg-navy/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-lg w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-cardline flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MessageCircleQuestion size={16} className="text-teal-dark" />
             <h3 className="font-bold text-navy">Ask about this transaction</h3>
@@ -1176,7 +1176,7 @@ function FlagTransactionModal({
             </>
           ) : (
             <>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+              <div className="bg-canvas border border-cardline rounded-lg p-3 text-xs">
                 <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate mb-1">You're asking about</div>
                 <div className="flex items-center justify-between">
                   <div className="min-w-0">
@@ -1196,7 +1196,7 @@ function FlagTransactionModal({
 
               <div>
                 <label className="text-xs font-semibold text-ink-slate uppercase tracking-wider">
-                  Your question or note <span className="text-red-700">*</span>
+                  Your question or note <span className="text-rust">*</span>
                 </label>
                 <textarea
                   value={note}
@@ -1204,7 +1204,7 @@ function FlagTransactionModal({
                   placeholder="e.g. This was for the Hudson job, not general overhead. Or: I don't recognize this vendor — can you check?"
                   maxLength={1500}
                   rows={4}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-teal/50 focus:outline-none"
+                  className="mt-1 w-full px-3 py-2 text-sm border border-cardline rounded-lg focus:border-teal/50 focus:outline-none"
                 />
                 <div className="text-[11px] text-ink-light mt-1 flex items-center justify-between">
                   <span>Your bookkeeper sees this exact note + the transaction details.</span>
@@ -1239,7 +1239,7 @@ function FlagTransactionModal({
                             className={`flex items-start gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
                               checked
                                 ? "border-teal-border bg-teal-light"
-                                : "border-slate-200 hover:border-teal-border hover:bg-teal-light/30"
+                                : "border-cardline hover:border-teal-border hover:bg-teal-light/30"
                             }`}
                           >
                             <input
@@ -1261,8 +1261,8 @@ function FlagTransactionModal({
                       <label
                         className={`flex items-start gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
                           pickedAlternative === "none"
-                            ? "border-slate-400 bg-slate-50"
-                            : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/60"
+                            ? "border-ink-light bg-canvas"
+                            : "border-cardline hover:border-cardline hover:bg-canvas/60"
                         }`}
                       >
                         <input
@@ -1284,10 +1284,10 @@ function FlagTransactionModal({
                 </div>
               )}
 
-              {error && <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">{error}</div>}
+              {error && <div className="p-2 bg-rust-tint border border-rust-border rounded text-xs text-rust">{error}</div>}
 
               <div className="flex items-center gap-2 justify-end">
-                <button onClick={onClose} disabled={submitting} className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold text-ink-slate hover:bg-slate-50 disabled:opacity-50">Cancel</button>
+                <button onClick={onClose} disabled={submitting} className="px-3 py-1.5 border border-cardline rounded-lg text-sm font-semibold text-ink-slate hover:bg-canvas disabled:opacity-50">Cancel</button>
                 <button
                   onClick={submit}
                   disabled={submitting || !note.trim()}
@@ -1465,7 +1465,7 @@ function ReclassRequestModal({
   return (
     <div className="fixed inset-0 z-[70] bg-navy/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-lg w-full shadow-xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-cardline flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Tag size={16} className="text-teal-dark" />
             <h3 className="font-bold text-navy">
@@ -1494,7 +1494,7 @@ function ReclassRequestModal({
           ) : (
             <>
               {/* What's being changed */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+              <div className="bg-canvas border border-cardline rounded-lg p-3 text-xs">
                 <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate mb-1">
                   {isTxnLevel ? "Transaction you flagged" : "Category you're questioning"}
                 </div>
@@ -1527,7 +1527,7 @@ function ReclassRequestModal({
               {/* Target category picker */}
               <div>
                 <label className="text-xs font-semibold text-ink-slate uppercase tracking-wider">
-                  Move to which category? <span className="text-red-700">*</span>
+                  Move to which category? <span className="text-rust">*</span>
                 </label>
                 {targetAccount ? (
                   <div className="mt-1 flex items-center justify-between gap-2 px-3 py-2 border border-teal-border bg-teal-light rounded-lg">
@@ -1553,7 +1553,7 @@ function ReclassRequestModal({
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search categories — e.g. Marketing"
-                        className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-teal-border focus:outline-none"
+                        className="w-full pl-8 pr-3 py-2 text-sm border border-cardline rounded-lg focus:border-teal-border focus:outline-none"
                       />
                     </div>
                     {accountsLoading ? (
@@ -1562,9 +1562,9 @@ function ReclassRequestModal({
                         Loading your categories…
                       </div>
                     ) : accountsError ? (
-                      <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">{accountsError}</div>
+                      <div className="mt-2 p-2 bg-rust-tint border border-rust-border rounded text-xs text-rust">{accountsError}</div>
                     ) : (
-                      <div className="mt-2 border border-slate-200 rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100">
+                      <div className="mt-2 border border-cardline rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100">
                         {filteredAccounts.length === 0 ? (
                           <div className="px-3 py-3 text-xs text-ink-light italic">No match — try a different search.</div>
                         ) : filteredAccounts.map((a) => (
@@ -1587,7 +1587,7 @@ function ReclassRequestModal({
               {/* Reason */}
               <div>
                 <label className="text-xs font-semibold text-ink-slate uppercase tracking-wider">
-                  Why does it belong there? <span className="text-red-700">*</span>
+                  Why does it belong there? <span className="text-rust">*</span>
                 </label>
                 <textarea
                   value={reason}
@@ -1599,7 +1599,7 @@ function ReclassRequestModal({
                   }
                   maxLength={1500}
                   rows={3}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-teal-border focus:outline-none"
+                  className="mt-1 w-full px-3 py-2 text-sm border border-cardline rounded-lg focus:border-teal-border focus:outline-none"
                 />
                 <div className="text-[11px] text-ink-light mt-1 flex items-center justify-between">
                   <span>Your bookkeeper sees this verbatim and decides whether to approve.</span>
@@ -1607,13 +1607,13 @@ function ReclassRequestModal({
                 </div>
               </div>
 
-              {error && <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">{error}</div>}
+              {error && <div className="p-2 bg-rust-tint border border-rust-border rounded text-xs text-rust">{error}</div>}
 
               <div className="flex items-center gap-2 justify-end">
                 <button
                   onClick={onClose}
                   disabled={submitting}
-                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold text-ink-slate hover:bg-slate-50 disabled:opacity-50"
+                  className="px-3 py-1.5 border border-cardline rounded-lg text-sm font-semibold text-ink-slate hover:bg-canvas disabled:opacity-50"
                 >
                   Cancel
                 </button>

@@ -33,7 +33,7 @@ export function MonthEndBanner() {
   const href = `/portal/statements/${banner.periodYear}/${banner.periodMonth}`;
 
   return (
-    <div className="mb-6 flex items-center gap-3 rounded-xl border-2 border-teal/40 bg-teal/10 px-4 py-3">
+    <div className="mb-6 flex items-center gap-3 rounded-xl border border-teal-border bg-teal-light px-4 py-3">
       <FileCheck2 size={20} className="text-teal-dark flex-shrink-0" />
       <p className="text-sm text-navy flex-1">
         Your <strong>{banner.label}</strong> statements are ready.{" "}

@@ -85,7 +85,7 @@ export function ImpersonationBanner({
               value={currentClientLinkId || ""}
               disabled={switching}
               onChange={(e) => switchTo(e.target.value)}
-              className="appearance-none bg-white text-amber-800 font-bold text-xs rounded pl-2.5 pr-7 py-1 max-w-[180px] sm:max-w-[240px] truncate disabled:opacity-60 cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/60"
+              className="appearance-none bg-white text-gold-deep font-bold text-xs rounded pl-2.5 pr-7 py-1 max-w-[180px] sm:max-w-[240px] truncate disabled:opacity-60 cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/60"
               title="Switch to another client's portal"
             >
               {!currentClientLinkId && <option value="">Switch client…</option>}
@@ -93,7 +93,7 @@ export function ImpersonationBanner({
                 <option key={c.client_link_id} value={c.client_link_id}>{c.name}</option>
               ))}
             </select>
-            <span className="pointer-events-none absolute right-1.5 text-amber-700">
+            <span className="pointer-events-none absolute right-1.5 text-gold-deep">
               {switching ? <Loader2 size={12} className="animate-spin" /> : <ChevronDown size={13} />}
             </span>
           </div>
@@ -101,7 +101,7 @@ export function ImpersonationBanner({
         <button
           onClick={stop}
           disabled={stopping}
-          className="inline-flex items-center gap-1 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-50 px-3 py-1 rounded text-xs font-bold"
+          className="inline-flex items-center gap-1 bg-white text-gold-deep hover:bg-gold-tint disabled:opacity-50 px-3 py-1 rounded text-xs font-bold"
         >
           {stopping ? <Loader2 size={11} className="animate-spin" /> : <LogOut size={11} />}
           <span className="hidden sm:inline">Stop impersonating</span>

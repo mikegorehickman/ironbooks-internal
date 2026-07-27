@@ -47,7 +47,7 @@ export function StatementSwitcher({ active }: { active: StatementId }) {
             className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 transition-colors ${
               isActive
                 ? "bg-navy border-navy text-white"
-                : "bg-white border-gray-200 text-navy hover:border-teal"
+                : "bg-white border-cardline text-navy hover:border-teal"
             }`}
           >
             <Icon size={16} className={isActive ? "text-teal-light" : "text-teal"} />

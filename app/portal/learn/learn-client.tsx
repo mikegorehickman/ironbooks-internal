@@ -94,7 +94,7 @@ export function LearnClient({ resources }: { resources: Resource[] }) {
       </div>
 
       {resources.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center">
+        <div className="bg-white border border-cardline rounded-2xl p-8 text-center">
           <GraduationCap size={32} className="text-ink-light mx-auto mb-3" />
           <h2 className="font-bold text-navy">Videos coming soon</h2>
           <p className="text-sm text-ink-slate mt-2 max-w-md mx-auto">
@@ -134,7 +134,7 @@ function VideoTile({ resource, onPlay }: { resource: Resource; onPlay: () => voi
 
   return (
     <div
-      className={`bg-white border border-slate-200 rounded-xl overflow-hidden ${
+      className={`bg-white border border-cardline rounded-xl overflow-hidden ${
         hasEmbed ? "hover:border-teal/40 hover:shadow-sm cursor-pointer" : "opacity-60"
       }`}
       onClick={hasEmbed ? onPlay : undefined}
@@ -201,7 +201,7 @@ function VideoModal({ resource, onClose }: { resource: Resource; onClose: () => 
         className="bg-white rounded-2xl max-w-4xl w-full overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-cardline">
           <div className="min-w-0">
             <h3 className="font-bold text-navy truncate">{resource.title}</h3>
             {resource.description && (
@@ -230,7 +230,7 @@ function VideoModal({ resource, onClose }: { resource: Resource; onClose: () => 
           )}
         </div>
         {resource.download_url && (
-          <div className="px-5 py-3 border-t border-slate-200 bg-slate-50">
+          <div className="px-5 py-3 border-t border-cardline bg-canvas">
             <a
               href={resource.download_url}
               target="_blank"

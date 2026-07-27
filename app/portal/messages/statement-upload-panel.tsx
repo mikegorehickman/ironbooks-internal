@@ -142,7 +142,7 @@ export function StatementUploadPanel() {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5">
+    <div className="bg-white rounded-2xl border border-cardline p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
           <div className="p-2 rounded-lg bg-teal/10 flex-shrink-0">
@@ -175,19 +175,19 @@ export function StatementUploadPanel() {
 
       {/* Bookkeeper's open requests — a self-clearing checklist. */}
       {requests.length > 0 && (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
-          <div className="text-xs font-bold uppercase tracking-wide text-amber-800">
+        <div className="mt-4 rounded-lg border border-gold-border bg-gold-tint px-3 py-3">
+          <div className="text-xs font-bold uppercase tracking-wide text-gold-deep">
             Your bookkeeper needs {requests.length} statement{requests.length === 1 ? "" : "s"}
           </div>
           <ul className="mt-2 space-y-1.5">
             {requests.map((r) => (
-              <li key={r.id} className="flex items-center gap-2 text-sm text-amber-900">
+              <li key={r.id} className="flex items-center gap-2 text-sm text-gold-deep">
                 <span className="w-4 h-4 rounded-full border-2 border-amber-400 flex-shrink-0" />
                 <span>{r.label}</span>
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[11px] text-amber-700">These clear automatically as you upload each one.</p>
+          <p className="mt-2 text-[11px] text-gold-deep">These clear automatically as you upload each one.</p>
         </div>
       )}
 
@@ -197,7 +197,7 @@ export function StatementUploadPanel() {
         </div>
       )}
       {error && (
-        <div className="mt-3 flex items-start gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        <div className="mt-3 flex items-start gap-1.5 text-xs text-rust bg-rust-tint border border-rust-border rounded-lg px-3 py-2">
           <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" /> {error}
         </div>
       )}
@@ -214,20 +214,20 @@ export function StatementUploadPanel() {
 
       {/* AI couldn't match — let the client place it. */}
       {unmatched.length > 0 && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
+        <div className="mt-4 rounded-lg border border-cardline bg-canvas px-3 py-3">
+          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-slate">
             <HelpCircle size={13} /> Which account {unmatched.length === 1 ? "is this" : "are these"}?
           </div>
-          <p className="text-[11px] text-slate-500 mt-0.5">We couldn't tell automatically — pick the account so your bookkeeper can use it.</p>
+          <p className="text-[11px] text-ink-light mt-0.5">We couldn't tell automatically — pick the account so your bookkeeper can use it.</p>
           <ul className="mt-2 space-y-2">
             {unmatched.map((s) => (
-              <li key={s.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                <FileText size={14} className="text-slate-400 flex-shrink-0" />
+              <li key={s.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-cardline bg-white px-3 py-2">
+                <FileText size={14} className="text-ink-light flex-shrink-0" />
                 <span className="text-sm text-navy flex-1 min-w-[120px] truncate">{s.original_name || s.display_name}</span>
                 <select
                   value={matchSel[s.id] || ""}
                   onChange={(e) => setMatchSel((p) => ({ ...p, [s.id]: e.target.value }))}
-                  className="text-sm rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-navy max-w-[200px]"
+                  className="text-sm rounded-lg border border-cardline bg-white px-2 py-1.5 text-navy max-w-[200px]"
                 >
                   <option value="">Select account…</option>
                   {accounts.map((a) => (
@@ -255,7 +255,7 @@ export function StatementUploadPanel() {
           <div className="text-xs font-bold uppercase tracking-wide text-ink-slate mb-2">
             Your filed statements
           </div>
-          <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white">
+          <div className="border border-cardline rounded-lg overflow-x-auto bg-white">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr className="text-[11px] uppercase tracking-wide text-ink-slate">

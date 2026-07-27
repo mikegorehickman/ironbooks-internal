@@ -199,7 +199,7 @@ export function WhosPayingClient({
       {/* Customer cards */}
       <div className="space-y-3">
         {customers.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-ink-slate">
+          <div className="bg-white border border-cardline rounded-2xl p-8 text-center text-sm text-ink-slate">
             No open invoices — all customers are paid up.
           </div>
         ) : (
@@ -248,7 +248,7 @@ function DismissedSection({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+    <div className="bg-canvas border border-cardline rounded-2xl overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
         className="w-full px-5 py-3 flex items-center gap-2 text-left text-sm font-semibold text-ink-slate hover:bg-slate-100"
@@ -266,7 +266,7 @@ function DismissedSection({
           {dismissed.map((d) => (
             <div
               key={d.qbo_invoice_id}
-              className="flex items-center justify-between text-xs text-ink-slate py-1 border-t border-slate-200/60 first:border-0"
+              className="flex items-center justify-between text-xs text-ink-slate py-1 border-t border-cardline/60 first:border-0"
             >
               <span>
                 {d.doc_number ? `#${d.doc_number}` : d.qbo_invoice_id}
@@ -303,15 +303,15 @@ function MetricTile({
   const colors = {
     emerald: "border-emerald-200 bg-emerald-50",
     teal: "border-teal/30 bg-teal/5",
-    amber: "border-amber-200 bg-amber-50",
-    red: "border-red-200 bg-red-50",
-    slate: "border-slate-200 bg-slate-50",
+    amber: "border-gold-border bg-gold-tint",
+    red: "border-rust-border bg-rust-tint",
+    slate: "border-cardline bg-canvas",
   }[tone];
   const valueColor = {
     emerald: "text-emerald-700",
     teal: "text-teal-dark",
-    amber: "text-amber-700",
-    red: "text-red-700",
+    amber: "text-gold-deep",
+    red: "text-rust",
     slate: "text-ink-slate",
   }[tone];
   return (
@@ -326,9 +326,9 @@ function MetricTile({
 function Bucket({ label, amount, count, color }: { label: string; amount: string; count: number; color: string }) {
   const colors: Record<string, string> = {
     emerald: "bg-emerald-50 border-emerald-200 text-emerald-900",
-    amber: "bg-amber-50 border-amber-200 text-amber-900",
+    amber: "bg-gold-tint border-gold-border text-gold-deep",
     orange: "bg-orange-50 border-orange-200 text-orange-900",
-    red: "bg-red-50 border-red-200 text-red-900",
+    red: "bg-rust-tint border-rust-border text-rust",
   };
   return (
     <div className={`p-3 rounded-xl border ${colors[color]}`}>
@@ -354,13 +354,13 @@ function CustomerCardView({
 }) {
   const urgent = c.oldest_days > 30;
   return (
-    <div className={`bg-white border rounded-2xl p-5 ${urgent ? "border-red-300" : "border-slate-200"}`}>
+    <div className={`bg-white border rounded-2xl p-5 ${urgent ? "border-red-300" : "border-cardline"}`}>
       <div className="flex items-start justify-between mb-3 gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-bold text-navy">{c.name}</h3>
             {urgent && (
-              <span className="text-[10px] font-bold bg-red-100 text-red-800 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-bold bg-red-100 text-rust px-1.5 py-0.5 rounded">
                 <AlertCircle size={9} className="inline mr-0.5" />
                 URGENT
               </span>
@@ -426,7 +426,7 @@ function CustomerCardView({
         </div>
       )}
       {!c.last_payment_date && c.oldest_days > 0 && (
-        <div className="text-xs text-amber-700 mb-3 flex items-center gap-1.5">
+        <div className="text-xs text-gold-deep mb-3 flex items-center gap-1.5">
           <AlertTriangle size={11} />
           No payments from this customer in the last 180 days
         </div>
@@ -443,13 +443,13 @@ function CustomerCardView({
             <span className="font-mono flex items-center gap-1">
               {fmtMoney(inv.amount)}
               {inv.days_overdue > 0 && (
-                <span className="text-red-700 font-semibold ml-2">({inv.days_overdue}d late)</span>
+                <span className="text-rust font-semibold ml-2">({inv.days_overdue}d late)</span>
               )}
               <button
                 onClick={() => onDismissInvoice(inv)}
                 disabled={busyInvoice !== null}
                 title="Not actually owed? Dismiss it — your bookkeeper is notified and it stays hidden from your A/R"
-                className="ml-2 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border border-slate-200 text-ink-slate hover:text-red-700 hover:border-red-300 hover:bg-red-50 transition-all disabled:opacity-40"
+                className="ml-2 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border border-cardline text-ink-slate hover:text-rust hover:border-red-300 hover:bg-rust-tint transition-all disabled:opacity-40"
               >
                 {busyInvoice === inv.doc_id ? (
                   <Loader2 size={11} className="animate-spin" />
@@ -485,7 +485,7 @@ function CustomerCardView({
         {c.email && (
           <a
             href={`mailto:${c.email}`}
-            className="px-3 py-1.5 border border-slate-300 rounded text-xs font-semibold text-ink-slate hover:bg-slate-50 inline-flex items-center gap-1.5"
+            className="px-3 py-1.5 border border-cardline rounded text-xs font-semibold text-ink-slate hover:bg-canvas inline-flex items-center gap-1.5"
           >
             <Mail size={11} />
             Email directly
@@ -521,11 +521,11 @@ function CustomerCardView({
 
 function SplitTile({ label, value, tone, empty }: { label: string; value: string; tone: "emerald" | "amber" | "red" | "slate"; empty: boolean }) {
   const colors = empty
-    ? "bg-slate-50 border-slate-100 text-ink-light"
+    ? "bg-canvas border-hairline text-ink-light"
     : tone === "emerald" ? "bg-emerald-50 border-emerald-200 text-emerald-900"
-    : tone === "amber" ? "bg-amber-50 border-amber-200 text-amber-900"
-    : tone === "red" ? "bg-red-50 border-red-200 text-red-900"
-    : "bg-slate-50 border-slate-200 text-ink-slate";
+    : tone === "amber" ? "bg-gold-tint border-gold-border text-gold-deep"
+    : tone === "red" ? "bg-rust-tint border-rust-border text-rust"
+    : "bg-canvas border-cardline text-ink-slate";
   return (
     <div className={`px-3 py-2 rounded-lg border ${colors}`}>
       <div className="text-[10px] uppercase tracking-wider font-semibold opacity-80">{label}</div>
@@ -595,7 +595,7 @@ function FollowupModal({ customer, onClose }: { customer: CustomerCard; onClose:
         className="bg-white rounded-2xl max-w-2xl w-full shadow-xl max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-cardline flex items-center justify-between">
           <div className="min-w-0">
             <h3 className="font-bold text-navy">Draft follow-up email</h3>
             <div className="text-xs text-ink-slate truncate">
@@ -620,7 +620,7 @@ function FollowupModal({ customer, onClose }: { customer: CustomerCard; onClose:
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
                     tone === t
                       ? "bg-teal text-white border-teal"
-                      : "bg-white text-ink-slate border-slate-200 hover:bg-slate-50"
+                      : "bg-white text-ink-slate border-cardline hover:bg-canvas"
                   }`}
                 >
                   {t === "friendly" && "🌱 Friendly nudge"}
@@ -654,7 +654,7 @@ function FollowupModal({ customer, onClose }: { customer: CustomerCard; onClose:
           )}
 
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800 flex items-start gap-2">
+            <div className="p-3 bg-rust-tint border border-rust-border rounded text-sm text-rust flex items-start gap-2">
               <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
               <div>{error}</div>
             </div>
@@ -662,8 +662,8 @@ function FollowupModal({ customer, onClose }: { customer: CustomerCard; onClose:
 
           {draft && (
             <>
-              <div className="border border-slate-200 rounded-lg overflow-hidden">
-                <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs">
+              <div className="border border-cardline rounded-lg overflow-hidden">
+                <div className="px-3 py-2 bg-canvas border-b border-cardline text-xs">
                   <span className="text-ink-slate font-semibold">Subject:</span>{" "}
                   <span className="text-navy">{draft.subject}</span>
                 </div>
@@ -681,14 +681,14 @@ function FollowupModal({ customer, onClose }: { customer: CustomerCard; onClose:
                 </button>
                 <button
                   onClick={copyBody}
-                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold text-ink-slate hover:bg-slate-50 inline-flex items-center gap-1.5"
+                  className="px-3 py-1.5 border border-cardline rounded-lg text-sm font-semibold text-ink-slate hover:bg-canvas inline-flex items-center gap-1.5"
                 >
                   <Copy size={12} />
                   Copy body only
                 </button>
                 <button
                   onClick={generate}
-                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-semibold text-ink-slate hover:bg-slate-50 inline-flex items-center gap-1.5"
+                  className="px-3 py-1.5 border border-cardline rounded-lg text-sm font-semibold text-ink-slate hover:bg-canvas inline-flex items-center gap-1.5"
                 >
                   <Sparkles size={12} />
                   Re-draft

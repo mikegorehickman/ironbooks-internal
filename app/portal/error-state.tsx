@@ -34,12 +34,12 @@ export function PortalErrorState({
   }[code];
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-8 max-w-xl mx-auto text-center">
+    <div className="bg-white border border-cardline rounded-2xl p-8 max-w-xl mx-auto text-center">
       <AlertCircle size={32} className="text-amber-600 mx-auto mb-3" />
       <h2 className="text-lg font-bold text-navy">{friendly.title}</h2>
       <p className="text-sm text-ink-slate mt-2">{friendly.body}</p>
       {process.env.NODE_ENV === "development" && message && (
-        <pre className="mt-4 text-[10px] text-left bg-slate-50 border border-slate-200 p-2 rounded text-ink-slate whitespace-pre-wrap">
+        <pre className="mt-4 text-[10px] text-left bg-canvas border border-cardline p-2 rounded text-ink-slate whitespace-pre-wrap">
           Dev detail: {message}
         </pre>
       )}
