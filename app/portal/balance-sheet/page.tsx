@@ -97,27 +97,33 @@ export default async function BalanceSheetPage() {
         <StatementReviewNotes clientLinkId={ctx.clientLinkId} kind="bs" statementLabel="Balance Sheet" />
       )}
 
-      {/* ── Gradient hero ───────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
-        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Balance Sheet</div>
-            <h1 className="text-3xl font-bold mt-1">What you own & what you owe</h1>
-            <div className="text-sm text-white/70 mt-1">As of {asOfLabel} · a snapshot in time</div>
+      {/* ── Header — quiet, light; no dark hero ─────────────────────── */}
+      <header className="min-w-0">
+        <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark">Balance Sheet</div>
+        <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">What you own &amp; what you owe</h1>
+        <div className="text-sm text-ink-slate mt-2">As of {asOfLabel} · a snapshot in time</div>
+      </header>
+
+      {/* ── Assets − Liabilities = Net worth, one connected strip ───── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 rounded-2xl border border-cardline bg-white overflow-hidden">
+        {[
+          { label: "What you own", note: "Assets", value: bs.totalAssets, op: "", net: false, neg: false },
+          { label: "What you owe", note: "Liabilities", value: bs.totalLiabilities, op: "−", net: false, neg: true },
+          { label: "What's yours", note: "Net worth · own − owe", value: netWorth, op: "=", net: true, neg: netWorth < 0 },
+        ].map((s, i) => (
+          <div key={s.label} className={`relative px-5 py-4 border-t border-hairline sm:border-t-0 sm:border-l first:border-l-0 ${s.net ? "bg-teal-lighter" : ""}`}>
+            {s.op && (
+              <span className="hidden sm:flex absolute -left-[9px] top-1/2 -translate-y-1/2 w-[18px] h-[18px] items-center justify-center rounded-full bg-canvas border border-cardline text-ink-light text-[11px] font-bold z-10">{s.op}</span>
+            )}
+            <div className={`font-brand text-[10px] uppercase tracking-[0.1em] ${s.net ? "text-teal-dark" : "text-ink-light"}`}>{s.label}</div>
+            <div className={`text-[22px] font-bold mt-2 tabular-nums leading-none ${s.net ? "text-teal-dark" : s.neg ? "text-rust" : "text-navy"}`}>{fmtMoney(s.value)}</div>
+            <div className="text-[11.5px] text-ink-slate mt-1.5">{s.note}</div>
           </div>
-          <div className="flex-shrink-0 bg-white/10 backdrop-blur rounded-xl px-5 py-3 border border-white/15">
-            <div className="text-[10px] uppercase tracking-wider font-semibold text-white/60">Net worth</div>
-            <div className={`text-3xl font-bold mt-0.5 ${netWorth >= 0 ? "text-white" : "text-red-300"}`}>
-              {netWorth < 0 ? `(${fmtMoney(Math.abs(netWorth))})` : fmtMoney(netWorth)}
-            </div>
-            <div className="text-xs text-white/70 mt-0.5">own minus owe</div>
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* ── AI insight card ─────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl border-2 border-teal/30 bg-gradient-to-br from-teal/10 via-white to-white p-5">
+      <div className="relative overflow-hidden rounded-2xl border border-teal-border bg-teal-lighter p-5">
         <div className="flex items-start gap-3">
           <div className="w-9 h-9 rounded-full bg-teal/15 flex items-center justify-center flex-shrink-0">
             <Sparkles size={18} className="text-teal-dark" />
@@ -192,15 +198,10 @@ export default async function BalanceSheetPage() {
         />
       </div>
 
-      {/* ── Balance equation ────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-gradient-to-r from-slate-50 to-white border border-cardline p-5 text-center text-sm text-ink-slate">
-        <strong className="text-navy">{fmtMoney(bs.totalAssets)}</strong> (you own) −{" "}
-        <strong className="text-navy">{fmtMoney(bs.totalLiabilities)}</strong> (you owe) ={" "}
-        <strong className="text-teal-dark">{fmtMoney(netWorth)}</strong> (yours) ✓
-        <div className="text-xs text-ink-light mt-1">
-          That's why it's called a "balance" sheet — these always equal out.
-        </div>
-      </div>
+      <p className="text-[11.5px] text-ink-light leading-relaxed px-1">
+        A snapshot as of {asOfLabel}. What you own always equals what you owe plus what&apos;s yours —
+        that&apos;s why it&apos;s called a &ldquo;balance&rdquo; sheet.
+      </p>
     </div>
   );
 }
@@ -227,33 +228,26 @@ function Card({
   group: string;
 }) {
   const toneColors = {
-    emerald: "text-emerald-700",
+    emerald: "text-teal-dark",
     amber: "text-gold-deep",
     teal: "text-teal-dark",
   }[tone];
-  const accentBar = {
-    emerald: "bg-emerald-500",
-    amber: "bg-amber-400",
-    teal: "bg-teal",
-  }[tone];
   const iconChip = {
-    emerald: "bg-emerald-50 text-emerald-700",
+    emerald: "bg-teal/10 text-teal-dark",
     amber: "bg-gold-tint text-gold-deep",
     teal: "bg-teal/10 text-teal-dark",
   }[tone];
-  const borderClass = emphasize ? "border-2 border-teal/40" : "border border-cardline";
   return (
-    <div className={`relative bg-white ${borderClass} rounded-2xl p-5 overflow-hidden`}>
-      <span className={`absolute left-0 top-0 h-full w-1 ${accentBar}`} />
+    <div className={`relative bg-white rounded-2xl p-5 overflow-hidden ${emphasize ? "border border-teal-border bg-teal-lighter" : "border border-cardline"}`}>
       <div className="flex items-center gap-2 mb-1">
         <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${iconChip}`}>
           <Icon size={14} />
         </span>
-        <div className={`text-xs ${emphasize ? "text-teal-dark" : "text-ink-slate"} uppercase tracking-wider font-semibold`}>
+        <div className={`font-brand text-[11px] ${emphasize ? "text-teal-dark" : "text-ink-slate"} uppercase tracking-[0.1em]`}>
           {title}
         </div>
       </div>
-      <div className={`text-2xl font-bold ${toneColors} mt-1`}>{amount}</div>
+      <div className={`text-2xl font-bold ${toneColors} mt-2 tabular-nums`}>{amount}</div>
       <div className="text-xs text-ink-slate mt-1">{subtitle}</div>
       <div className="mt-4 space-y-1 text-sm">
         {rows.length === 0 ? (

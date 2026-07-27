@@ -11,7 +11,7 @@ import {
 } from "@/lib/portal-data";
 import { PortalErrorState } from "../error-state";
 import { StatementSwitcher } from "../financial-statements/statement-switcher";
-import { Sparkles, TrendingDown, TrendingUp } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { createServiceSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -117,55 +117,48 @@ export default async function CashFlowPage({
     <div className="space-y-6">
       <StatementSwitcher active="cfs" />
 
-      {/* ── Gradient hero ───────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-emerald-300/15 blur-2xl" />
-        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">
-              Cash Flow Statement
-            </div>
-            <h1 className="text-3xl font-bold mt-1">Where your cash went</h1>
-            <div className="text-sm text-white/70 mt-1">{range.label}</div>
-          </div>
-          <div className="flex-shrink-0 bg-white/10 backdrop-blur rounded-xl px-5 py-3 border border-white/15">
-            <div className="text-[10px] uppercase tracking-wider font-semibold text-white/60">
-              Net cash change
-            </div>
-            <div
-              className={`text-3xl font-bold mt-0.5 flex items-center gap-2 ${
-                positive ? "text-white" : "text-red-300"
+      {/* ── Header — quiet, light; no dark hero ─────────────────────── */}
+      <header className="flex items-end justify-between gap-5 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark">Cash Flow</div>
+          <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">Where your cash went</h1>
+          <div className="text-sm text-ink-slate mt-2">{range.label}</div>
+        </div>
+        <div className="inline-flex gap-0.5 bg-white border border-cardline rounded-xl p-1 flex-wrap">
+          {Object.entries(presets).map(([key, r]) => (
+            <Link
+              key={key}
+              href={key === "lastMonth" ? "/portal/cash-flow" : `/portal/cash-flow?range=${key}`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                key === rangeKey ? "bg-teal text-white" : "text-ink-slate hover:bg-hairline"
               }`}
             >
-              {positive ? <TrendingUp size={22} /> : <TrendingDown size={22} />}
-              {fmtSigned(cf.netCashChange)}
-            </div>
-            <div className="text-xs text-white/70 mt-0.5">
-              {fmtMoney(cf.cashAtStart)} → {fmtMoney(cf.cashAtEnd)}
-            </div>
-          </div>
+              {r.label}
+            </Link>
+          ))}
         </div>
-      </div>
+      </header>
 
-      {/* ── Period presets ──────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-1.5">
-        {Object.entries(presets).map(([key, r]) => (
-          <Link
-            key={key}
-            href={key === "lastMonth" ? "/portal/cash-flow" : `/portal/cash-flow?range=${key}`}
-            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-              key === rangeKey
-                ? "bg-navy text-white border-navy"
-                : "bg-white text-ink-slate border-cardline hover:border-teal hover:text-teal-dark"
-            }`}
-          >
-            {r.label}
-          </Link>
+      {/* ── Cash walk: start + change = end, one connected strip ─────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 rounded-2xl border border-cardline bg-white overflow-hidden">
+        {[
+          { label: "Cash at start", value: cf.cashAtStart, op: "", net: false, neg: cf.cashAtStart < 0, note: range.label },
+          { label: "Net change", value: cf.netCashChange, op: "+", net: false, neg: cf.netCashChange < 0, note: positive ? "cash grew" : "cash shrank" },
+          { label: "Cash at end", value: cf.cashAtEnd, op: "=", net: true, neg: cf.cashAtEnd < 0, note: "what's in the bank" },
+        ].map((s) => (
+          <div key={s.label} className={`relative px-5 py-4 border-t border-hairline sm:border-t-0 sm:border-l first:border-l-0 ${s.net ? "bg-teal-lighter" : ""}`}>
+            {s.op && (
+              <span className="hidden sm:flex absolute -left-[9px] top-1/2 -translate-y-1/2 w-[18px] h-[18px] items-center justify-center rounded-full bg-canvas border border-cardline text-ink-light text-[11px] font-bold z-10">{s.op}</span>
+            )}
+            <div className={`font-brand text-[10px] uppercase tracking-[0.1em] ${s.net ? "text-teal-dark" : "text-ink-light"}`}>{s.label}</div>
+            <div className={`text-[22px] font-bold mt-2 tabular-nums leading-none ${s.net ? "text-teal-dark" : s.neg ? "text-rust" : "text-navy"}`}>{fmtSigned(s.value)}</div>
+            <div className="text-[11.5px] text-ink-slate mt-1.5">{s.note}</div>
+          </div>
         ))}
       </div>
 
       {/* ── Plain-English insight ───────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl border-2 border-teal/30 bg-gradient-to-br from-teal/10 via-white to-white p-5">
+      <div className="relative overflow-hidden rounded-2xl border border-teal-border bg-teal-lighter p-5">
         <div className="flex items-start gap-3">
           <div className="w-9 h-9 rounded-full bg-teal/15 flex items-center justify-center flex-shrink-0">
             <Sparkles size={18} className="text-teal-dark" />
@@ -218,19 +211,7 @@ export default async function CashFlowPage({
         subtitle="Loans, credit lines, and money moving to or from owners"
       />
 
-      {/* ── Beginning → ending walk ─────────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-cardline p-5">
-        <div className="space-y-2 text-sm">
-          <WalkRow label="Cash at beginning of period" value={cf.cashAtStart} />
-          <WalkRow label="Net cash change" value={cf.netCashChange} signed />
-          <div className="border-t border-hairline pt-2 flex items-center justify-between font-bold text-navy">
-            <span>Cash at end of period</span>
-            <span>{fmtMoney(cf.cashAtEnd)}</span>
-          </div>
-        </div>
-      </div>
-
-      <p className="text-[11px] text-ink-slate/70 max-w-2xl">
+      <p className="text-[11px] text-ink-light max-w-2xl">
         Built live from your QuickBooks data (indirect method). Cash includes
         bank accounts and other cash-equivalent accounts as configured in
         QuickBooks.
@@ -249,15 +230,15 @@ function SectionCard({ section, subtitle }: { section: CashFlowSection; subtitle
           <div className="text-xs text-ink-slate mt-0.5">{subtitle}</div>
         </div>
         <div
-          className={`text-base font-bold flex-shrink-0 ${
-            positive ? "text-emerald-700" : "text-rust"
+          className={`text-base font-bold flex-shrink-0 tabular-nums ${
+            positive ? "text-teal-dark" : "text-rust"
           }`}
         >
           {fmtSigned(section.total)}
         </div>
       </div>
       {section.items.length > 0 ? (
-        <ul className="divide-y divide-gray-50">
+        <ul className="divide-y divide-hairline">
           {section.items.map((item, i) => (
             <li key={`${item.label}-${i}`} className="px-5 py-2.5 flex items-center justify-between gap-3 text-sm">
               <span className="text-navy/85 min-w-0 truncate">{item.label}</span>
@@ -270,17 +251,6 @@ function SectionCard({ section, subtitle }: { section: CashFlowSection; subtitle
       ) : (
         <div className="px-5 py-4 text-xs text-ink-slate">No activity this period.</div>
       )}
-    </div>
-  );
-}
-
-function WalkRow({ label, value, signed }: { label: string; value: number; signed?: boolean }) {
-  return (
-    <div className="flex items-center justify-between text-navy/85">
-      <span>{label}</span>
-      <span className={`font-medium ${signed && value < 0 ? "text-rust" : ""}`}>
-        {signed ? fmtSigned(value) : fmtMoney(value)}
-      </span>
     </div>
   );
 }

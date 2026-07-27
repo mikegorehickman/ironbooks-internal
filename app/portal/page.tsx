@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
-  TrendingUp, TrendingDown, AlertCircle, MessageSquare, ArrowRight,
-  DollarSign, Wallet, Sparkles, CheckCircle2, Scissors,
+  TrendingUp, AlertCircle, MessageSquare, ArrowRight,
+  Sparkles, CheckCircle2,
   BarChart3, Scale, Users, FileWarning, ChevronRight,
 } from "lucide-react";
 import { tryResolvePortalContext } from "@/lib/portal-context";
@@ -140,50 +140,31 @@ export default async function PortalOverview() {
     <div className="space-y-6">
       <MonthEndBanner />
 
-      {/* ── Gradient hero ───────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-7 text-white">
-        <div className="absolute -right-12 -top-12 w-56 h-56 rounded-full bg-teal/20 blur-3xl" />
-        <div className="absolute -left-8 -bottom-16 w-48 h-48 rounded-full bg-emerald-400/10 blur-3xl" />
-        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-5">
-          <div className="min-w-0">
-            <div className="font-brand text-[11px] text-white/60 uppercase tracking-[0.14em]">
-              {firstName ? `Welcome back, ${firstName}` : "Welcome back"}
-            </div>
-            <h1 className="text-3xl font-bold mt-1.5 leading-tight">
-              Here's how your business is doing
-            </h1>
-            <div className="text-sm text-white/70 mt-2 flex items-center gap-2 flex-wrap">
-              <CheckCircle2 size={13} className="text-emerald-300" />
-              <span>
-                Most recent closed month: <strong className="text-white">{monthLabel}</strong>
-              </span>
-              <span className="text-white/40">·</span>
-              <span className="text-white/55">
-                {publishedPkg
-                  ? "Delivered by your Ironbooks team"
-                  : closed.base.source === "reclass_job_closed"
-                  ? "Reconciled and closed by your bookkeeper"
-                  : closed.base.source === "cleanup_completed"
-                  ? "Most recent reconciled period"
-                  : "Most recent month with activity"}
-              </span>
-            </div>
-          </div>
-
-          {/* Net profit headline */}
-          <div className="flex-shrink-0 bg-white/10 backdrop-blur rounded-xl px-5 py-3 border border-white/15">
-            <div className="text-[10px] uppercase tracking-wider font-semibold text-white/60">
-              {monthShort} net profit
-            </div>
-            <div className={`text-3xl font-bold mt-0.5 ${c.netProfit >= 0 ? "text-white" : "text-red-300"}`}>
-              {c.netProfit < 0 ? `(${fmtMoney(Math.abs(c.netProfit))})` : fmtMoney(c.netProfit)}
-            </div>
-            <div className="text-xs text-white/70 mt-0.5">
-              {Math.round(c.netMarginPct)}% net margin
-            </div>
-          </div>
+      {/* ── Header — quiet, light; no dark hero ─────────────────────── */}
+      <header className="min-w-0">
+        <div className="font-brand text-[11px] text-teal-dark uppercase tracking-[0.14em]">
+          {firstName ? `Welcome back, ${firstName}` : "Welcome back"}
         </div>
-      </div>
+        <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">
+          Here&apos;s how your business is doing
+        </h1>
+        <div className="text-sm text-ink-slate mt-2 flex items-center gap-2 flex-wrap">
+          <CheckCircle2 size={13} className="text-teal" />
+          <span>
+            Most recent closed month: <strong className="text-navy">{monthLabel}</strong>
+          </span>
+          <span className="text-ink-light">·</span>
+          <span className="text-ink-light">
+            {publishedPkg
+              ? "Delivered by your Ironbooks team"
+              : closed.base.source === "reclass_job_closed"
+              ? "Reconciled and closed by your bookkeeper"
+              : closed.base.source === "cleanup_completed"
+              ? "Most recent reconciled period"
+              : "Most recent month with activity"}
+          </span>
+        </div>
+      </header>
 
       {/* ── AI insight card ─────────────────────────────────────────── */}
       <div className="relative overflow-hidden rounded-2xl border border-teal-border bg-teal-lighter p-5">
@@ -240,42 +221,8 @@ export default async function PortalOverview() {
         </div>
       </div>
 
-      {/* ── KPI tiles: Income → Gross Profit → Net Profit ───────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KpiCard
-          icon={DollarSign}
-          accent="teal"
-          label={`Money in (${monthShort})`}
-          value={fmtMoney(c.totalIncome)}
-          delta={signedMoney(incomeDelta, prevShort)}
-          deltaPositive={incomeDelta >= 0}
-          tooltip="Total invoices and sales for work completed this month."
-        />
-        <KpiCard
-          icon={Scissors}
-          accent="emerald"
-          label={`Gross profit (${monthShort})`}
-          value={fmtMoney(c.grossProfit)}
-          sub={`${Math.round(c.grossMarginPct)}% gross margin`}
-          delta={signedMoney(gpDelta, prevShort)}
-          deltaPositive={gpDelta >= 0}
-          tooltip={
-            c.costSplitEstimated
-              ? "Income minus estimated direct job costs (materials, subs, crew). Set up Cost of Goods Sold for an exact figure."
-              : "Income minus the direct cost of doing the work — materials, subs, crew."
-          }
-        />
-        <KpiCard
-          icon={Wallet}
-          accent={c.netProfit >= 0 ? "emerald" : "red"}
-          label={`Net profit (what's left)`}
-          value={fmtMoney(c.netProfit)}
-          sub={`${Math.round(c.netMarginPct)}% net margin`}
-          delta={signedMoney(netDelta, prevShort)}
-          deltaPositive={netDelta >= 0}
-          tooltip="Money in minus every cost and overhead expense. This is what's truly yours."
-        />
-      </div>
+      {/* ── Income → Net waterfall — matches the P&L, with vs-prior deltas ── */}
+      <WaterfallStrip c={c} incomeDelta={incomeDelta} gpDelta={gpDelta} netDelta={netDelta} prevShort={prevShort} monthShort={monthShort} />
 
       {/* ── Where each $1 of income goes ────────────────────────────── */}
       {c.totalIncome > 0 && <ProportionBar c={c} />}
@@ -460,38 +407,40 @@ function buildHeuristicNarrative(
 
 // ─── SUB-COMPONENTS ─────────────────────────────────────────────────────
 
-function KpiCard({
-  icon: Icon, accent, label, value, sub, delta, deltaPositive, tooltip,
+/** Income − COGS = Gross − Overhead = Net, as one connected strip — identical
+ *  to the P&L, with month-over-month deltas folded into the outcome cells. */
+function WaterfallStrip({
+  c, incomeDelta, gpDelta, netDelta, prevShort, monthShort,
 }: {
-  icon: any;
-  accent: "teal" | "emerald" | "red";
-  label: string;
-  value: string;
-  sub?: string;
-  delta: string;
-  deltaPositive: boolean;
-  tooltip: string;
+  c: PortalPl;
+  incomeDelta: number; gpDelta: number; netDelta: number;
+  prevShort: string; monthShort: string;
 }) {
-  const iconColor = {
-    teal: "text-teal-dark bg-teal/10",
-    emerald: "text-emerald-700 bg-emerald-50",
-    red: "text-rust bg-rust-tint",
-  }[accent];
+  const pctOf = (v: number) => `${Math.round((v / (c.totalIncome || 1)) * 100)}% of income`;
+  const cells = [
+    { label: `Income (${monthShort})`, value: c.totalIncome, op: "", sub: signedMoney(incomeDelta, prevShort), up: incomeDelta >= 0, neg: false, net: false },
+    { label: c.costSplitEstimated ? "Cost of goods*" : "Cost of goods", value: c.totalVariable, op: "−", sub: pctOf(c.totalVariable), up: null, neg: true, net: false },
+    { label: "Gross profit", value: c.grossProfit, op: "=", sub: signedMoney(gpDelta, prevShort), up: gpDelta >= 0, neg: false, net: false },
+    { label: "Operating exp.", value: c.totalFixed, op: "−", sub: pctOf(c.totalFixed), up: null, neg: true, net: false },
+    { label: "Net profit", value: c.netProfit, op: "=", sub: signedMoney(netDelta, prevShort), up: netDelta >= 0, neg: c.netProfit < 0, net: true },
+  ];
   return (
-    <div className="relative bg-white border border-cardline rounded-2xl p-5 overflow-hidden">
-      <div className="flex items-center gap-2 mb-1">
-        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${iconColor}`}>
-          <Icon size={14} />
-        </span>
-        <span className="font-brand text-[11px] font-medium text-ink-slate uppercase tracking-[0.1em]">{label}</span>
-      </div>
-      <div className="text-2xl font-bold text-navy mt-2">{value}</div>
-      {sub && <div className="text-xs text-ink-slate mt-0.5">{sub}</div>}
-      <div className={`text-xs mt-1 ${deltaPositive ? "text-emerald-700" : "text-amber-700"}`}>
-        {deltaPositive ? <TrendingUp size={11} className="inline mr-0.5" /> : <TrendingDown size={11} className="inline mr-0.5" />}
-        {delta}
-      </div>
-      <div className="mt-3 text-[11px] text-ink-light italic leading-relaxed">{tooltip}</div>
+    <div className="grid grid-cols-2 md:grid-cols-5 rounded-2xl border border-cardline bg-white overflow-hidden">
+      {cells.map((s, i) => (
+        <div
+          key={s.label}
+          className={`relative px-4 py-4 border-t border-hairline md:border-t-0 md:border-l first:border-l-0 ${i < 2 ? "border-t-0" : ""} ${s.net ? "bg-teal-lighter" : ""}`}
+        >
+          {s.op && (
+            <span className="hidden md:flex absolute -left-[9px] top-1/2 -translate-y-1/2 w-[18px] h-[18px] items-center justify-center rounded-full bg-canvas border border-cardline text-ink-light text-[11px] font-bold z-10">
+              {s.op}
+            </span>
+          )}
+          <div className={`font-brand text-[10px] uppercase tracking-[0.1em] ${s.net ? "text-teal-dark" : "text-ink-light"}`}>{s.label}</div>
+          <div className={`text-[22px] font-bold mt-2 tabular-nums leading-none ${s.net ? "text-teal-dark" : s.neg ? "text-rust" : "text-navy"}`}>{fmtMoney(s.value)}</div>
+          <div className={`text-[11.5px] mt-1.5 ${s.up == null ? "text-ink-slate" : s.up ? "text-teal-dark" : "text-gold-deep"}`}>{s.sub}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -510,16 +459,16 @@ function ProportionBar({ c }: { c: PortalPl }) {
           Full P&amp;L <ChevronRight size={12} />
         </Link>
       </div>
-      <div className="flex h-6 rounded-full overflow-hidden bg-slate-100">
-        {varPct > 0 && <div className="bg-amber-400 h-full" style={{ width: `${varPct}%` }} title={`COGS ${Math.round(varPct)}¢`} />}
-        {fixedPct > 0 && <div className="bg-orange-500 h-full" style={{ width: `${fixedPct}%` }} title={`Operating expenses ${Math.round(fixedPct)}¢`} />}
-        {!loss && netPct > 0 && <div className="bg-emerald-500 h-full" style={{ width: `${netPct}%` }} title={`Net profit ${Math.round(netPct)}¢`} />}
+      <div className="flex h-3 rounded-full overflow-hidden bg-hairline">
+        {varPct > 0 && <div className="bg-ink-slate h-full" style={{ width: `${varPct}%` }} title={`Cost of goods ${Math.round(varPct)}¢`} />}
+        {fixedPct > 0 && <div className="bg-gold h-full" style={{ width: `${fixedPct}%` }} title={`Operating expenses ${Math.round(fixedPct)}¢`} />}
+        {!loss && netPct > 0 && <div className="bg-teal h-full" style={{ width: `${netPct}%` }} title={`Net profit ${Math.round(netPct)}¢`} />}
       </div>
-      <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs">
-        <Legend color="bg-amber-400" label={c.costSplitEstimated ? "COGS*" : "COGS"} value={`${Math.round(varPct)}¢`} />
-        <Legend color="bg-orange-500" label="Operating expenses" value={`${Math.round(fixedPct)}¢`} />
+      <div className="flex flex-wrap gap-x-6 gap-y-1 mt-4 text-xs">
+        <Legend color="bg-ink-slate" label={c.costSplitEstimated ? "Cost of goods*" : "Cost of goods"} value={`${Math.round(varPct)}¢`} />
+        <Legend color="bg-gold" label="Operating expenses" value={`${Math.round(fixedPct)}¢`} />
         <Legend
-          color={loss ? "bg-rust" : "bg-emerald-500"}
+          color={loss ? "bg-rust" : "bg-teal"}
           label={loss ? "Loss" : "Net profit"}
           value={loss ? `(${Math.round(Math.abs(c.netMarginPct))}¢)` : `${Math.round(netPct)}¢`}
         />
