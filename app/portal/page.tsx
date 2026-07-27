@@ -146,10 +146,10 @@ export default async function PortalOverview() {
         <div className="absolute -left-8 -bottom-16 w-48 h-48 rounded-full bg-emerald-400/10 blur-3xl" />
         <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-5">
           <div className="min-w-0">
-            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">
+            <div className="font-brand text-[11px] text-white/60 uppercase tracking-[0.14em]">
               {firstName ? `Welcome back, ${firstName}` : "Welcome back"}
             </div>
-            <h1 className="text-3xl font-bold mt-1 leading-tight">
+            <h1 className="text-3xl font-bold mt-1.5 leading-tight">
               Here's how your business is doing
             </h1>
             <div className="text-sm text-white/70 mt-2 flex items-center gap-2 flex-wrap">
@@ -186,7 +186,7 @@ export default async function PortalOverview() {
       </div>
 
       {/* ── AI insight card ─────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl border-2 border-teal/30 bg-gradient-to-br from-teal/10 via-white to-white p-5">
+      <div className="relative overflow-hidden rounded-2xl border border-teal-border bg-teal-lighter p-5">
         <div className="flex items-start gap-3">
           <div className="w-9 h-9 rounded-full bg-teal/15 flex items-center justify-center flex-shrink-0">
             <Sparkles size={18} className="text-teal-dark" />
@@ -472,11 +472,6 @@ function KpiCard({
   deltaPositive: boolean;
   tooltip: string;
 }) {
-  const accentBar = {
-    teal: "bg-teal",
-    emerald: "bg-emerald-500",
-    red: "bg-rust",
-  }[accent];
   const iconColor = {
     teal: "text-teal-dark bg-teal/10",
     emerald: "text-emerald-700 bg-emerald-50",
@@ -484,12 +479,11 @@ function KpiCard({
   }[accent];
   return (
     <div className="relative bg-white border border-cardline rounded-2xl p-5 overflow-hidden">
-      <span className={`absolute left-0 top-0 h-full w-1 ${accentBar}`} />
       <div className="flex items-center gap-2 mb-1">
         <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${iconColor}`}>
           <Icon size={14} />
         </span>
-        <span className="text-xs font-semibold text-ink-slate uppercase tracking-wider">{label}</span>
+        <span className="font-brand text-[11px] font-medium text-ink-slate uppercase tracking-[0.1em]">{label}</span>
       </div>
       <div className="text-2xl font-bold text-navy mt-2">{value}</div>
       {sub && <div className="text-xs text-ink-slate mt-0.5">{sub}</div>}
