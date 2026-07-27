@@ -48,6 +48,7 @@ import type {
 import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
 import { ClientDetailsCard } from "./client-details-card";
 import { ResendLoginLink } from "./resend-login-link";
+import { PortalUsersCard } from "./portal-users-card";
 import { StatementsCard } from "./statements-card";
 import { MessagesPanel } from "./messages-panel";
 import { BillingTab } from "./billing-tab";
@@ -886,6 +887,10 @@ function ProfileTab({
           profile_updated_at: clientLink.profile_updated_at ?? null,
         }}
         onboardingAnswers={onboarding?.answers}
+      />
+      <PortalUsersCard
+        clientLinkId={clientLink.id}
+        canManage={actorRole === "admin" || actorRole === "lead"}
       />
       {onboarding && <OnboardingDetailsCard onboarding={onboarding} />}
     </div>
