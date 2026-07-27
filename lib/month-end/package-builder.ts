@@ -269,7 +269,8 @@ export async function buildPackagesBulk(
   service: Service,
   clientLinkIds: string[],
   periodRef: { periodYear: number; periodMonth: number },
-  createdBy: string
+  createdBy: string,
+  options?: { skipGateCheck?: boolean; forceRebuild?: boolean }
 ): Promise<Array<{ clientLinkId: string; packageId?: string; ok: boolean; error?: string }>> {
   return mapPool(clientLinkIds, BUILD_CONCURRENCY, async (clientLinkId) => {
     try {
@@ -277,7 +278,8 @@ export async function buildPackagesBulk(
         service,
         clientLinkId,
         periodRef,
-        createdBy
+        createdBy,
+        options
       );
       return { clientLinkId, packageId, ok: true };
     } catch (err: any) {

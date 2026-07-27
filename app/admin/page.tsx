@@ -286,6 +286,7 @@ export default async function AdminOverviewPage() {
         <div className="space-y-2">
           {[
             { href: "/admin/close-coverage", icon: CalendarCheck, title: "Close coverage", desc: "Every client × month — the date they received their completed books · gaps flagged" },
+            { href: "/admin/backfill-portal-package", icon: Mail, title: "Backfill portal packages", desc: "Publish P&L (+BS) to the portal + email clients whose close only went out as a plain summary email" },
             { href: "/admin/billing", icon: CreditCard, title: "Billing", desc: "Subscription revenue — Stripe-synced + manual entries · MRR, dunning, reconciliation banner" },
             { href: "/admin/daily-recon", icon: Repeat, title: "Daily recon engine", desc: "Enroll / dry-run / pause clients · nightly run history · run all now" },
             { href: "/admin/bulk-email", icon: Mail, title: "Bulk email", desc: "Email some or all clients · rich text · unsubscribe-aware" },
