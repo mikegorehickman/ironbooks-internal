@@ -296,6 +296,7 @@ export default async function AdminOverviewPage() {
             { href: "/admin/reapply-skipped", icon: CheckCheck, title: "Re-apply skipped", desc: "Re-push 'already in target account' skips to QBO · idempotent, closed-period safe" },
             { href: "/admin/payroll-double-scan", icon: AlertTriangle, title: "Payroll double-count scan", desc: "Same crew's pay booked to two labor lines · read-only triage · $ overstated per client" },
             { href: "/admin/duplicates", icon: Copy, title: "Duplicate transactions — fleet", desc: "Duplicate expenses across the fleet · open findings + $ exposure · void the extra copies" },
+            { href: "/admin/gst-extraction", icon: Landmark, title: "GST/HST extraction — Canada", desc: "Pull sales tax out of 2026 revenue → GST/HST Payable, and ITCs out of expenses · totals never change" },
           ].map((t) => {
             const Icon = t.icon;
             return (

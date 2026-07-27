@@ -79,6 +79,60 @@ const GOODS_PST = new Set(["BC", "SK", "MB"]);
 /** Provinces whose PST ALSO applies to (painting) SERVICES. */
 const SERVICE_PST = new Set(["SK"]);
 
+/**
+ * Purchased SERVICES that still embed PST/RST in BC & MB because the province
+ * taxes services supplied to TANGIBLE personal property, plus telecom:
+ *   - rentals/leases of equipment, tools, vehicles, scaffolding, lifts
+ *   - repairs & maintenance OF vehicles/equipment (not of real property)
+ *   - telecommunications (phone/cell/internet/data)
+ * (SK taxes services outright, so it never reaches this test.)
+ */
+const PST_TAXABLE_SERVICE =
+  /\b(equipment|tools?|machin\w*|vehicles?|trucks?|vans?|auto\w*|fleet|trailers?|scaffold\w*|lifts?|sprayers?|compressors?|generators?|telephones?|phones?|cell\w*|mobile|internet|telecom\w*|data)\b/;
+
+/**
+ * Explicit REAL-PROPERTY / professional signals that keep a service PST-exempt
+ * in BC & MB even when it matches a rent/lease/repair keyword — premises rent,
+ * building maintenance, subcontracted labour on real property, professional
+ * fees, advertising, insurance. Checked BEFORE the taxable list so
+ * "Repairs & Maintenance - Building" stays exempt while "Vehicle Repairs" doesn't.
+ */
+const PST_EXEMPT_SERVICE =
+  /\b(buildings?|premises|offices?|shops?|yards?|storage|warehouses?|real property|lands?|spaces?|units?|accounting|bookkeep\w*|legal|professional|consult\w*|advertis\w*|marketing|subcontract\w*|labour|labor|insurance|utilit\w*|electric\w*|hydro|water|heat|fuel|gas)\b/;
+
+/**
+ * PST/RST rate embedded in a PURCHASE, per provincial rules. This is the piece
+ * that decides how much of a gross expense is recoverable: PST paid on inputs
+ * is NOT an ITC (it's a cost that stays in the expense), so it must be excluded
+ * from the recoverable base — ITC = gross × gst / (1 + gst + pst).
+ *
+ * Rules encoded (Mike 2026-07-27 — "CRA rules for what includes PST, get 95%"):
+ *   - No-PST provinces (HST provinces, AB, YT/NT/NU) and QC (QST folded into
+ *     the federal-equivalent rate and fully recoverable as an ITR) → 0.
+ *   - SK: PST applies to goods AND services (incl. real-property construction).
+ *   - BC / MB: goods always; services only when supplied to tangible personal
+ *     property or telecom (see the two lists above). Real-property labour,
+ *     premises rent, professional fees, advertising, insurance, fuel (motor
+ *     fuel tax instead) and commercial utilities are exempt.
+ *
+ * Residual risk (CPA review): BC charges PST on legal services — treated exempt
+ * here as immaterial for a painting contractor.
+ */
+export function purchasePstRate(
+  rates: ProvinceRates,
+  kind: GstInputKind,
+  accountName?: string | null
+): number {
+  if (rates.pst <= 0 || kind === "none") return 0;
+  // SK taxes services outright — no name discrimination needed.
+  if (SERVICE_PST.has(rates.province)) return rates.pst;
+  if (!GOODS_PST.has(rates.province)) return 0;
+  if (kind === "goods") return rates.pst;
+  const n = normalizeAccountKey(accountName);
+  if (!n || PST_EXEMPT_SERVICE.test(n)) return 0;
+  return PST_TAXABLE_SERVICE.test(n) ? rates.pst : 0;
+}
+
 /** Memo stamped on every transaction the apply step edits (idempotency). */
 export const GST_EXTRACTION_MEMO = "SNAP GST/HST extraction";
 
@@ -175,23 +229,24 @@ export interface ExpenseSplit {
 }
 
 /**
- * Split a gross expense line into net + recoverable ITC, per the category's
- * input kind and the province's purchase rules:
- *   - 'none'    → no split.
- *   - 'service' → GST/HST embedded (plus SK PST on services — unrecoverable,
- *                 stays in net): ITC = gross × g / (1 + g + servicePst).
- *   - 'goods'   → in BC/SK/MB the price embeds GST+PST; only GST is
- *                 recoverable: ITC = gross × g / (1 + g + pst).
+ * Split a gross expense line into net + recoverable ITC. Only the GST/HST
+ * portion is recoverable; any PST/RST embedded in the price is a cost and stays
+ * inside the net expense — so the recoverable base excludes it:
+ *   ITC = gross × gst / (1 + gst + embeddedPst)
+ * `embeddedPst` comes from purchasePstRate(), which encodes the provincial
+ * rules (SK taxes services; BC/MB tax goods + services to tangible property /
+ * telecom; everywhere else 0). Pass the account name so those rules can apply —
+ * omitting it falls back to goods-only PST.
  * Rounding: ITC rounded, net absorbs the residual (net + itc === gross).
  */
-export function splitExpense(gross: number, rates: ProvinceRates, kind: GstInputKind): ExpenseSplit | null {
+export function splitExpense(
+  gross: number,
+  rates: ProvinceRates,
+  kind: GstInputKind,
+  accountName?: string | null
+): ExpenseSplit | null {
   if (kind === "none" || !gross) return null;
-  const embeddedPst =
-    kind === "goods" && GOODS_PST.has(rates.province)
-      ? rates.pst
-      : kind === "service" && SERVICE_PST.has(rates.province)
-        ? rates.pst
-        : 0;
+  const embeddedPst = purchasePstRate(rates, kind, accountName);
   const g = rates.gstHst;
   if (g <= 0) return null;
   const itc = r2((gross * g) / (1 + g + embeddedPst));
@@ -323,7 +378,7 @@ export function buildExtractionPlan(
         excludedVendorLines++;
         continue;
       }
-      const split = splitExpense(amount, rates, kind);
+      const split = splitExpense(amount, rates, kind, row.account);
       if (split) {
         expenses.push({
           txn_id: row.txn_id,
