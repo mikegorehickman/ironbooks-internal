@@ -281,7 +281,7 @@ export default async function PortalOverview() {
       {c.totalIncome > 0 && <ProportionBar c={c} />}
 
       {/* ── What needs your attention ───────────────────────────────── */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+      <div className="bg-white border border-cardline rounded-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-navy">What needs your attention</h3>
         </div>
@@ -324,7 +324,7 @@ export default async function PortalOverview() {
       </div>
 
       {/* ── Cash on hand ────────────────────────────────────────────── */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+      <div className="bg-white border border-cardline rounded-2xl p-6">
         <h3 className="font-bold text-navy mb-3">Cash on hand</h3>
         {data.banks.accounts.length === 0 ? (
           <div className="text-sm text-ink-slate italic">
@@ -343,13 +343,13 @@ export default async function PortalOverview() {
                 />
               ))}
             </div>
-            <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-ink-slate">
+            <div className="mt-4 pt-3 border-t border-hairline text-xs text-ink-slate">
               Total cash available:{" "}
               <strong className="text-navy">{fmtMoney(data.banks.totalCashOnHand)}</strong>
               {data.banks.totalCreditCardDebt > 0 && (
                 <>
                   {" "}· Credit card debt:{" "}
-                  <strong className="text-red-700">{fmtMoney(data.banks.totalCreditCardDebt)}</strong>
+                  <strong className="text-rust">{fmtMoney(data.banks.totalCreditCardDebt)}</strong>
                 </>
               )}
             </div>
@@ -475,15 +475,15 @@ function KpiCard({
   const accentBar = {
     teal: "bg-teal",
     emerald: "bg-emerald-500",
-    red: "bg-red-500",
+    red: "bg-rust",
   }[accent];
   const iconColor = {
     teal: "text-teal-dark bg-teal/10",
     emerald: "text-emerald-700 bg-emerald-50",
-    red: "text-red-700 bg-red-50",
+    red: "text-rust bg-rust-tint",
   }[accent];
   return (
-    <div className="relative bg-white border border-slate-200 rounded-2xl p-5 overflow-hidden">
+    <div className="relative bg-white border border-cardline rounded-2xl p-5 overflow-hidden">
       <span className={`absolute left-0 top-0 h-full w-1 ${accentBar}`} />
       <div className="flex items-center gap-2 mb-1">
         <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${iconColor}`}>
@@ -509,7 +509,7 @@ function ProportionBar({ c }: { c: PortalPl }) {
   const loss = c.netProfit < 0;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+    <div className="bg-white border border-cardline rounded-2xl p-5">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-bold text-navy">Where each $1 of income goes</h3>
         <Link href="/portal/profit-loss" className="text-xs font-semibold text-teal-dark hover:underline inline-flex items-center gap-1">
@@ -525,7 +525,7 @@ function ProportionBar({ c }: { c: PortalPl }) {
         <Legend color="bg-amber-400" label={c.costSplitEstimated ? "COGS*" : "COGS"} value={`${Math.round(varPct)}¢`} />
         <Legend color="bg-orange-500" label="Operating expenses" value={`${Math.round(fixedPct)}¢`} />
         <Legend
-          color={loss ? "bg-red-500" : "bg-emerald-500"}
+          color={loss ? "bg-rust" : "bg-emerald-500"}
           label={loss ? "Loss" : "Net profit"}
           value={loss ? `(${Math.round(Math.abs(c.netMarginPct))}¢)` : `${Math.round(netPct)}¢`}
         />
@@ -554,8 +554,8 @@ function AttentionItem({
   color, icon: Icon, title, body, cta, href,
 }: { color: "red" | "amber" | "teal"; icon: any; title: string; body: string; cta: string; href: string }) {
   const colors = {
-    red: "bg-red-50 border-red-200 text-red-900",
-    amber: "bg-amber-50 border-amber-200 text-amber-900",
+    red: "bg-rust-tint border-rust-border text-rust",
+    amber: "bg-gold-tint border-gold-border text-gold-deep",
     teal: "bg-teal/5 border-teal/30 text-teal-dark",
   }[color];
   return (
@@ -576,7 +576,7 @@ function CashTile({ label, amount, sub, negative }: { label: string; amount: str
   return (
     <div>
       <div className="text-xs text-ink-slate truncate" title={label}>{label}</div>
-      <div className={`text-xl font-bold ${negative ? "text-red-700" : "text-navy"}`}>{amount}</div>
+      <div className={`text-xl font-bold ${negative ? "text-rust" : "text-navy"}`}>{amount}</div>
       <div className="text-[11px] text-ink-light">{sub}</div>
     </div>
   );
@@ -588,7 +588,7 @@ function NavCard({
   return (
     <Link
       href={href}
-      className="group flex items-start gap-3 bg-white border border-slate-200 rounded-2xl p-4 hover:border-teal/40 hover:shadow-sm transition-all"
+      className="group flex items-start gap-3 bg-white border border-cardline rounded-2xl p-4 hover:border-teal/40 hover:shadow-sm transition-all"
     >
       <span className="w-9 h-9 rounded-lg bg-teal/10 text-teal-dark flex items-center justify-center flex-shrink-0 group-hover:bg-teal/15">
         <Icon size={16} />
