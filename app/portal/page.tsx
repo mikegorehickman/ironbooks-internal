@@ -40,16 +40,25 @@ export default async function PortalOverview() {
 
   // New clients land on the onboarding wizard by default (soft gate) — send
   // them there until they've finished the required steps (form + docs).
+  // EXCEPT when they've chosen "I'll do this later": that sets a SESSION cookie
+  // (snap_ob_snoozed) which suppresses the auto-redirect for the rest of the
+  // browser session, so they can look around the portal. The cookie is not
+  // persisted, so the welcome sequence greets them again at the start of their
+  // next visit. The persistent nag banner stays up either way as the way back.
   {
-    const svc = createServiceSupabase();
-    const { data: cl } = await (svc as any)
-      .from("client_links")
-      .select("status, cleanup_completed_at, daily_recon_enabled, portal_onboarding")
-      .eq("id", ctx.clientLinkId)
-      .maybeSingle();
-    const { shouldShowOnboarding, onboardingRequiredDone, readOnboardingState } = await import("@/lib/portal-onboarding");
-    if (cl && shouldShowOnboarding(cl) && !onboardingRequiredDone(readOnboardingState(cl))) {
-      redirect("/portal/onboarding");
+    const { cookies } = await import("next/headers");
+    const snoozed = (await cookies()).get("snap_ob_snoozed")?.value === "1";
+    if (!snoozed) {
+      const svc = createServiceSupabase();
+      const { data: cl } = await (svc as any)
+        .from("client_links")
+        .select("status, cleanup_completed_at, daily_recon_enabled, portal_onboarding")
+        .eq("id", ctx.clientLinkId)
+        .maybeSingle();
+      const { shouldShowOnboarding, onboardingRequiredDone, readOnboardingState } = await import("@/lib/portal-onboarding");
+      if (cl && shouldShowOnboarding(cl) && !onboardingRequiredDone(readOnboardingState(cl))) {
+        redirect("/portal/onboarding");
+      }
     }
   }
 
