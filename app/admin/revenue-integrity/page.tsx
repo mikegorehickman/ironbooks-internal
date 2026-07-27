@@ -1,8 +1,8 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { Landmark, AlertTriangle } from "lucide-react";
+import { Landmark } from "lucide-react";
 import { RunSweepButton } from "./run-sweep-button";
+import { ArFixerRow } from "./ar-fixer-row";
 
 export const dynamic = "force-dynamic";
 
@@ -155,122 +155,24 @@ export default async function RevenueIntegrityPage() {
                 <th className="px-3 py-2.5 text-right font-semibold">Closed yrs</th>
                 <th className="px-3 py-2.5 text-right font-semibold">A/R × rev</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Deposits → rev</th>
+                <th className="px-3 py-2.5 text-right font-semibold">Fix</th>
               </tr>
             </thead>
             <tbody>
-              {merged.map((m) => {
-                const ar = m.ar;
-                const rev = m.rev;
-                const bad = ar?.verdict === "unreliable";
-                return (
-                  <tr
-                    key={m.id}
-                    className={`border-b border-gray-50 last:border-0 ${
-                      bad ? "bg-red-50/40" : ar?.flagged ? "bg-amber-50/30" : ""
-                    }`}
-                  >
-                    <td className="px-4 py-2.5 align-top">
-                      <Link href={`/clients/${m.id}`} className="font-semibold text-navy hover:text-teal hover:underline">
-                        {m.name}
-                      </Link>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {ar && <ArBadge verdict={ar.verdict} />}
-                        {ar?.deposits_only && (
-                          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] font-semibold text-ink-slate">
-                            deposits-only
-                          </span>
-                        )}
-                        {rev?.flagged && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
-                            <AlertTriangle size={10} /> double-count
-                          </span>
-                        )}
-                      </div>
-                      {ar?.reason && (
-                        <div className="text-[11px] text-ink-slate mt-1 max-w-[440px]">{ar.reason}</div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top font-semibold text-navy tabular-nums">
-                      {ar ? (
-                        <>
-                          {fmt(ar.total_open)}{" "}
-                          <span className="text-[10px] font-normal text-ink-light">({ar.total_count})</span>
-                        </>
-                      ) : (
-                        <span className="text-ink-light">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top tabular-nums">
-                      {ar ? (
-                        <span className={ar.pct_over_90 >= 70 ? "font-semibold text-red-700" : "text-ink-slate"}>
-                          {Math.round(ar.pct_over_90)}%
-                        </span>
-                      ) : (
-                        <span className="text-ink-light">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top text-ink-slate tabular-nums">
-                      {ar?.oldest_days != null ? `${Number(ar.oldest_days).toLocaleString()}d` : "—"}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top text-ink-slate tabular-nums">
-                      {ar?.prior_year_total ? (
-                        <>
-                          {fmt(ar.prior_year_total)}{" "}
-                          <span className="text-[10px] text-ink-light">({ar.prior_year_count})</span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top tabular-nums">
-                      {ar?.ar_to_monthly_revenue != null ? (
-                        <span className={ar.ar_to_monthly_revenue > 6 ? "font-semibold text-red-700" : "text-ink-slate"}>
-                          {ar.ar_to_monthly_revenue}×
-                        </span>
-                      ) : (
-                        <span className="text-ink-light">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top text-ink-slate tabular-nums">
-                      {rev ? (
-                        <>
-                          {fmt(rev.deposit_total)}{" "}
-                          <span className="text-[10px] text-ink-light">({rev.deposit_count})</span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              {merged.map((m) => (
+                <ArFixerRow
+                  key={m.id}
+                  clientId={m.id}
+                  clientName={m.name}
+                  ar={m.ar}
+                  rev={m.rev}
+                />
+              ))}
             </tbody>
           </table>
         </div>
       )}
     </div>
-  );
-}
-
-function ArBadge({ verdict }: { verdict: string }) {
-  if (verdict === "unreliable") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
-        <AlertTriangle size={10} /> A/R not trustworthy
-      </span>
-    );
-  }
-  if (verdict === "suspect") {
-    return (
-      <span className="inline-flex items-center rounded-full border border-gold-border bg-gold-tint px-1.5 py-0.5 text-[10px] font-semibold text-gold-deep">
-        A/R questionable
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-      A/R clean
-    </span>
   );
 }
 
