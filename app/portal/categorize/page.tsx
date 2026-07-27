@@ -101,21 +101,18 @@ export default async function CategorizePage() {
 
   return (
     <div className="space-y-6">
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
-        <div className="relative">
-          <div className="text-xs text-white/60 uppercase tracking-wider font-semibold flex items-center gap-1.5">
-            <Tags size={13} /> Categorize transactions
-          </div>
-          <h1 className="text-3xl font-bold mt-1">Help us label these</h1>
-          <p className="text-sm text-white/70 mt-1 max-w-xl">
-            Your bookkeeper found {open.length === 0 ? "no" : open.length} transaction
-            {open.length === 1 ? "" : "s"} they need your help identifying. Pick a category or add a
-            note for each one — your books won&apos;t change until your bookkeeper reviews and
-            confirms your answers.
-          </p>
+      <header className="min-w-0">
+        <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark flex items-center gap-1.5">
+          <Tags size={12} /> Categorize transactions
         </div>
-      </div>
+        <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">Help us label these</h1>
+        <p className="text-sm text-ink-slate mt-2 max-w-2xl">
+          Your bookkeeper found {open.length === 0 ? "no" : open.length} transaction
+          {open.length === 1 ? "" : "s"} they need your help identifying. Pick a category or add a
+          note for each one — your books won&apos;t change until your bookkeeper reviews and
+          confirms your answers.
+        </p>
+      </header>
 
       <CategorizeClient
         open={open}

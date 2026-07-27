@@ -62,19 +62,14 @@ export default async function PortalMessagesPage() {
   return (
     <div className="space-y-6">
       {/* Gradient hero — matches the portal visual system */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-amber-300/15 blur-2xl" />
-        <div className="relative">
-          <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">
-            Your bookkeeping team
-          </div>
-          <h1 className="text-3xl font-bold mt-1">Messages</h1>
-          <div className="text-sm text-white/70 mt-1">
-            Ask your bookkeeper questions, send documents like bank statements, and get
-            updates on your cleanup progress — all in one place.
-          </div>
+      <header className="min-w-0">
+        <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark">Your bookkeeping team</div>
+        <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">Messages</h1>
+        <div className="text-sm text-ink-slate mt-2 max-w-2xl">
+          Ask your bookkeeper questions, send documents like bank statements, and get
+          updates on your cleanup progress — all in one place.
         </div>
-      </div>
+      </header>
 
       <StatementUploadPanel />
 

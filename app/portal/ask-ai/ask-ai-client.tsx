@@ -187,23 +187,19 @@ export function AskAiClient({ starters }: { starters: string[] }) {
 
   return (
     <div className="flex flex-col h-[calc(100vh-100px)] gap-4">
-      {/* ── Gradient hero ───────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-5 text-white flex-shrink-0">
-        <div className="absolute -right-10 -top-12 w-48 h-48 rounded-full bg-teal/25 blur-3xl" />
-        <div className="absolute -left-6 -bottom-14 w-40 h-40 rounded-full bg-emerald-400/10 blur-3xl" />
-        <div className="relative flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center flex-shrink-0">
-            <Sparkles size={22} className="text-white" />
-          </div>
-          <div>
-            <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">Your AI bookkeeper</div>
-            <h1 className="text-2xl font-bold leading-tight">Ask anything about your finances</h1>
-            <div className="text-xs text-white/65 mt-0.5">
-              Knows your live QuickBooks data · Explains things in plain English
-            </div>
+      {/* ── Header — quiet, light; no dark hero ─────────────────────── */}
+      <header className="flex-shrink-0 flex items-center gap-3">
+        <div className="w-11 h-11 rounded-xl bg-teal-lighter border border-teal-border flex items-center justify-center flex-shrink-0">
+          <Sparkles size={22} className="text-teal-dark" />
+        </div>
+        <div className="min-w-0">
+          <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark">Your AI bookkeeper</div>
+          <h1 className="font-brand text-2xl font-semibold text-navy leading-none mt-1">Ask anything about your finances</h1>
+          <div className="text-xs text-ink-slate mt-1">
+            Knows your live QuickBooks data · Explains things in plain English
           </div>
         </div>
-      </div>
+      </header>
 
       {/* History toolbar — New chat + saved conversations */}
       {(conversations.length > 0 || messages.length > 0) && (

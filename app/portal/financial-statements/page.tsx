@@ -17,19 +17,14 @@ export default async function FinancialStatementsHub() {
 
   return (
     <div className="space-y-6">
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy to-teal-dark px-6 py-6 text-white">
-        <div className="absolute -right-10 -top-10 w-48 h-48 rounded-full bg-teal/20 blur-2xl" />
-        <div className="relative">
-          <div className="text-xs text-white/60 uppercase tracking-wider font-semibold">
-            Financial Statements
-          </div>
-          <h1 className="text-3xl font-bold mt-1">Your three core reports</h1>
-          <div className="text-sm text-white/70 mt-1">
-            Profit tells you if the business model works. The balance sheet tells
-            you what it's worth. Cash flow tells you if you can make payroll.
-          </div>
+      <header className="min-w-0">
+        <div className="font-brand text-[11px] uppercase tracking-[0.14em] text-teal-dark">Financial Statements</div>
+        <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">Your three core reports</h1>
+        <div className="text-sm text-ink-slate mt-2 max-w-2xl">
+          Profit tells you if the business model works. The balance sheet tells
+          you what it&apos;s worth. Cash flow tells you if you can make payroll.
         </div>
-      </div>
+      </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {STATEMENTS.map((s) => {
