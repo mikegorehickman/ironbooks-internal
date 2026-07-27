@@ -78,8 +78,13 @@ export async function GET(request: Request) {
   try {
     const ids = scope === "signoffs" ? [] : production.map((c) => c.id);
     if (ids.length > 0) {
+      // Don't filter kind='production_me' — (client, period) is unique in
+      // monthly_rec_runs, so a cleanup-graduation month is a kind='cleanup'
+      // row that still represents this period's real close/waiting/review
+      // state. Over-filtering left graduated clients showing "Not started"
+      // on the board even after their first month was delivered.
       const runs = await selectRuns((q: any) =>
-        q.eq("period", period).eq("kind", "production_me").in("client_link_id", ids)
+        q.eq("period", period).in("client_link_id", ids)
       );
       runsByClient = new Map(runs.map((r) => [r.client_link_id, r]));
     }

@@ -1022,6 +1022,18 @@ export async function POST(
       }
     }
 
+    // Stamp the unified "month closed & delivered" marker. The package-delivery
+    // fast-close path already sets client_links.latest_closed_period; do the
+    // same here so BOTH close paths record it and the lifecycle (which reads
+    // latest_closed_period as month_done) graduates the client to "Done"
+    // consistently regardless of which path closed the month. Only advance the
+    // marker forward — never regress it if a later period is already closed.
+    await service
+      .from("client_links")
+      .update({ latest_closed_period: periodEnd } as any)
+      .eq("id", clientLinkId)
+      .or(`latest_closed_period.is.null,latest_closed_period.lt.${periodEnd}`);
+
     // Cleanup sign-off: approving + sending the statements IS the cleanup
     // completion — stamp the client record and GRADUATE them to
     // Production (daily recon on, joins the /production board).
