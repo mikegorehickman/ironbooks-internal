@@ -7,6 +7,7 @@ import {
   upsertLeadFromWebhook,
   pick,
 } from "@/lib/onboarding";
+import { readOnboardingState } from "@/lib/portal-onboarding";
 
 export const dynamic = "force-dynamic";
 
@@ -87,5 +88,82 @@ export async function POST(request: Request) {
     console.error("[ghl/ob-call] upsert failed:", result.error);
     return NextResponse.json({ error: result.error }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, lead_id: result.id });
+
+  // Also reflect the booking in the client's PORTAL onboarding wizard, so the
+  // "Book your call" step ticks itself off from a real appointment rather than
+  // relying on the client's self-confirmation. A cancellation clears it again,
+  // matching the board behaviour — they need to rebook to finish onboarding.
+  const portal = await syncPortalCallState(service, result.id, fields.email, status);
+
+  return NextResponse.json({ ok: true, lead_id: result.id, portal });
+}
+
+/**
+ * Mirror the appointment onto client_links.portal_onboarding.call_booked_at.
+ * Resolves the client via the lead's link first, then by contact email.
+ * Best-effort: never fails the webhook, since the board write already succeeded.
+ */
+async function syncPortalCallState(
+  service: any,
+  leadId: string | undefined,
+  email: string | null | undefined,
+  status: string
+): Promise<string> {
+  try {
+    let clientLinkId: string | null = null;
+
+    if (leadId) {
+      const { data: lead } = await service
+        .from("onboarding_leads")
+        .select("client_link_id")
+        .eq("id", leadId)
+        .maybeSingle();
+      clientLinkId = (lead as any)?.client_link_id ?? null;
+    }
+    if (!clientLinkId && email) {
+      const { data: matches } = await service
+        .from("client_links")
+        .select("id")
+        .ilike("client_email", String(email).trim())
+        .eq("is_active", true)
+        .limit(1);
+      clientLinkId = ((matches as any[]) || [])[0]?.id ?? null;
+    }
+    if (!clientLinkId) return "no client matched";
+
+    const { data: client } = await service
+      .from("client_links")
+      .select("id, client_name, portal_onboarding")
+      .eq("id", clientLinkId)
+      .single();
+    if (!client) return "no client matched";
+
+    const state = readOnboardingState(client);
+    const cancelled = status === "cancelled";
+    const next = cancelled ? null : state.call_booked_at || new Date().toISOString();
+    if (next === state.call_booked_at) return "unchanged";
+
+    await service
+      .from("client_links")
+      .update({ portal_onboarding: { ...state, call_booked_at: next } })
+      .eq("id", clientLinkId);
+
+    try {
+      await service.from("audit_log").insert({
+        event_type: cancelled ? "portal_onboarding_call_cancelled" : "portal_onboarding_call_booked",
+        request_payload: {
+          client_link_id: clientLinkId,
+          client_name: (client as any).client_name,
+          source: "ghl_webhook",
+          status,
+        } as any,
+      } as any);
+    } catch {
+      /* audit is best-effort */
+    }
+    return cancelled ? "cleared" : "recorded";
+  } catch (e: any) {
+    console.warn("[ghl/ob-call] portal sync skipped:", e?.message);
+    return "skipped";
+  }
 }

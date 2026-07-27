@@ -11,9 +11,19 @@
 export interface PortalOnboardingState {
   video_watched_at?: string | null;
   form_submitted_at?: string | null;
+  /** Onboarding call booked (client-confirmed, or authoritatively by the GHL
+   *  appointment webhook). */
+  call_booked_at?: string | null;
+  /** Legacy: documents step, retired from the wizard 2026-07-27 (statements are
+   *  now requested by the bookkeeper). Kept so historic rows still read. */
   docs_provided_at?: string | null;
   completed_at?: string | null;
   accounts_attested?: boolean;
+  /** Thank-you reward (see lib/onboarding-reward.ts). `claimed` is the atomic
+   *  latch that makes sending exactly-once; `sent` records success. */
+  reward_claimed_at?: string | null;
+  reward_sent_at?: string | null;
+  reward_error?: string | null;
 }
 
 export function readOnboardingState(row: { portal_onboarding?: any } | null | undefined): PortalOnboardingState {
@@ -21,16 +31,27 @@ export function readOnboardingState(row: { portal_onboarding?: any } | null | un
   return {
     video_watched_at: s.video_watched_at ?? null,
     form_submitted_at: s.form_submitted_at ?? null,
+    call_booked_at: s.call_booked_at ?? null,
     docs_provided_at: s.docs_provided_at ?? null,
     completed_at: s.completed_at ?? null,
     accounts_attested: !!s.accounts_attested,
+    reward_claimed_at: s.reward_claimed_at ?? null,
+    reward_sent_at: s.reward_sent_at ?? null,
+    reward_error: s.reward_error ?? null,
   };
 }
 
-/** The wizard is "done enough" once the intake form + documents are handled.
- * (Video is encouraged but never blocks.) */
+/**
+ * The wizard is "done enough" once the intake form is in AND the onboarding call
+ * is booked — those are the two things the team actually needs from the client.
+ * (The video is encouraged but never blocks.)
+ *
+ * Documents used to be required here; they moved out of the wizard on
+ * 2026-07-27 — the bookkeeper requests statements directly instead. Clients who
+ * finished under the old rule already carry `completed_at`, so they stay done.
+ */
 export function onboardingRequiredDone(s: PortalOnboardingState): boolean {
-  return !!s.form_submitted_at && !!s.docs_provided_at;
+  return !!s.form_submitted_at && !!s.call_booked_at;
 }
 
 export function onboardingComplete(s: PortalOnboardingState): boolean {
@@ -61,3 +82,16 @@ export function shouldShowOnboarding(
 export function onboardingVideoUrl(): string {
   return process.env.NEXT_PUBLIC_ONBOARDING_VIDEO_URL || "";
 }
+
+/**
+ * Onboarding-call booking calendar — set NEXT_PUBLIC_OB_CALL_CALENDAR_URL to the
+ * GHL calendar embed URL. Empty → the step explains that the team will reach out
+ * to schedule, and the client can still confirm a call booked another way, so an
+ * unset env var never dead-ends the wizard.
+ */
+export function onboardingCallCalendarUrl(): string {
+  return process.env.NEXT_PUBLIC_OB_CALL_CALENDAR_URL || "";
+}
+
+/** Reward copy — kept in one place so the wizard and the webhook agree. */
+export const ONBOARDING_REWARD_LABEL = "$5 Starbucks gift card";

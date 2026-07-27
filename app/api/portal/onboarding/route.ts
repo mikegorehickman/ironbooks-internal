@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceSupabase } from "@/lib/supabase";
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import { readOnboardingState, onboardingRequiredDone } from "@/lib/portal-onboarding";
+import { maybeSendOnboardingReward, type RewardOutcome } from "@/lib/onboarding-reward";
 
 export const dynamic = "force-dynamic";
 
@@ -63,12 +64,19 @@ export async function POST(request: Request) {
     if (Object.keys(updates).length) updates.profile_updated_at = now;
     state.form_submitted_at = now;
     state.accounts_attested = body.accounts_attested === true;
+  } else if (action === "book_call") {
+    // Client confirms the onboarding call is booked. The GHL appointment webhook
+    // (/api/webhooks/ghl/ob-call) sets the same field authoritatively when it
+    // fires; whichever lands first wins and the other is a no-op.
+    state.call_booked_at = state.call_booked_at || now;
   } else if (action === "ack_docs") {
+    // Retired from the wizard (statements are requested by the bookkeeper now),
+    // but the action still works for any older client mid-flow.
     state.docs_provided_at = now;
   } else if (action === "complete") {
     if (!onboardingRequiredDone(state)) {
       return NextResponse.json(
-        { error: "Please complete the business details and documents steps first." },
+        { error: "Please fill in your business details and book your onboarding call first." },
         { status: 400 }
       );
     }
@@ -98,5 +106,15 @@ export async function POST(request: Request) {
     } catch { /* non-critical */ }
   }
 
-  return NextResponse.json({ ok: true, state });
+  // Finishing onboarding earns the thank-you gift card. Exactly-once and
+  // never-for-staff are enforced inside the helper, which also never throws —
+  // a reward problem must not fail the client's completion.
+  let reward: RewardOutcome | null = null;
+  if (action === "complete") {
+    reward = await maybeSendOnboardingReward(service, clientLinkId, {
+      impersonating: ctxRes.ctx.impersonating || false,
+    });
+  }
+
+  return NextResponse.json({ ok: true, state, reward });
 }

@@ -1,7 +1,12 @@
 import { redirect } from "next/navigation";
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import { createServiceSupabase } from "@/lib/supabase";
-import { readOnboardingState, onboardingComplete, onboardingVideoUrl } from "@/lib/portal-onboarding";
+import {
+  readOnboardingState,
+  onboardingComplete,
+  onboardingVideoUrl,
+  onboardingCallCalendarUrl,
+} from "@/lib/portal-onboarding";
 import { PortalErrorState } from "../error-state";
 import { OnboardingWizard } from "./onboarding-wizard";
 
@@ -30,23 +35,13 @@ export default async function PortalOnboardingPage() {
   // Already finished → send them to their real dashboard.
   if (onboardingComplete(state)) redirect("/portal");
 
-  // Documents we've asked for (open statement requests) — shown in the docs step.
-  let docRequests: Array<{ label: string }> = [];
-  try {
-    const { data } = await (service as any)
-      .from("statement_requests")
-      .select("label, status")
-      .eq("client_link_id", ctx.clientLinkId)
-      .eq("status", "open");
-    docRequests = ((data as any[]) || []).map((r) => ({ label: r.label }));
-  } catch { /* pre-migration env */ }
-
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <OnboardingWizard
         clientName={client?.client_name || ctx.clientName || "your business"}
         jurisdiction={client?.jurisdiction || "US"}
         videoUrl={onboardingVideoUrl()}
+        calendarUrl={onboardingCallCalendarUrl()}
         initial={{
           legal_business_name: client?.legal_business_name || "",
           trade_type: client?.trade_type || "",
@@ -62,7 +57,6 @@ export default async function PortalOnboardingPage() {
           state_province: client?.state_province || "",
         }}
         state={state}
-        docRequests={docRequests}
       />
     </div>
   );
