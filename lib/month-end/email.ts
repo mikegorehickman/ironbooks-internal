@@ -57,7 +57,7 @@ export async function sendMonthEndEmail(
     </div>
     <div style="padding:28px;">
       <h2 style="margin:0 0 8px;color:#0F1F2E;font-size:18px;">Your ${esc(params.period.label)} statements are ready ✅</h2>
-      <p style="margin:0 0 22px;color:#33414E;font-size:14px;line-height:1.55;">Hi ${esc(params.recipientFirstName)}, your books for ${esc(params.period.label)} are closed and reconciled. Your Profit &amp; Loss and Balance Sheet are ready to view securely in your portal.</p>
+      <p style="margin:0 0 22px;color:#33414E;font-size:14px;line-height:1.55;">Hi ${esc(params.recipientFirstName)}, your books for ${esc(params.period.label)} are closed and reconciled. Your financial statements are ready to view securely in your portal.</p>
       <a href="${params.portalUrl}" style="display:inline-block;background:#1A9B8F;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;">Log in to view your statements →</a>
       <div style="background:#FCFCFD;border:1px solid #EEF0F2;border-radius:8px;padding:12px 14px;margin:22px 0 0;color:#8A94A0;font-size:11px;line-height:1.6;">
         <strong style="color:#5B6770;">Notice to Reader:</strong> These statements are prepared from your QuickBooks data and haven't been audited or reviewed. For a true read on your business, look at trends over at least a 90-day period rather than any single month.

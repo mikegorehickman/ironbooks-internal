@@ -871,7 +871,7 @@ export async function POST(
       ``,
       ...lines,
       ``,
-      `See the full Profit & Loss and Balance Sheet in your portal.`,
+      `See your full financial statements in your portal.`,
     ].join("\n");
 
     // 1. Portal notification — amber Bell card in their Messages, red
