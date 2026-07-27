@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { PlayCircle, ClipboardList, Upload, CheckCircle2, Loader2, ArrowRight, ArrowLeft } from "lucide-react";
-import type { PortalOnboardingState } from "@/lib/portal-onboarding";
+import { PlayCircle, ClipboardList, CheckCircle2, Loader2, ArrowRight, ArrowLeft, CalendarCheck, Gift } from "lucide-react";
+import { ONBOARDING_REWARD_LABEL, type PortalOnboardingState } from "@/lib/portal-onboarding";
 
 type Foundation = {
   legal_business_name: string; trade_type: string; entity_type: string;
@@ -23,14 +23,15 @@ const ENTITY_OPTIONS_CA = [
 const EMPLOYEE_OPTIONS = ["Just me (owner-operator)", "2–5", "6–15", "16–30", "30+"];
 
 export function OnboardingWizard({
-  clientName, jurisdiction, videoUrl, initial, state, docRequests,
+  clientName, jurisdiction, videoUrl, calendarUrl, initial, state,
 }: {
   clientName: string;
   jurisdiction: string;
   videoUrl: string;
+  /** GHL onboarding-call calendar embed URL ("" when not configured). */
+  calendarUrl: string;
   initial: Foundation;
   state: PortalOnboardingState;
-  docRequests: Array<{ label: string }>;
 }) {
   const router = useRouter();
   const isCA = String(jurisdiction).toUpperCase().startsWith("CA");
@@ -41,7 +42,7 @@ export function OnboardingWizard({
   const [attested, setAttested] = useState(!!state.accounts_attested);
   const [videoDone, setVideoDone] = useState(!!state.video_watched_at);
   const [formDone, setFormDone] = useState(!!state.form_submitted_at);
-  const [docsDone, setDocsDone] = useState(!!state.docs_provided_at);
+  const [callDone, setCallDone] = useState(!!state.call_booked_at);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -68,7 +69,8 @@ export function OnboardingWizard({
   const steps = [
     { icon: PlayCircle, label: "Welcome", done: videoDone },
     { icon: ClipboardList, label: "Your business", done: formDone },
-    { icon: Upload, label: "Documents", done: docsDone },
+    { icon: CalendarCheck, label: "Book your call", done: callDone },
+    { icon: Gift, label: "Thank you", done: !!state.completed_at },
   ];
 
   async function markVideo() { if (await post({ action: "watch_video" })) { setVideoDone(true); setStep(1); } }
@@ -78,8 +80,14 @@ export function OnboardingWizard({
     }
     if (await post({ action: "submit_form", ...form, accounts_attested: attested })) { setFormDone(true); setStep(2); }
   }
-  async function ackDocs() { if (await post({ action: "ack_docs" })) { setDocsDone(true); await finish(); } }
-  async function finish() { if (await post({ action: "complete" })) router.push("/portal"); }
+  /** Confirm the call is booked, then complete — which triggers the gift card.
+   *  The GHL appointment webhook sets the same flag authoritatively; this is the
+   *  client-side confirmation so the wizard never dead-ends waiting on a hook. */
+  async function confirmCallBooked() {
+    if (!callDone && !(await post({ action: "book_call" }))) return;
+    setCallDone(true);
+    if (await post({ action: "complete" })) setStep(3);
+  }
 
   // "I'll do this later" — snooze the welcome sequence for THIS browser session
   // only (a session cookie, no expiry). They drop into the portal; the sequence
@@ -95,7 +103,7 @@ export function OnboardingWizard({
       <div className="mb-6 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold text-navy">Welcome to Ironbooks, {clientName.split(/[ ,]/)[0]} 👋</h1>
-          <p className="text-sm text-ink-slate mt-1">A quick 3-step setup so we can get your books right. Takes about 5 minutes.</p>
+          <p className="text-sm text-ink-slate mt-1">Four quick steps so we can get your books right — about 5 minutes, and there's a coffee in it for you.</p>
         </div>
         <button
           type="button"
@@ -189,35 +197,69 @@ export function OnboardingWizard({
           </div>
         )}
 
-        {/* STEP 2 — documents */}
+        {/* STEP 2 — book the onboarding call */}
         {step === 2 && (
           <div className="space-y-4">
-            <h2 className="text-lg font-bold text-navy">Send us your documents</h2>
+            <h2 className="text-lg font-bold text-navy">Book your onboarding call</h2>
             <p className="text-sm text-ink-slate">
-              {docRequests.length > 0
-                ? "Here's what we need to get your books accurate. Upload them in Messages, or reply to our email with the files attached."
-                : "Your bookkeeper will request any documents they need shortly. You can finish setup now."}
+              A 30-minute call with your bookkeeper to walk through your books, answer your
+              questions, and agree what happens next. Pick a time that suits you.
             </p>
-            {docRequests.length > 0 && (
-              <ul className="rounded-xl border border-cardline divide-y divide-gray-50">
-                {docRequests.map((d, i) => (
-                  <li key={i} className="px-4 py-2.5 text-sm text-navy flex items-start gap-2">
-                    <ClipboardList size={14} className="text-teal mt-0.5 flex-shrink-0" /> {d.label}
-                  </li>
-                ))}
-              </ul>
+
+            {calendarUrl ? (
+              <div className="rounded-xl border border-cardline overflow-hidden">
+                <iframe
+                  src={calendarUrl}
+                  title="Book your onboarding call"
+                  className="w-full"
+                  style={{ height: 620, border: "none" }}
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-gold-border bg-gold-tint px-4 py-3 text-sm text-gold-deep">
+                The booking calendar isn&apos;t connected yet — your Ironbooks team will reach out to
+                schedule your call. You can still finish setup below.
+              </div>
             )}
-            <Link href="/portal/messages" className="inline-flex items-center gap-2 text-sm font-semibold text-teal border border-teal/30 rounded-lg px-4 py-2.5 hover:bg-teal/5">
-              <Upload size={15} /> Upload documents in Messages
-            </Link>
-            <div className="flex justify-between items-center pt-2">
-              <button onClick={() => setStep(1)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-slate hover:text-navy"><ArrowLeft size={15} /> Back</button>
-              <button onClick={ackDocs} disabled={busy}
+
+            <div className="flex justify-between items-center pt-2 gap-3 flex-wrap">
+              <button onClick={() => setStep(1)} className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-slate hover:text-navy">
+                <ArrowLeft size={15} /> Back
+              </button>
+              <button onClick={confirmCallBooked} disabled={busy}
                 className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg disabled:opacity-60">
-                {busy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} I've sent my documents — finish
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <CalendarCheck size={15} />}
+                {callDone ? "Continue" : "I've booked my call"}
               </button>
             </div>
-            <p className="text-[11px] text-ink-light text-center">Haven't got them all yet? Finish anyway — we'll follow up in Messages.</p>
+            <p className="text-[11px] text-ink-light text-center">
+              Booked it above? We&apos;ll pick that up automatically — this button just moves you along.
+            </p>
+          </div>
+        )}
+
+        {/* STEP 3 — done + thank-you reward */}
+        {step === 3 && (
+          <div className="space-y-4 text-center">
+            <div className="inline-flex w-14 h-14 rounded-full bg-teal-lighter border border-teal-border items-center justify-center">
+              <Gift size={26} className="text-teal-dark" />
+            </div>
+            <h2 className="text-lg font-bold text-navy">You&apos;re all set — coffee&apos;s on us ☕</h2>
+            <p className="text-sm text-ink-slate max-w-md mx-auto leading-relaxed">
+              Thanks for getting your setup done. We&apos;re sending a{" "}
+              <strong className="text-navy">{ONBOARDING_REWARD_LABEL}</strong> to your email as a
+              thank-you — it usually lands within a few minutes.
+            </p>
+            <p className="text-xs text-ink-light max-w-md mx-auto">
+              Your bookkeeper takes it from here. If they need bank statements or anything else,
+              they&apos;ll ask you in Messages.
+            </p>
+            <div className="flex justify-center gap-2 pt-2">
+              <button onClick={() => router.push("/portal")}
+                className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg">
+                <ArrowRight size={15} /> Go to my dashboard
+              </button>
+            </div>
           </div>
         )}
       </div>
