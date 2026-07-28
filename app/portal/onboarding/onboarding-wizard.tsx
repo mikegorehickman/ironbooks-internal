@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PlayCircle, ClipboardList, CheckCircle2, Loader2, ArrowRight, ArrowLeft, CalendarCheck, Gift } from "lucide-react";
 import { ONBOARDING_REWARD_LABEL, type PortalOnboardingState } from "@/lib/portal-onboarding";
-import { OnboardingForm, EMPTY_ANSWERS, type OnboardingAnswers } from "./onboarding-form";
+import { OnboardingForm } from "./onboarding-form";
+import { type OnboardingAnswers } from "@/lib/onboarding-answers";
 
 
 export function OnboardingWizard({

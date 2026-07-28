@@ -11,6 +11,7 @@ import {
   onboardingComplete,
   shouldShowOnboarding,
 } from "../lib/portal-onboarding";
+import { normalizeAnswers, EMPTY_ANSWERS } from "../lib/onboarding-answers";
 
 let pass = 0, fail = 0;
 function ok(name: string, cond: boolean) { cond ? pass++ : (fail++, console.error(`  ✗ ${name}`)); }
@@ -111,4 +112,48 @@ ok("already-completed onboarding does NOT",
   !shouldShowOnboarding({ status: "onboarding", cleanup_completed_at: null, daily_recon_enabled: false, portal_onboarding: { completed_at: "2026-07-01" } }));
 
 console.log(`\nportal-onboarding: ${pass} passed, ${fail} failed`);
+if (fail > 0) process.exit(1);
+
+// ── normalizeAnswers — the guard for the white-screen bug ──────────────────
+// A draft saved before the client-module fix is missing every array/boolean/
+// null field. The form maps over those arrays, so an undefined one is an
+// "Application error", not a blank input.
+{
+  ok("EMPTY_ANSWERS is a real object, not a client-reference proxy",
+    typeof EMPTY_ANSWERS === "object" && Object.keys(EMPTY_ANSWERS).length === 33);
+
+  // The exact draft shape that crashed production: 21 scalar keys, no arrays.
+  const brokenDraft = {
+    email: "a@b.com", country: "USA", firstName: "Mike", lastName: "GH",
+    fiscalYearEnd: "January", incorporationDate: "2026-07-02", lastTaxReturnYear: "2024",
+  };
+  const n = normalizeAnswers(brokenDraft);
+  ok("missing staff becomes []", Array.isArray(n.staff) && n.staff.length === 0);
+  ok("missing accounts becomes []", Array.isArray(n.accounts) && n.accounts.length === 0);
+  ok("missing leaseFiles becomes []", Array.isArray(n.leaseFiles) && n.leaseFiles.length === 0);
+  ok("missing taxReturnFile becomes null", n.taxReturnFile === null);
+  ok("missing accountAttestation becomes false", n.accountAttestation === false);
+  ok("missing string fields become ''", n.additionalNotes === "" && n.gstRegistered === "");
+  ok("real values survive", n.email === "a@b.com" && n.country === "USA" && n.lastTaxReturnYear === "2024");
+
+  // Fiscal year end is an <input type="date"> now — a month name can't render.
+  eq("legacy month name is dropped", n.fiscalYearEnd, "");
+  eq("ISO date is kept", normalizeAnswers({ fiscalYearEnd: "2026-12-31" }).fiscalYearEnd, "2026-12-31");
+  eq("free-text date is dropped", normalizeAnswers({ fiscalYearEnd: "Dec 31" }).fiscalYearEnd, "");
+  eq("ISO incorporation date is kept", n.incorporationDate, "2026-07-02");
+
+  // Hostile / junk input must not throw — this runs on every page load.
+  for (const junk of [null, undefined, 0, "nope", [], { staff: "not an array" }, { accounts: [null, 3] }]) {
+    const r = normalizeAnswers(junk as any);
+    ok(`junk input ${JSON.stringify(junk)} yields safe arrays`,
+      Array.isArray(r.staff) && Array.isArray(r.accounts) && Array.isArray(r.leaseFiles));
+  }
+  ok("garbage account rows are coerced to the right shape",
+    normalizeAnswers({ accounts: [null, 3] }).accounts.every(
+      (r) => typeof r.institution === "string" && typeof r.accountType === "string" && typeof r.last4 === "string"));
+  ok("country falls back to the default when blank",
+    normalizeAnswers({}).country === "Canada");
+}
+
+console.log(`portal-onboarding (incl. normalizeAnswers): ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

@@ -9,7 +9,11 @@ import {
 } from "@/lib/portal-onboarding";
 import { PortalErrorState } from "../error-state";
 import { OnboardingWizard } from "./onboarding-wizard";
-import { EMPTY_ANSWERS } from "./onboarding-form";
+// Must come from the plain module, NOT from onboarding-form.tsx — that file is
+// "use client", and a server component importing a value out of a client module
+// gets a reference proxy with zero keys, so the spread below would silently do
+// nothing and the form would receive undefined arrays.
+import { EMPTY_ANSWERS, normalizeAnswers } from "@/lib/onboarding-answers";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +47,7 @@ export default async function PortalOnboardingPage() {
         jurisdiction={client?.jurisdiction || "US"}
         videoUrl={onboardingVideoUrl()}
         calendarUrl={onboardingCallCalendarUrl()}
-        initialAnswers={{
+        initialAnswers={normalizeAnswers({
           ...EMPTY_ANSWERS,
           // Pre-fill from the client profile so they aren't retyping what we
           // already know, then let any saved draft win over it.
@@ -67,7 +71,7 @@ export default async function PortalOnboardingPage() {
           cardsUsed: client?.uses_business_cards || "",
           payrollProvider: client?.payroll_provider || "",
           ...(state.form_draft || {}),
-        }}
+        })}
         state={state}
       />
     </div>

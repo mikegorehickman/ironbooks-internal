@@ -5,6 +5,9 @@ import { createBrowserClient } from "@supabase/ssr";
 import {
   Loader2, ArrowRight, ArrowLeft, Plus, Trash2, Upload, FileCheck2, X, Save, CheckCircle2,
 } from "lucide-react";
+// Types + EMPTY_ANSWERS live in a plain module so the server component that
+// builds the initial answers gets the real object, not a client-reference proxy.
+import { normalizeAnswers, type OnboardingAnswers, type UploadedFile } from "@/lib/onboarding-answers";
 
 /**
  * The onboarding intake form — the long one, broken into pages.
@@ -28,10 +31,6 @@ const TRADES = [
 const CORP_TYPES = [
   "Sole Proprietorship", "Partnership", "Corporation (Inc.)", "LLC", "S-Corp", "Other",
 ];
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
 const REVENUE = [
   "Under $100K", "$100K – $250K", "$250K – $500K", "$500K – $1M", "$1M – $3M", "Over $3M",
 ];
@@ -51,42 +50,6 @@ const STAFF_ROLES = ["Office", "Field", "Painter"];
 const ACCOUNT_TYPES = ["Checking", "Savings", "Credit Card", "Loan", "Line of Credit", "Investment"];
 
 const TAX_YEARS = Array.from({ length: 10 }, (_, i) => String(new Date().getFullYear() - i));
-
-export interface StaffRow { name: string; role: string }
-export interface AccountRow { institution: string; accountType: string; last4: string }
-export interface UploadedFile { path: string; name: string }
-
-export interface OnboardingAnswers {
-  firstName: string; lastName: string; email: string; phone: string;
-  companyName: string; tradeType: string; corporationType: string;
-  fiscalYearEnd: string; country: string; provinceState: string;
-  annualRevenue: string; taxesUpToDate: string; lastBookkeeper: string; accountingSoftware: string;
-  employeeCount: string; keepsReceipts: string; bankConnected: string; cardsUsed: string;
-  incorporationDate: string; lastTaxReturnYear: string; taxReturnFile: UploadedFile | null;
-  gstRegistered: string; gstFrequency: string; gstQuarterEndMonths: string;
-  payrollProvider: string; payrollProviderOther: string;
-  staff: StaffRow[];
-  hasFinancedVehicles: string; leaseFiles: UploadedFile[];
-  accounts: AccountRow[];
-  accountAttestation: boolean; accountAttestationTimestamp: string | null;
-  additionalNotes: string;
-}
-
-export const EMPTY_ANSWERS: OnboardingAnswers = {
-  firstName: "", lastName: "", email: "", phone: "",
-  companyName: "", tradeType: "", corporationType: "",
-  fiscalYearEnd: "", country: "Canada", provinceState: "",
-  annualRevenue: "", taxesUpToDate: "", lastBookkeeper: "", accountingSoftware: "",
-  employeeCount: "", keepsReceipts: "", bankConnected: "", cardsUsed: "",
-  incorporationDate: "", lastTaxReturnYear: "", taxReturnFile: null,
-  gstRegistered: "", gstFrequency: "", gstQuarterEndMonths: "",
-  payrollProvider: "", payrollProviderOther: "",
-  staff: [],
-  hasFinancedVehicles: "", leaseFiles: [],
-  accounts: [],
-  accountAttestation: false, accountAttestationTimestamp: null,
-  additionalNotes: "",
-};
 
 const PAGES = [
   "You & your business",
@@ -114,7 +77,10 @@ export function OnboardingForm({
   onSubmit: (answers: OnboardingAnswers) => Promise<void>;
   busy: boolean;
 }) {
-  const [a, setA] = useState<OnboardingAnswers>(initial);
+  // Normalize on mount: drafts are free-form jsonb and a missing array field is
+  // a white screen, not a blank input. Cheap insurance for the rows already
+  // saved in the broken shape.
+  const [a, setA] = useState<OnboardingAnswers>(() => normalizeAnswers(initial));
   const [page, setPage] = useState(() =>
     Math.min(Math.max(Math.trunc(initialPage) || 0, 0), PAGES.length - 1)
   );
@@ -226,7 +192,7 @@ export function OnboardingForm({
               <Field label="Company / business name" required v={a.companyName} on={(v) => set("companyName", v)} placeholder="ABC Painting Inc." />
               <Select label="Type of trade / business" required v={a.tradeType} on={(v) => set("tradeType", v)} options={TRADES} />
               <Select label="Corporation type" required v={a.corporationType} on={(v) => set("corporationType", v)} options={CORP_TYPES} />
-              <Select label="Fiscal year end" v={a.fiscalYearEnd} on={(v) => set("fiscalYearEnd", v)} options={MONTHS} />
+              <Field label="Fiscal year end" type="date" v={a.fiscalYearEnd} on={(v) => set("fiscalYearEnd", v)} />
               <Select label="Country" required v={a.country} on={(v) => set("country", v)} options={["Canada", "USA"]} />
               <Field label="Province / state" v={a.provinceState} on={(v) => set("provinceState", v)} placeholder="e.g. Ontario, British Columbia, California" />
             </Grid>
@@ -450,7 +416,7 @@ export function OnboardingForm({
             disabled={busy}
             className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg disabled:opacity-60"
           >
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />} Next
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />} Save &amp; continue
           </button>
         ) : (
           <button
@@ -465,8 +431,8 @@ export function OnboardingForm({
       </div>
 
       <p className="text-[11px] text-ink-light">
-        Your answers are saved each time you hit Next, so you can close this and come back whenever suits —
-        nothing is lost.
+        Your answers are saved each time you hit Save &amp; continue, so you can close this and come back
+        whenever suits — nothing is lost.
       </p>
     </div>
   );
