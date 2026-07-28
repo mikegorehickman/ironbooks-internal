@@ -75,10 +75,28 @@ async function main() {
   ok("text part stands alone (not a stripped HTML dump)",
     resend.text.includes("Hi Dave,") && !resend.text.includes("<div"));
 
-  // ── The promise made must match the actual link lifetime
-  //    (ACTIVATION_TTL_DAYS = 7 in lib/portal-invite.ts).
-  ok("html states the real 7-day expiry", resend.html.includes("7 days"));
-  ok("text states the real 7-day expiry", resend.text.includes("7 days"));
+  // ── The expiry we STATE must never exceed the real link lifetime.
+  //
+  // We deliberately under-promise: the copy says 3 days, the link lives 7. That
+  // gives urgency without locking anyone out on day four — which matters doubly
+  // for the re-invite, whose whole job is rescuing someone who already couldn't
+  // sign in. The invariant is STATED <= ACTUAL and it must never invert. The
+  // test can import both numbers; the email module can't (circular).
+  const { STATED_LINK_DAYS } = await import("../lib/client-comms");
+  const { ACTIVATION_TTL_DAYS } = await import("../lib/portal-invite");
+  ok(`stated expiry (${STATED_LINK_DAYS}d) never exceeds the real TTL (${ACTIVATION_TTL_DAYS}d)`,
+    STATED_LINK_DAYS <= ACTIVATION_TTL_DAYS);
+  ok("stated expiry is a positive number of days", STATED_LINK_DAYS >= 1);
+
+  for (const [label, m] of [["resend", resend], ["first", first]] as const) {
+    ok(`${label}: html states the expiry in days`, m.html.includes(`${STATED_LINK_DAYS} days`));
+    ok(`${label}: text states the expiry in days`, m.text.includes(`${STATED_LINK_DAYS} days`));
+    // Prominent, not buried: it appears beside the button AND in the footer.
+    ok(`${label}: expiry appears twice in the html (near CTA + footer)`,
+      (m.html.match(new RegExp(`expires in ${STATED_LINK_DAYS} days`, "g")) || []).length >= 2);
+    ok(`${label}: uses "expires in", not vague wording`,
+      m.text.includes("expires in") && !m.text.includes("a little while"));
+  }
 
   // ── Value, not just a link — the whole point of the rewrite.
   ok("resend body names what's waiting, not just the link",

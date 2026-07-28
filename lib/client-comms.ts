@@ -14,12 +14,24 @@
 
 import { resolveFromEmail } from "./email-sender";
 
-/** Human wording for the activation-link lifetime. Kept in sync BY HAND with
- *  ACTIVATION_TTL_DAYS in lib/portal-invite.ts — importing it would be circular
- *  (that module imports sendPortalInviteEmail from this one). If you change the
- *  TTL there, change the words here: telling a client "7 days" when the link
- *  dies in one is exactly the kind of small lie that costs a login. */
-const ACTIVATION_TTL_DAYS_TEXT = "7 days";
+/**
+ * Days we TELL the client the link lasts.
+ *
+ * Deliberately shorter than the real ACTIVATION_TTL_DAYS (7) in
+ * lib/portal-invite.ts. Stating 3 creates a reason to act now, while the link
+ * actually keeps working for 7 — so the urgency is real but nobody gets locked
+ * out on day four. That direction is the safe one: the promise can only be
+ * over-delivered, never broken.
+ *
+ * The invariant is STATED <= ACTUAL, and it must never invert. Telling someone
+ * a link lasts longer than it does is the small lie that costs a login — which
+ * matters doubly here, because this email exists to rescue clients who already
+ * couldn't sign in. Enforced in scripts/test-portal-invite-email.ts, which can
+ * import both numbers (the test isn't part of the import cycle that stops this
+ * module reading ACTIVATION_TTL_DAYS directly).
+ */
+export const STATED_LINK_DAYS = 3;
+const ACTIVATION_TTL_DAYS_TEXT = `${STATED_LINK_DAYS} days`;
 
 /**
  * "Lisa at Ironbooks <noreply@mail.ironbooks.com>" — a From line that reads as a
@@ -332,7 +344,7 @@ export async function sendPortalInviteEmail(params: {
     ``,
     `${cta}: ${params.actionLink}`,
     ``,
-    `One tap and you're in — there's no password to remember. The link works for the next ${ACTIVATION_TTL_DAYS_TEXT} and is just for you, so please don't forward it.`,
+    `One tap and you're in — there's no password to remember. This link expires in ${ACTIVATION_TTL_DAYS_TEXT} and is just for you, so please don't forward it.`,
     ``,
     `If it's stopped working, reply to this email and we'll send another straight away.`,
     ``,
@@ -380,7 +392,8 @@ export async function sendPortalInviteEmail(params: {
         ${cta}
       </a>
       <p style="color:#5A6875;font-size:13px;line-height:1.55;margin:14px 0 0;text-align:center;">
-        One tap and you're in — <strong>no password to remember</strong>.
+        One tap and you're in — <strong>no password to remember</strong>.<br/>
+        <span style="color:#954E44;">This link expires in ${ACTIVATION_TTL_DAYS_TEXT}.</span>
       </p>
     </div>
 
@@ -396,7 +409,7 @@ export async function sendPortalInviteEmail(params: {
 
     <div style="background:#F9FAFB;padding:16px 28px;border-top:1px solid #EDF1F4;">
       <p style="color:#8A94A0;font-size:11px;line-height:1.6;margin:0;">
-        This link is just for you and works for the next ${ACTIVATION_TTL_DAYS_TEXT} — please don't forward it.
+        This link is just for you and expires in ${ACTIVATION_TTL_DAYS_TEXT} — please don't forward it.
         If it's stopped working, reply and we'll send a new one.<br/>
         Button not working? Paste this into your browser:<br/>
         <a href="${params.actionLink}" style="color:#2F6F6C;word-break:break-all;">${params.actionLink}</a>
