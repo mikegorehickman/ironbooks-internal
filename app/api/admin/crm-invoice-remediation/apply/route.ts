@@ -3,7 +3,7 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, voidInvoice, voidPayment, fetchAllAccounts } from "@/lib/qbo";
 import { getCompanyClosingDate } from "@/lib/qbo-reclass";
 import { buildRemediationPreview } from "../preview/route";
-import { applyDepositToInvoice, findArAccount } from "@/lib/crm-invoice-apply";
+import { applyDepositToInvoice, findArAccount, findFeeAccount, matchDepositToInvoicePayment } from "@/lib/crm-invoice-apply";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -15,10 +15,18 @@ const MAX_PER_PASS = 40;
  *   { client_link_id, start?, end?, invoice_ids: string[],
  *     dry_run?: boolean (default TRUE), allow_review?: boolean (default false) }
  *
- * For each selected recognized CRM invoice: VOID its phantom UF payment(s),
- * then VOID the invoice (keeps the doc, zeroes the income). The real bank
- * deposit is never touched. This is the "recognize deposits only, remove the
- * duplicate invoices" fix, executed on the ledger.
+ * DEFAULT (`match`, Mike 2026-07-28): for each selected invoice, MATCH the real
+ * bank deposit to the invoice's Undeposited-Funds payment — the QBO-native fix.
+ * The duplicate income line on the deposit becomes a link to the payment (plus a
+ * fee line when a processor withheld one), so the invoice stays PAID, UF clears,
+ * revenue is recognized once, and the deposit total — hence bank rec — is
+ * unchanged. Nothing is voided.
+ *
+ * Per-invoice `actions` can opt a row into the legacy paths instead:
+ *   "void"          — void the phantom payment(s) + the invoice (destroys A/R
+ *                     history; only for genuinely junk CRM docs).
+ *   "apply_deposit" — keep the invoice, repoint the deposit line to A/R as a
+ *                     customer credit (depends on "auto-apply credits").
  *
  * Hard guards — every one re-checked server-side, client input never trusted:
  *   1. Admin/lead only.
@@ -88,6 +96,9 @@ export async function POST(request: Request) {
   const summary = {
     dry_run: dryRun,
     requested: ids.length,
+    would_match: 0,
+    matched: 0,
+    needs_fee_account: 0,
     would_void_invoices: 0,
     would_void_payments: 0,
     voided_invoices: 0,
@@ -103,15 +114,28 @@ export async function POST(request: Request) {
     details: [] as Array<{ invoiceId: string; doc: string | null; outcome: string; amount: number }>,
   };
 
-  const memo = `SNAP CRM revenue remediation by ${(actor as any)?.full_name || "senior"} — voided duplicate CRM invoice (recognize deposits only)`;
+  const memo = `SNAP CRM revenue remediation by ${(actor as any)?.full_name || "senior"} — matched bank deposits to the invoice payments (revenue recognized once)`;
 
-  // A/R account — only needed when any invoice takes the keep-invoice path.
+  // Chart lookups: A/R for the legacy keep-invoice path, and a merchant/bank-fee
+  // account (auto-detected) to absorb payment-vs-deposit gaps when matching.
+  const wantsApplyDeposit = Object.values(actions).includes("apply_deposit");
+  const wantsMatch = selected.some((id) => (actions[id] || "match") === "match");
   let arAccount: { id: string; name: string } | null = null;
-  if (Object.values(actions).includes("apply_deposit")) {
+  let feeAccount: { id: string; name: string } | null = null;
+  if (wantsApplyDeposit || wantsMatch) {
     const all = await fetchAllAccounts(realm, token);
-    arAccount = findArAccount(all);
-    if (!arAccount) {
-      return NextResponse.json({ error: "No active Accounts Receivable account in this QBO file — can't apply deposits to invoices" }, { status: 400 });
+    if (wantsApplyDeposit) {
+      arAccount = findArAccount(all);
+      if (!arAccount) {
+        return NextResponse.json({ error: "No active Accounts Receivable account in this QBO file — can't apply deposits to invoices" }, { status: 400 });
+      }
+    }
+    if (wantsMatch) {
+      // Explicit override wins; otherwise auto-detect. Null is fine — only rows
+      // with an actual gap need it, and those report needs_fee_account.
+      feeAccount = body.fee_account_id
+        ? { id: String(body.fee_account_id), name: String(body.fee_account_name || "Fees") }
+        : findFeeAccount(all);
     }
   }
   const snapshot = async (kind: string, id: string, entity: any): Promise<void> => {
@@ -129,7 +153,11 @@ export async function POST(request: Request) {
     }
     const id = selected[i];
     const plan = planById.get(id)!;
-    const action = actions[id] === "apply_deposit" ? "apply_deposit" : "void";
+    // DEFAULT = match (Mike 2026-07-28). Voiding a real invoice guts A/R
+    // history; matching the deposit to the invoice's UF payment is what a
+    // bookkeeper does in QBO. "void" / "apply_deposit" stay as explicit opt-ins.
+    const requested = actions[id] || "match";
+    const action = requested === "void" || requested === "apply_deposit" ? requested : "match";
 
     if (!plan.safe && !allowReview) {
       summary.skipped_review++;
@@ -139,6 +167,50 @@ export async function POST(request: Request) {
     if (closingDate && plan.date && plan.date <= closingDate) {
       summary.skipped_closed++;
       summary.details.push({ invoiceId: id, doc: plan.docNumber, outcome: `skipped: closed period (${closingDate})`, amount: plan.total });
+      continue;
+    }
+
+    // ── MATCH PATH (default): deposit ↔ the invoice's UF payment ──
+    // Nothing is voided: the invoice stays paid, the payment leaves Undeposited
+    // Funds, revenue recognizes once, and the deposit total is unchanged.
+    if (action === "match") {
+      if (!plan.matchedDeposit) {
+        summary.skipped_no_pair++;
+        summary.details.push({ invoiceId: id, doc: plan.docNumber, outcome: "skipped: no confident deposit match — matching needs a pair", amount: plan.total });
+        continue;
+      }
+      if (plan.payments.length === 0) {
+        summary.skipped_no_pair++;
+        summary.details.push({
+          invoiceId: id,
+          doc: plan.docNumber,
+          outcome: "skipped: invoice has no payment to match (it's open) — the deposit is the cash; receive payment against it in QBO",
+          amount: plan.total,
+        });
+        continue;
+      }
+      const out = await matchDepositToInvoicePayment({
+        realm,
+        token,
+        invoiceId: id,
+        payments: plan.payments.map((p) => ({ id: p.id, amount: p.amount })),
+        deposit: { txn_id: plan.matchedDeposit.txn_id, account: plan.matchedDeposit.account, amount: plan.matchedDeposit.amount },
+        feeAccount,
+        dryRun,
+        closingDate,
+        snapshot,
+      });
+      if (out.outcome === "would_match") summary.would_match++;
+      else if (out.outcome === "matched") summary.matched++;
+      else if (out.outcome === "needs_fee_account") summary.needs_fee_account++;
+      else if (out.outcome === "failed") summary.failed++;
+      else if (out.outcome === "skipped_closed") summary.skipped_closed++;
+      summary.details.push({
+        invoiceId: id,
+        doc: plan.docNumber,
+        outcome: `${out.outcome}${out.detail ? `: ${out.detail}` : ""}`,
+        amount: plan.total,
+      });
       continue;
     }
 
