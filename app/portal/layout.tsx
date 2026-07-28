@@ -59,7 +59,37 @@ export default async function PortalLayout({ children }: { children: React.React
   // messages, published statements, billing and settings. A persistent banner
   // keeps asking them to reconnect.
   const skipQbo = (await cookies()).get(SKIP_QBO_COOKIE)?.value === "1";
-  if (!ctxResult.ok && ctxResult.code === "no_qbo" && !skipQbo) {
+
+  // ONBOARDING OUTRANKS THE QBO GATE. A client who hasn't onboarded yet
+  // usually has no QuickBooks connection — connecting it is part of what
+  // onboarding walks them through. Gating them on "Reconnect QuickBooks" is a
+  // dead end: the reconnect card replaced the whole portal, so a new client
+  // never reached the wizard, and "Skip for now" dropped them on Messages.
+  //
+  // Rather than redirect from here (a layout can't see the pathname, so it
+  // would loop on /portal/onboarding itself), fall through into the SAME
+  // degraded mode the skip-for-now cookie uses. Then /portal redirects to
+  // /portal/onboarding on its own, the wizard renders, and finishing it sends
+  // them back to /portal — which is the flow we want.
+  let onboardingOverridesGate = false;
+  if (!ctxResult.ok && ctxResult.code === "no_qbo" && !skipQbo && ctxResult.meta.clientLinkId) {
+    try {
+      const { data: obRow } = await (service as any)
+        .from("client_links")
+        .select("status, cleanup_completed_at, daily_recon_enabled, portal_onboarding")
+        .eq("id", ctxResult.meta.clientLinkId)
+        .single();
+      const { shouldShowOnboarding, onboardingRequiredDone, readOnboardingState } =
+        await import("@/lib/portal-onboarding");
+      onboardingOverridesGate =
+        !!obRow && shouldShowOnboarding(obRow) && !onboardingRequiredDone(readOnboardingState(obRow));
+    } catch {
+      // Can't tell → show the reconnect card, the safer default.
+      onboardingOverridesGate = false;
+    }
+  }
+
+  if (!ctxResult.ok && ctxResult.code === "no_qbo" && !skipQbo && !onboardingOverridesGate) {
     return (
       <QboDisconnectedState
         clientLinkId={ctxResult.meta.clientLinkId || null}
@@ -72,7 +102,7 @@ export default async function PortalLayout({ children }: { children: React.React
   }
   // Skipped: re-resolve in degraded mode (no realm/token, qboDisconnected:true)
   // so the shell + every DB-backed page still renders.
-  if (!ctxResult.ok && ctxResult.code === "no_qbo" && skipQbo) {
+  if (!ctxResult.ok && ctxResult.code === "no_qbo" && (skipQbo || onboardingOverridesGate)) {
     ctxResult = await resolvePortalContextAllowNoQbo();
   }
 
@@ -449,7 +479,7 @@ function QboDisconnectedState({
             {/* Escape hatch — a dead token shouldn't lock the client out of
                 their messages, published statements or billing. */}
             <a
-              href="/api/portal/skip-qbo?to=/portal/messages"
+              href="/api/portal/skip-qbo?to=/portal"
               className="block w-full text-center px-5 py-2.5 rounded-lg border border-cardline hover:bg-canvas text-ink text-sm font-medium transition-colors"
             >
               Skip for now — take me to my portal
