@@ -14,6 +14,31 @@
 
 import { resolveFromEmail } from "./email-sender";
 
+/** Human wording for the activation-link lifetime. Kept in sync BY HAND with
+ *  ACTIVATION_TTL_DAYS in lib/portal-invite.ts — importing it would be circular
+ *  (that module imports sendPortalInviteEmail from this one). If you change the
+ *  TTL there, change the words here: telling a client "7 days" when the link
+ *  dies in one is exactly the kind of small lie that costs a login. */
+const ACTIVATION_TTL_DAYS_TEXT = "7 days";
+
+/**
+ * "Lisa at Ironbooks <noreply@mail.ironbooks.com>" — a From line that reads as a
+ * note from their bookkeeper rather than a system notification.
+ *
+ * resolveFromEmail returns a FULL header ("Ironbooks <addr>"), not a bare
+ * address, so the address has to be unwrapped first. Wrapping the whole thing
+ * produced `Lisa at Ironbooks <Ironbooks <addr>>` — nested angle brackets, which
+ * is a malformed header. Caught by rendering the email rather than reading it.
+ *
+ * Goes through resolveFromEmail rather than a hardcoded domain so its
+ * sandbox-sender guard still applies.
+ */
+function personalFrom(firstName: string): string {
+  const resolved = resolveFromEmail(process.env.SUPPORT_FROM_EMAIL);
+  const address = resolved.match(/<([^>]+)>/)?.[1] || resolved;
+  return `${firstName} at Ironbooks <${address}>`;
+}
+
 export const CLIENT_UPLOADS_BUCKET = "client-uploads";
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // keep in sync with bucket fileSizeLimit
 
@@ -238,69 +263,156 @@ export async function sendPortalInviteEmail(params: {
   /** The Supabase action_link from admin.generateLink — clicking it signs the
    *  client in via /auth/callback. */
   actionLink: string;
-  /** Resend of an existing client's link vs. a first-time invite — only changes
-   *  the wording. */
+  /** Resend of an existing client's link vs. a first-time invite. */
   isResend?: boolean;
+  /** Bookkeeper's first name, when known — a note from a person outperforms a
+   *  note from a system, and these clients know their bookkeeper by name. */
+  bookkeeperName?: string | null;
 }): Promise<boolean> {
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const firstName = (params.fullName || "").trim().split(/\s+/)[0] || "there";
-  const heading = params.isResend
-    ? "Here's your new sign-in link"
-    : "You're invited to your Ironbooks portal";
-  const introHtml = params.isResend
-    ? `Here's a fresh, secure link to sign in to your Ironbooks portal for <strong>${esc(
-        params.clientName
-      )}</strong>.`
-    : `Your Ironbooks bookkeeping team has set up a secure online portal for <strong>${esc(
-        params.clientName
-      )}</strong> — Advancing Financial Literacy In The Trades. Set up your access and take a look whenever you like.`;
-  const cta = params.isResend ? "Sign in to your portal" : "Set up your access";
+  const client = esc(params.clientName);
+  const bk = (params.bookkeeperName || "").trim().split(/\s+/)[0];
 
+  // ── What actually goes in the email ──────────────────────────────────────
+  //
+  // The old version was a link-delivery mechanism: "here's a fresh, secure link
+  // to sign in". Accurate, and no reason on earth for a painting contractor to
+  // stop what they're doing and click it. Every line below either tells them
+  // what is waiting or removes a reason not to bother.
+  //
+  // The three items are real portal pages (Profit & Loss, Who owes you, Ask the
+  // AI), not aspirational copy — promising a feature that isn't there is how you
+  // teach someone to ignore your emails.
+  const subject = params.isResend
+    ? `${firstName}, your books are up to date — here's your new link`
+    : `${firstName}, your Ironbooks portal is ready`;
+
+  // Preheader: the grey line after the subject in most inboxes. Left unset it
+  // leaks whatever the HTML starts with, which looks broken.
+  const preheader = params.isResend
+    ? `A fresh sign-in link for ${params.clientName}. One tap, no password.`
+    : `See your profit, who owes you money, and ask us anything. One tap, no password.`;
+
+  const openingLine = params.isResend
+    ? `Your last sign-in link expired, so here's a fresh one. Your books for <strong>${client}</strong> are up to date and waiting for you.`
+    : `Your Ironbooks team has your books for <strong>${client}</strong> up to date, and set you up with somewhere to see them any time you want.`;
+
+  const cta = params.isResend ? "Open my books" : "Open my books";
+
+  const BULLETS: Array<[string, string]> = [
+    ["Where you actually stand", "Profit and loss for any month — no spreadsheets, no waiting."],
+    ["Who owes you money", "Every unpaid invoice, oldest first, so nothing slips."],
+    ["Ask us anything", "Type a question about your numbers and get a straight answer."],
+  ];
+
+  const signoff = bk
+    ? `${esc(bk)} and the Ironbooks team`
+    : `Your Ironbooks team`;
+
+  // ── Plain-text part ──────────────────────────────────────────────────────
+  // Written to stand on its own. Some clients read text-only, and a text part
+  // that's obviously a stripped-down HTML email reads like spam.
   const text = [
     `Hi ${firstName},`,
     ``,
     params.isResend
-      ? `Here's a fresh link to sign in to your Ironbooks portal for ${params.clientName}.`
-      : `Your Ironbooks bookkeeping team has set up a secure online portal for ${params.clientName} — Advancing Financial Literacy In The Trades.`,
+      ? `Your last sign-in link expired, so here's a fresh one. Your books for ${params.clientName} are up to date and waiting for you.`
+      : `Your Ironbooks team has your books for ${params.clientName} up to date, and set you up with somewhere to see them any time you want.`,
+    ``,
+    ...BULLETS.map(([t, d]) => `• ${t} — ${d}`),
     ``,
     `${cta}: ${params.actionLink}`,
     ``,
-    `This link is personal to you — please don't forward it, and it expires after a little while for your security. If it stops working, ask your bookkeeper to re-send it.`,
+    `One tap and you're in — there's no password to remember. The link works for the next ${ACTIVATION_TTL_DAYS_TEXT} and is just for you, so please don't forward it.`,
+    ``,
+    `If it's stopped working, reply to this email and we'll send another straight away.`,
+    ``,
+    `— ${bk ? `${bk} and the Ironbooks team` : "Your Ironbooks team"}`,
   ].join("\n");
 
+  const bulletsHtml = BULLETS.map(
+    ([t, d]) => `
+        <tr>
+          <td style="padding:0 0 14px;vertical-align:top;width:26px;">
+            <div style="width:18px;height:18px;border-radius:50%;background:#E6F1F0;color:#2F6F6C;font-size:11px;font-weight:700;line-height:18px;text-align:center;">&#10003;</div>
+          </td>
+          <td style="padding:0 0 14px;vertical-align:top;">
+            <div style="color:#152F46;font-size:14px;font-weight:700;line-height:1.4;">${t}</div>
+            <div style="color:#5A6875;font-size:13px;line-height:1.5;margin-top:2px;">${d}</div>
+          </td>
+        </tr>`
+  ).join("");
+
   const html = `
-<div style="background:#F4F5F7;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;">
-    <div style="background:#0F1F2E;padding:22px 28px;">
-      <div style="color:#ffffff;font-size:18px;font-weight:700;">Ironbooks</div>
-      <div style="color:#8CD3CC;font-size:12px;margin-top:2px;">Advancing Financial Literacy In The Trades</div>
+<div style="background:#F5F7F9;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${esc(preheader)}</div>
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #E3E8ED;">
+
+    <div style="background:#152F46;padding:24px 28px;">
+      <div style="color:#ffffff;font-size:19px;font-weight:700;letter-spacing:-0.01em;">Ironbooks</div>
+      <div style="color:#8CD3CC;font-size:12px;margin-top:3px;">Advancing Financial Literacy In The Trades</div>
     </div>
-    <div style="padding:28px;">
-      <h2 style="margin:0 0 14px;color:#0F1F2E;font-size:18px;">${heading}</h2>
-      <p style="color:#33414E;font-size:14px;line-height:1.6;margin:0 0 8px;">Hi ${esc(
-        firstName
-      )},</p>
-      <p style="color:#33414E;font-size:14px;line-height:1.6;margin:0 0 22px;">${introHtml}</p>
-      <a href="${params.actionLink}" style="display:inline-block;background:#1A9B8F;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;padding:12px 26px;border-radius:8px;">${cta}</a>
-      <p style="color:#8A94A0;font-size:12px;margin:24px 0 0;line-height:1.55;">
-        This link is personal to you — please don't forward it, and it expires after a little while for your security.<br/>
-        If the button doesn't work, copy and paste this into your browser:<br/>
-        <a href="${params.actionLink}" style="color:#1A9B8F;word-break:break-all;">${params.actionLink}</a>
+
+    <div style="padding:30px 28px 8px;">
+      <h1 style="margin:0 0 16px;color:#152F46;font-size:21px;line-height:1.3;font-weight:700;">
+        ${params.isResend ? "Your books are ready when you are" : "Your books, whenever you want them"}
+      </h1>
+      <p style="color:#33414E;font-size:15px;line-height:1.6;margin:0 0 6px;">Hi ${esc(firstName)},</p>
+      <p style="color:#33414E;font-size:15px;line-height:1.6;margin:0 0 24px;">${openingLine}</p>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 26px;">
+        ${bulletsHtml}
+      </table>
+
+      <!-- Single full-width tap target: most of these clients open email on a
+           phone with paint on their hands. -->
+      <a href="${params.actionLink}"
+         style="display:block;background:#3E908D;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;padding:15px 20px;border-radius:10px;text-align:center;">
+        ${cta}
+      </a>
+      <p style="color:#5A6875;font-size:13px;line-height:1.55;margin:14px 0 0;text-align:center;">
+        One tap and you're in — <strong>no password to remember</strong>.
+      </p>
+    </div>
+
+    <div style="padding:20px 28px 26px;">
+      <div style="border-top:1px solid #EDF1F4;padding-top:18px;">
+        <p style="color:#33414E;font-size:14px;line-height:1.6;margin:0 0 4px;">Anything look off, or want something explained?</p>
+        <p style="color:#5A6875;font-size:13px;line-height:1.6;margin:0;">
+          Just reply to this email — it comes straight to us.
+        </p>
+        <p style="color:#152F46;font-size:14px;line-height:1.6;margin:16px 0 0;">&mdash; ${signoff}</p>
+      </div>
+    </div>
+
+    <div style="background:#F9FAFB;padding:16px 28px;border-top:1px solid #EDF1F4;">
+      <p style="color:#8A94A0;font-size:11px;line-height:1.6;margin:0;">
+        This link is just for you and works for the next ${ACTIVATION_TTL_DAYS_TEXT} — please don't forward it.
+        If it's stopped working, reply and we'll send a new one.<br/>
+        Button not working? Paste this into your browser:<br/>
+        <a href="${params.actionLink}" style="color:#2F6F6C;word-break:break-all;">${params.actionLink}</a>
       </p>
     </div>
   </div>
+
   <div style="max-width:560px;margin:12px auto 0;text-align:center;color:#9AA3AD;font-size:11px;">
-    Sent by your Ironbooks bookkeeping team for ${esc(params.clientName)}.
+    Sent by your Ironbooks bookkeeping team for ${client}.
   </div>
 </div>`;
 
   return sendResendEmail({
     to: [params.to],
     replyTo: process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com",
-    subject: params.isResend
-      ? "Your Ironbooks portal sign-in link"
-      : "You're invited to your Ironbooks portal",
+    // A person's name in the From line materially outperforms a brand alone,
+    // and these clients know their bookkeeper. Falls back to the brand.
+    // A person's name in the From line reads as a note from their bookkeeper
+    // rather than a system notification. Built off the RESOLVED address so
+    // resolveFromEmail's sandbox guard still applies — hardcoding a domain here
+    // would quietly bypass it.
+    from: bk ? personalFrom(bk) : undefined,
+    subject,
     text,
     html,
   });

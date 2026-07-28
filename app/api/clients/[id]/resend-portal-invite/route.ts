@@ -31,11 +31,21 @@ export async function POST(
 
   const { data: client } = await service
     .from("client_links")
-    .select("client_name")
+    .select("client_name, assigned_bookkeeper_id")
     .eq("id", clientLinkId)
     .single();
   if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
   const clientName = (client as any).client_name || "your business";
+
+  // The assigned bookkeeper's name, so the email comes FROM a person the client
+  // knows rather than a system. Best-effort — a missing name just falls back to
+  // the brand sender, it never blocks the resend.
+  let bookkeeperName: string | null = null;
+  const bkId = (client as any).assigned_bookkeeper_id;
+  if (bkId) {
+    const { data: bk } = await service.from("users").select("full_name").eq("id", bkId).single();
+    bookkeeperName = ((bk as any)?.full_name || "").trim() || null;
+  }
 
   // Active portal users mapped to this client.
   const { data: maps } = await (service as any)
@@ -80,6 +90,7 @@ export async function POST(
         clientName,
         actionLink: link,
         isResend: true,
+        bookkeeperName,
       });
       (ok ? sent : failed).push(u.email);
     } catch {
