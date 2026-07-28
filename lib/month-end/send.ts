@@ -40,6 +40,33 @@ async function loadClientName(
   return data?.client_name || "Client";
 }
 
+/**
+ * Does this client have a balance sheet to look at?
+ *
+ * bs_enabled === false is the "owed BS" tag — balance-sheet cleanup deferred, so
+ * the portal's BS tab has nothing behind it. Anything other than an explicit
+ * true is treated as unavailable, so a read failure omits the line rather than
+ * promising a statement the client can't open.
+ */
+async function loadBalanceSheetAvailable(
+  service: Service,
+  clientLinkId: string
+): Promise<boolean> {
+  const { data, error } = await service
+    .from("client_links")
+    .select("bs_enabled")
+    .eq("id", clientLinkId)
+    .single();
+  if (error) {
+    console.warn(
+      `[month-end] couldn't read bs_enabled for ${clientLinkId} — omitting the ` +
+        `balance-sheet line from the email: ${error.message}`
+    );
+    return false;
+  }
+  return (data as any)?.bs_enabled === true;
+}
+
 async function finalizeSuccessfulSend(
   service: Service,
   pkg: MonthEndPackageRow,
@@ -174,6 +201,8 @@ export async function deliverPackage(
     return { packageId, clientLinkId, clientName, ok: false, error: "No portal recipients" };
   }
 
+  const balanceSheetAvailable = await loadBalanceSheetAvailable(service, pkg.client_link_id);
+
   let lastMessageId: string | undefined;
   const errors: string[] = [];
 
@@ -186,6 +215,7 @@ export async function deliverPackage(
         period,
         aiSummaryExcerpt: pkg.ai_summary!,
         portalUrl,
+        balanceSheetAvailable,
       });
       if (result.ok) {
         lastMessageId = result.messageId;

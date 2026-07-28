@@ -14,6 +14,19 @@ export interface MonthEndEmailParams {
   period: PeriodBounds;
   aiSummaryExcerpt: string;
   portalUrl: string;
+  /**
+   * Is a balance sheet actually visible to this client in the portal?
+   *
+   * Clients tagged "owed BS" (client_links.bs_enabled === false) have had their
+   * balance-sheet cleanup deferred, so there is nothing behind the portal's BS
+   * tab for them. Listing it in the email promises something they can't open —
+   * the same broken promise as claiming their books are up to date.
+   *
+   * Defaults to FALSE deliberately: a caller that hasn't been taught about this
+   * flag omits the line rather than over-promising. Under-promising is the safe
+   * direction; a client who finds MORE than the email said is never let down.
+   */
+  balanceSheetAvailable?: boolean;
 }
 
 export async function sendMonthEndEmail(
@@ -49,7 +62,9 @@ export async function sendMonthEndEmail(
     ``,
     `What you'll find:`,
     `• Profit and loss for ${params.period.label} — what came in, what went out, what's left`,
-    `• Balance sheet — what the business owns and owes`,
+    ...(params.balanceSheetAvailable
+      ? [`• Balance sheet — what the business owns and owes`]
+      : []),
     `• A plain-English summary of what changed and why`,
     ``,
     `Not sure what a number means? Reply to this email, or ask in the portal — that's what it's there for.`,
@@ -71,7 +86,10 @@ export async function sendMonthEndEmail(
           `Profit and loss for ${escapeHtml(params.period.label)}`,
           "What came in, what went out, and what's left — in plain language.",
         ],
-        ["Balance sheet", "What the business owns and what it owes, side by side."],
+        // Only listed when there IS one to open — see balanceSheetAvailable.
+        ...(params.balanceSheetAvailable
+          ? ([["Balance sheet", "What the business owns and what it owes, side by side."]] as Array<[string, string]>)
+          : []),
         ["A summary of what changed", "Written out, so you don't have to interpret the numbers yourself."],
       ]) +
       emailParagraph(
