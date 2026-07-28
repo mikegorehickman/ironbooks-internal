@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Bell, Download, FileText, Loader2, MessageSquare, Send,
+  Bell, Check, Download, FileText, Loader2, MessageSquare, RotateCcw, Send,
 } from "lucide-react";
 import type { ClientCommunication, CommAttachment } from "@/lib/client-comms";
 import { playSound } from "@/lib/sounds";
@@ -17,8 +17,11 @@ import { playSound } from "@/lib/sounds";
  *                   as the amber Bell card in the portal and counted in
  *                   the client's red unread badge
  *
- * Mounting marks inbound (from_client) rows read → clears this client
- * from the /today "Inbound from clients" widget.
+ * Mounting marks inbound (from_client) rows READ — which is deliberately not
+ * the same as handled. A message leaves the /today widget and the badges only
+ * when it's dismissed: automatically on reply, or manually per-message here
+ * (migration 144). Dismissed rows stay visible in the thread, tagged, with an
+ * Undo — so "where did that message go?" always has an answer.
  */
 export function BookkeeperMessagesClient({
   clientLinkId,
@@ -39,7 +42,38 @@ export function BookkeeperMessagesClient({
   // Non-blocking warning: the message saved, but the client won't get an
   // email notification (no portal login / send failure).
   const [deliveryWarning, setDeliveryWarning] = useState<string | null>(null);
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Dismiss = "handled, no reply needed"; undo puts it back in the queue.
+   * Optimistic so the tag flips instantly, then router.refresh() re-syncs the
+   * server-rendered badges. Reverts the local row if the request fails.
+   */
+  async function toggleDismiss(m: ClientCommunication) {
+    if (dismissingId) return;
+    const undo = !!m.dismissed_at;
+    setDismissingId(m.id);
+    const optimistic = undo ? null : new Date().toISOString();
+    setMessages((prev) =>
+      prev.map((x) => (x.id === m.id ? { ...x, dismissed_at: optimistic } : x))
+    );
+    try {
+      const res = await fetch("/api/comms/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [m.id], undo }),
+      });
+      if (!res.ok) throw new Error("dismiss failed");
+      router.refresh();
+    } catch {
+      setMessages((prev) =>
+        prev.map((x) => (x.id === m.id ? { ...x, dismissed_at: m.dismissed_at } : x))
+      );
+    } finally {
+      setDismissingId(null);
+    }
+  }
 
   useEffect(() => {
     // Mark inbound read on open, then refresh so the /today + /clients inbox
@@ -138,7 +172,13 @@ export function BookkeeperMessagesClient({
           </div>
         )}
         {messages.map((m) => (
-          <Row key={m.id} m={m} />
+          <Row
+            key={m.id}
+            m={m}
+            canDismiss={canSend}
+            busy={dismissingId === m.id}
+            onDismiss={() => toggleDismiss(m)}
+          />
         ))}
         <div ref={bottomRef} />
       </div>
@@ -224,7 +264,14 @@ export function BookkeeperMessagesClient({
   );
 }
 
-function Row({ m }: { m: ClientCommunication }) {
+function Row({
+  m, canDismiss, busy, onDismiss,
+}: {
+  m: ClientCommunication;
+  canDismiss: boolean;
+  busy: boolean;
+  onDismiss: () => void;
+}) {
   const fromClient = m.direction === "from_client";
 
   if (m.kind === "notification") {
@@ -285,10 +332,34 @@ function Row({ m }: { m: ClientCommunication }) {
             ))}
           </div>
         )}
-        <div className={`text-[10px] mt-1.5 ${fromClient ? "text-ink-light" : "text-white/50"}`}>
-          {formatWhen(m.created_at)}
+        <div className={`text-[10px] mt-1.5 flex items-center gap-2 flex-wrap ${fromClient ? "text-ink-light" : "text-white/50"}`}>
+          <span>{formatWhen(m.created_at)}</span>
           {fromClient && !m.read_at && (
-            <span className="ml-2 font-bold text-amber-600">● new</span>
+            <span className="font-bold text-amber-600">● new</span>
+          )}
+          {/* Inbound rows carry their own handled-state control. Dismissed
+              messages stay in the thread (tagged) rather than disappearing —
+              the whole point is that nothing goes missing silently. */}
+          {fromClient && m.dismissed_at && (
+            <span className="inline-flex items-center gap-1 font-semibold text-ink-slate bg-white/70 border border-gray-200 rounded-full px-1.5 py-0.5">
+              <Check size={10} />
+              Dismissed{m.dismissed_by_name ? ` by ${m.dismissed_by_name}` : ""}
+            </span>
+          )}
+          {fromClient && canDismiss && (
+            <button
+              onClick={onDismiss}
+              disabled={busy}
+              className="inline-flex items-center gap-1 font-semibold text-teal-dark hover:text-navy disabled:opacity-50"
+            >
+              {busy ? (
+                <Loader2 size={10} className="animate-spin" />
+              ) : m.dismissed_at ? (
+                <><RotateCcw size={10} /> Undo</>
+              ) : (
+                <><Check size={10} /> Dismiss — no reply needed</>
+              )}
+            </button>
           )}
         </div>
       </div>

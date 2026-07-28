@@ -267,51 +267,64 @@ export default async function TodayPage({
   }
 
   // ─── Inbound client messages + statement uploads ───
-  // Unread from_client rows in client_communications. Same scoping rules
-  // as flags: seniors see everything, bookkeepers see assigned clients.
-  // Rows clear when the bookkeeper opens /clients/[id]/messages (which
-  // marks them read). try/catch so /today survives pre-migration envs.
+  // OPEN (not yet dismissed) from_client rows in client_communications. Same
+  // scoping rules as flags: seniors see everything, bookkeepers see assigned
+  // clients. Rows clear when somebody REPLIES or hits Dismiss — opening the
+  // thread only marks them read, which no longer counts as handled
+  // (migration 144). try/catch so /today survives pre-migration envs.
   let inboundComms: InboundCommRow[] = [];
   try {
-    const { data: commRows } = await service
-      .from("client_communications" as any)
-      .select("id, client_link_id, sender_user_id, body, attachments, created_at")
-      .eq("direction", "from_client")
-      .is("read_at", null)
-      .order("created_at", { ascending: false })
-      .limit(50);
-    let raw = (commRows as any[]) || [];
-
-    if (scopeUserId && raw.length > 0) {
+    // Scope FIRST, then limit. Filtering a fleet-wide top-50 down to one
+    // bookkeeper's clients used to hide their messages entirely whenever 50
+    // newer ones belonged to somebody else — an empty widget next to a red
+    // sidebar badge. Push the client filter into the query instead.
+    let ownedIds: string[] | null = null;
+    if (scopeUserId) {
       const { data: ownedClients } = await service
         .from("client_links")
         .select("id")
         .eq("assigned_bookkeeper_id", scopeUserId);
-      const ownedIds = new Set(((ownedClients as any[]) || []).map((c) => c.id));
-      raw = raw.filter((r) => ownedIds.has(r.client_link_id));
+      ownedIds = ((ownedClients as any[]) || []).map((c) => c.id);
     }
+
+    let commQ = (service as any)
+      .from("client_communications")
+      .select("id, client_link_id, sender_user_id, body, attachments, created_at")
+      .eq("direction", "from_client")
+      .is("dismissed_at", null);
+    if (ownedIds) commQ = commQ.in("client_link_id", ownedIds);
+    const { data: commRows } = ownedIds && ownedIds.length === 0
+      ? { data: [] }
+      : await commQ.order("created_at", { ascending: false }).limit(200);
+    const raw = (commRows as any[]) || [];
 
     if (raw.length > 0) {
       const commClientIds = Array.from(new Set(raw.map((r) => r.client_link_id)));
       const commSenderIds = Array.from(new Set(raw.map((r) => r.sender_user_id).filter(Boolean)));
       const [{ data: cn }, { data: sn }] = await Promise.all([
-        service.from("client_links").select("id, client_name").in("id", commClientIds),
+        service
+          .from("client_links")
+          .select("id, client_name, assigned_bookkeeper_id")
+          .in("id", commClientIds),
         commSenderIds.length > 0
           ? service.from("users").select("id, full_name, email").in("id", commSenderIds)
           : Promise.resolve({ data: [] }),
       ]);
-      const clientNameById = new Map(((cn as any[]) || []).map((c) => [c.id, c.client_name]));
+      const clientById = new Map(((cn as any[]) || []).map((c) => [c.id, c]));
       const senderById = new Map(
         ((sn as any[]) || []).map((u) => [u.id, u.full_name || u.email || ""])
       );
       inboundComms = raw.map((r) => ({
         id: r.id,
         client_link_id: r.client_link_id,
-        client_name: clientNameById.get(r.client_link_id) || "(unknown client)",
+        client_name: clientById.get(r.client_link_id)?.client_name || "(unknown client)",
         sender_name: senderById.get(r.sender_user_id) || "",
         body: r.body,
         attachments: Array.isArray(r.attachments) ? r.attachments : [],
         created_at: r.created_at,
+        // Nobody owns this client, so nobody's personal queue will ever show
+        // this message — only a manager's fleet-wide view. Flag it loudly.
+        unassigned: !clientById.get(r.client_link_id)?.assigned_bookkeeper_id,
       }));
     }
   } catch {
@@ -550,8 +563,12 @@ export default async function TodayPage({
     pendingFlags.length +
     pendingReclassRequests.length +
     clientAnswers.length +
-    inboundComms.length +
     (scopeUserId ? cleanupDeadlines.length : 0);
+  // Inbound messages now render in their own band ABOVE "Your work" — a human
+  // is sitting there waiting on a reply, so it outranks the internal queue.
+  // It's still work, so the one-line day summary counts both.
+  const messageCount = inboundComms.length;
+  const needsYouCount = workCount + messageCount;
   const viewAsName = viewAs
     ? allBookkeepers.find((b) => b.id === viewAs)?.full_name || "bookkeeper"
     : null;
@@ -572,9 +589,9 @@ export default async function TodayPage({
       <div className="px-8 py-6 max-w-5xl space-y-5">
         {/* Your day, one sentence — everything below is detail on this line. */}
         <p className="text-sm text-ink-slate -mt-2">
-          {workCount > 0 ? (
+          {needsYouCount > 0 ? (
             <>
-              <span className="font-bold text-navy">{workCount}</span> thing{workCount === 1 ? "" : "s"} need{workCount === 1 ? "s" : ""} you
+              <span className="font-bold text-navy">{needsYouCount}</span> thing{needsYouCount === 1 ? "" : "s"} need{needsYouCount === 1 ? "s" : ""} you
             </>
           ) : (
             <span className="font-semibold text-teal-dark">You&apos;re clear — nothing needs you right now</span>
@@ -627,6 +644,15 @@ export default async function TodayPage({
           dueSoon={counts.dueToday + counts.dueSoon}
         />
 
+        {/* ── INBOUND FROM CLIENTS ── above "Your work" on purpose: a client is
+            sitting there waiting on a human reply, which outranks anything in
+            the internal queue. Hides itself when the inbox is clear. ── */}
+        {messageCount > 0 && (
+          <section id="messages" className="space-y-4 scroll-mt-4">
+            <ClientInboxWidget rows={inboundComms} canDismiss={(actor as any)?.role !== "viewer"} />
+          </section>
+        )}
+
         {/* ── YOUR WORK ── the logged-in person's actionable queue ── */}
         <section id="work" className="space-y-4 scroll-mt-4">
           <h2 className="text-sm font-bold text-navy uppercase tracking-wider">
@@ -667,13 +693,13 @@ export default async function TodayPage({
               )}
               {/* Client-waiting items first (a human is blocked on a reply),
                   then your cleanup deadlines. Each widget self-manages its
-                  resolve state and hides at zero rows. */}
+                  resolve state and hides at zero rows. Inbound messages used to
+                  sit here — they now render in their own band above. */}
               {pendingFlags.length > 0 && <ClientFlagsWidget flags={pendingFlags} />}
               {pendingReclassRequests.length > 0 && (
                 <ReclassRequestsWidget requests={pendingReclassRequests} />
               )}
               {clientAnswers.length > 0 && <ClientAnswersWidget rows={clientAnswers} />}
-              {inboundComms.length > 0 && <ClientInboxWidget rows={inboundComms} />}
               {scopeUserId && cleanupDeadlines.length > 0 && (
                 <CleanupDeadlinesWidget rows={cleanupDeadlines} showBookkeeper={false} />
               )}

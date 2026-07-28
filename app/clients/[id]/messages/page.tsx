@@ -54,17 +54,23 @@ export default async function ClientMessagesPage({
       .limit(500);
     messages = (((rows as ClientCommunication[]) || [])).reverse();
 
-    const senderIds = [...new Set(messages.map((m) => m.sender_user_id).filter(Boolean))] as string[];
-    if (senderIds.length > 0) {
+    // Senders plus whoever dismissed each inbound row (the thread tags it).
+    const nameIds = [
+      ...new Set(
+        messages.flatMap((m) => [m.sender_user_id, m.dismissed_by]).filter(Boolean)
+      ),
+    ] as string[];
+    if (nameIds.length > 0) {
       const { data: senders } = await service
         .from("users")
         .select("id, full_name, email")
-        .in("id", senderIds);
+        .in("id", nameIds);
       const byId = new Map(
         ((senders as any[]) || []).map((u) => [u.id, u.full_name || u.email])
       );
       for (const m of messages) {
         if (m.sender_user_id) m.sender_name = byId.get(m.sender_user_id) || null;
+        if (m.dismissed_by) m.dismissed_by_name = byId.get(m.dismissed_by) || null;
       }
     }
   } catch {

@@ -56,16 +56,22 @@ export async function GET(
   }
   const messages = ((rows as ClientCommunication[]) || []).reverse();
 
-  // Sender names for both directions (client portal users + bookkeepers)
-  const senderIds = [...new Set(messages.map((m) => m.sender_user_id).filter(Boolean))] as string[];
-  if (senderIds.length > 0) {
+  // Names for both directions (client portal users + bookkeepers), plus
+  // whoever dismissed each inbound row so the thread can say who cleared it.
+  const nameIds = [
+    ...new Set(
+      messages.flatMap((m) => [m.sender_user_id, m.dismissed_by]).filter(Boolean)
+    ),
+  ] as string[];
+  if (nameIds.length > 0) {
     const { data: senders } = await service
       .from("users")
       .select("id, full_name, email")
-      .in("id", senderIds);
+      .in("id", nameIds);
     const byId = new Map(((senders as any[]) || []).map((u) => [u.id, u.full_name || u.email]));
     for (const m of messages) {
       if (m.sender_user_id) m.sender_name = byId.get(m.sender_user_id) || null;
+      if (m.dismissed_by) m.dismissed_by_name = byId.get(m.dismissed_by) || null;
     }
   }
 
@@ -127,18 +133,18 @@ export async function POST(
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
   }
 
-  // Sending into the thread means the bookkeeper has handled it — clear any
-  // unread inbound messages so this client drops out of the /today "Inbound
-  // from clients" widget and the /clients unread count. Opening the thread
-  // already marks these read, but doing it on send too guarantees the inbox
-  // clears even if that fire-and-forget call was missed (the reported bug:
-  // "replied but it didn't clear from the inbox").
+  // Replying IS handling it — auto-dismiss this client's open inbound rows so
+  // they drop out of the /today widget, the sidebar badge and the /clients
+  // count. This is the "obvious it's been replied to" half of the model; the
+  // explicit Dismiss button (POST /api/comms/dismiss) covers the rest.
+  // read_at is set alongside so the thread stops rendering "● new".
+  const nowIso = new Date().toISOString();
   await (service as any)
     .from("client_communications")
-    .update({ read_at: new Date().toISOString(), read_by: user.id })
+    .update({ read_at: nowIso, read_by: user.id, dismissed_at: nowIso, dismissed_by: user.id })
     .eq("client_link_id", id)
     .eq("direction", "from_client")
-    .is("read_at", null);
+    .is("dismissed_at", null);
 
   // Refresh the server-rendered inbox surfaces so the cleared state shows
   // when the bookkeeper navigates back (they're force-dynamic, but this also

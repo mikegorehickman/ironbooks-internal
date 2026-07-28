@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, FileText, Inbox, Paperclip } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowRight, Check, FileText, Inbox, Loader2, Paperclip } from "lucide-react";
 import type { CommAttachment } from "@/lib/client-comms";
 
 export interface InboundCommRow {
@@ -13,6 +14,8 @@ export interface InboundCommRow {
   body: string | null;
   attachments: CommAttachment[];
   created_at: string;
+  /** No assigned_bookkeeper_id — this sits in no bookkeeper's personal queue. */
+  unassigned?: boolean;
 }
 
 interface ClientGroup {
@@ -23,18 +26,44 @@ interface ClientGroup {
   preview: string | null;
   count: number;
   files: number;
+  unassigned: boolean;
 }
 
 /**
- * /today widget: unread client→bookkeeper messages, NESTED by client. Each
- * client shows once — most-recent message preview + a red badge with how many
- * unread messages they sent. Clicking opens the full thread (which marks them
- * read). Rows arrive most-recent-first.
- *
- * Server component — pure links, no interactivity needed.
+ * /today widget: OPEN (undismissed) client→bookkeeper messages, NESTED by
+ * client. Each client shows once — most-recent message preview + a red badge
+ * with how many messages are still owed a response. Clicking opens the full
+ * thread; the row clears when somebody replies or hits Dismiss, NOT merely by
+ * reading it. Rows arrive most-recent-first.
  */
-export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
+export function ClientInboxWidget({
+  rows,
+  canDismiss = true,
+}: {
+  rows: InboundCommRow[];
+  /** Viewers are read-only — the API 403s them, so don't offer the button. */
+  canDismiss?: boolean;
+}) {
+  const router = useRouter();
+  const [dismissing, setDismissing] = useState<string | null>(null);
   const totalFiles = rows.reduce((s, r) => s + (r.attachments?.length || 0), 0);
+
+  async function dismiss(clientLinkId: string) {
+    if (dismissing) return;
+    setDismissing(clientLinkId);
+    try {
+      await fetch("/api/comms/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientLinkId }),
+      });
+      router.refresh();
+    } catch {
+      /* leave the row in place — a failed dismiss must not look like success */
+    } finally {
+      setDismissing(null);
+    }
+  }
 
   // Group by client, preserving the incoming most-recent-first order.
   const order: string[] = [];
@@ -50,6 +79,7 @@ export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
         preview: r.body, // first seen = most recent
         count: 0,
         files: 0,
+        unassigned: !!r.unassigned,
       };
       byClient.set(r.client_link_id, g);
       order.push(r.client_link_id);
@@ -79,12 +109,12 @@ export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
       </div>
       <ul className="divide-y divide-gray-50">
         {visibleGroups.map((g) => (
-          <li key={g.client_link_id}>
+          <li key={g.client_link_id} className="flex items-stretch hover:bg-gray-50 transition-colors">
             <Link
               href={`/clients/${g.client_link_id}/messages`}
-              className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors"
+              className="flex items-center gap-4 px-5 py-3.5 flex-1 min-w-0"
             >
-              {/* Red count badge — how many unread messages from this client */}
+              {/* Red count badge — how many messages still owe this client a reply */}
               <span className="relative flex-shrink-0">
                 <span
                   className={`inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full text-xs font-bold ${
@@ -105,6 +135,14 @@ export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
                   {g.count > 1 && (
                     <span className="text-[11px] text-red-600 font-semibold">{g.count} messages</span>
                   )}
+                  {g.unassigned && (
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-300 rounded-full px-1.5 py-0.5"
+                      title="No bookkeeper is assigned to this client — it appears on no one's personal queue"
+                    >
+                      Unassigned
+                    </span>
+                  )}
                 </div>
                 {g.preview && (
                   <div className="text-xs text-ink-slate mt-0.5 truncate">{g.preview}</div>
@@ -117,6 +155,23 @@ export function ClientInboxWidget({ rows }: { rows: InboundCommRow[] }) {
               </div>
               <ArrowRight size={15} className="text-ink-light flex-shrink-0" />
             </Link>
+            {/* "No reply needed" — the answer went out by phone, the client
+                sorted it themselves, or it was an FYI. Reversible from the
+                thread, which tags dismissed messages with who cleared them. */}
+            {canDismiss && (
+            <button
+              onClick={() => dismiss(g.client_link_id)}
+              disabled={dismissing === g.client_link_id}
+              title="Dismiss — no reply needed"
+              className="flex-shrink-0 px-3 my-2 mr-2 rounded-lg text-[11px] font-semibold text-ink-light hover:text-teal-dark hover:bg-teal-lighter/50 border border-transparent hover:border-teal/20 transition-colors disabled:opacity-50"
+            >
+              {dismissing === g.client_link_id ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <span className="inline-flex items-center gap-1"><Check size={13} /> Dismiss</span>
+              )}
+            </button>
+            )}
           </li>
         ))}
       </ul>

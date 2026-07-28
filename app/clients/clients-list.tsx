@@ -956,9 +956,9 @@ function ClientRow({
                 href={`/clients/${client.id}/messages`}
                 onClick={(e) => e.stopPropagation()}
                 className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full hover:bg-red-100"
-                title={`${client.unread_from_client} unread message${client.unread_from_client === 1 ? "" : "s"} from the client`}
+                title={`${client.unread_from_client} message${client.unread_from_client === 1 ? "" : "s"} from the client still awaiting a reply — clears on reply or dismiss`}
               >
-                <MessageCircle size={9} /> {client.unread_from_client} unread
+                <MessageCircle size={9} /> {client.unread_from_client} awaiting reply
               </Link>
             )}
           </div>

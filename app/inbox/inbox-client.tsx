@@ -10,8 +10,11 @@ export interface InboxThread {
   clientName: string;
   preview: string;
   lastAt: string | null;
+  /** Inbound messages still owed a reply (undismissed), not merely unread. */
   unread: number;
   oldestUnreadAt: string | null;
+  /** No bookkeeper assigned — visible to managers only. */
+  unassigned?: boolean;
 }
 
 function ago(iso: string | null): string {
@@ -74,9 +77,17 @@ export function InboxClient({ threads, canSend }: { threads: InboxThread[]; canS
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-navy truncate flex-1">{t.clientName}</span>
-                    {t.unread > 0 && <span className="text-[10px] font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5 flex-shrink-0">{t.unread}</span>}
+                    {t.unread > 0 && <span className="text-[10px] font-bold text-white bg-red-500 rounded-full px-1.5 py-0.5 flex-shrink-0" title={`${t.unread} awaiting a reply`}>{t.unread}</span>}
                     <span className="text-[10px] text-ink-light flex-shrink-0">{ago(t.lastAt)}</span>
                   </div>
+                  {t.unassigned && (
+                    <span
+                      className="inline-block mt-1 text-[9px] font-bold uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-300 rounded-full px-1.5 py-0.5"
+                      title="No bookkeeper assigned — this client is on nobody's personal queue"
+                    >
+                      Unassigned
+                    </span>
+                  )}
                   <div className="text-[11px] text-ink-light truncate mt-0.5">{t.preview || "—"}</div>
                 </button>
               </li>

@@ -240,7 +240,9 @@ export async function gatherLifecycleInput(
       .select("id", { count: "exact", head: true })
       .eq("client_link_id", id)
       .eq("direction", "from_client")
-      .is("read_at", null);
+      // "Open" means still owed a reply. Reading the thread doesn't answer
+      // the client — dismissing or replying does (migration 144).
+      .is("dismissed_at", null);
     open_ask_client = (count || 0) > 0;
   } catch {
     /* ignore */

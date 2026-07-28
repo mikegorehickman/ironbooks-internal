@@ -86,9 +86,19 @@ export interface ClientCommunication {
   attachments: CommAttachment[];
   read_at: string | null;
   read_by: string | null;
+  /**
+   * Inbound message handled — replied to, or explicitly dismissed as needing
+   * no reply (migration 144). This, NOT read_at, is what every staff
+   * attention surface filters on. Opening a thread marks rows read without
+   * dismissing them, so "I glanced at it" no longer wipes it off Home.
+   */
+  dismissed_at: string | null;
+  dismissed_by: string | null;
   created_at: string;
   /** Enriched server-side where useful — not a DB column */
   sender_name?: string | null;
+  /** Enriched server-side: who dismissed it, for the thread's Dismissed tag */
+  dismissed_by_name?: string | null;
 }
 
 /**

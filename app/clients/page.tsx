@@ -202,12 +202,23 @@ export default async function ClientsPage({
     console.warn("[clients] portal-account fetch failed:", e?.message);
   }
   try {
+    // Explicit high limit: with no .limit() PostgREST applies its own max-rows
+    // cap silently, which would undercount badges once the firm accumulates a
+    // large unread backlog. Warn if we ever actually reach the ceiling.
+    const UNREAD_CAP = 5000;
     const { data: unread } = await (service as any)
       .from("client_communications")
       .select("client_link_id")
       .eq("direction", "from_client")
-      .is("read_at", null);
-    for (const r of ((unread as any[]) || [])) {
+      // Open = not dismissed. Reading a thread no longer clears the badge;
+      // replying or an explicit dismiss does (migration 144).
+      .is("dismissed_at", null)
+      .limit(UNREAD_CAP);
+    const unreadRows = (unread as any[]) || [];
+    if (unreadRows.length >= UNREAD_CAP) {
+      console.warn("[clients] unread-messages hit the row cap — badges may undercount");
+    }
+    for (const r of unreadRows) {
       unreadByClient.set(r.client_link_id, (unreadByClient.get(r.client_link_id) || 0) + 1);
     }
   } catch (e: any) {
