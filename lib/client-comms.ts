@@ -13,6 +13,15 @@
  */
 
 import { resolveFromEmail } from "./email-sender";
+import {
+  renderEmailShell,
+  emailParagraph,
+  emailTickList,
+  emailQuote,
+  escapeHtml,
+  linkFooter,
+  EMAIL_BRAND,
+} from "./email-shell";
 
 /**
  * Days we TELL the client the link lasts.
@@ -474,10 +483,14 @@ export async function emailPortalUsersAboutMessage(
     snippetChars?: number;
     /** Portal path the email's CTA links to (default /portal/messages). */
     portalPath?: string;
-    /** CTA button label (default "Log in to reply"). */
+    /** CTA button label (default "Read and reply"). */
     ctaLabel?: string;
-    /** Replace the whole email subject (else "Ironbooks sent you a … in SNAP …"). */
+    /** Replace the whole email subject entirely. */
     subjectOverride?: string;
+    /** Who it's from — a bookkeeper's name outperforms the brand, because it
+     *  tells a busy contractor whether this is worth opening. Falls back to
+     *  "Your bookkeeper". */
+    fromName?: string | null;
     /** Suppress the body preview in the EMAIL (security — e.g. financial
      *  statements). The portal copy still has the full body; the email only
      *  nudges them to log in. */
@@ -514,53 +527,67 @@ export async function emailPortalUsersAboutMessage(
     const snippet =
       params.body.length > snippetMax ? `${params.body.slice(0, snippetMax)}…` : params.body;
     const link = `${params.portalOrigin}${params.portalPath || "/portal/messages"}`;
-    const cta = params.ctaLabel || "Log in to reply";
+    const cta = params.ctaLabel || "Read and reply";
     const hideBody = params.hideBody === true;
-    // When the body is hidden (statements), the email says nothing but "log in".
-    const nudge = "Log in to your portal to view it securely.";
 
-    // Plain-text fallback for clients whose mail app blocks HTML
+    // Old heading was "Ironbooks has sent you a message in SNAP!" — house style,
+    // an exclamation mark, and a product name the client doesn't think in. It
+    // also buried WHO it's from, which is the only thing that decides whether a
+    // busy contractor opens it. Lead with the person.
+    const fromWho = params.fromName?.trim() || "Your bookkeeper";
+    const heading = hideBody
+      ? `${fromWho} has something for you`
+      : `${fromWho} sent you a ${noun}`;
+
     const text = [
-      `Ironbooks has sent you a ${noun} in SNAP!`,
+      `${heading}`,
       ``,
-      hideBody ? nudge : snippet,
+      params.subject ? `${params.subject}` : ``,
+      hideBody
+        ? `It's waiting in your portal — we keep it behind your login rather than in an inbox.`
+        : snippet,
       ``,
       `${cta}: ${link}`,
       ``,
-      `Do not reply to this email — replies aren't monitored. Use the portal to respond.`,
-    ].join("\n");
+      `Replies to this address aren't monitored — use the portal so your answer reaches the right person and stays with the rest of your file.`,
+    ]
+      .filter((l, i, a) => !(l === "" && a[i - 1] === ""))
+      .join("\n");
 
-    // Branded HTML card — inline styles only (email clients strip <style>)
-    const esc = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>");
-    const html = `
-<div style="background:#F4F5F7;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;">
-    <div style="background:#0F1F2E;padding:22px 28px;">
-      <div style="color:#ffffff;font-size:18px;font-weight:700;">Ironbooks</div>
-      <div style="color:#8CD3CC;font-size:12px;margin-top:2px;">Advancing Financial Literacy In The Trades</div>
-    </div>
-    <div style="padding:28px;">
-      <h2 style="margin:0 0 6px;color:#0F1F2E;font-size:18px;">Ironbooks has sent you a ${noun} in SNAP!</h2>
-      ${params.subject ? `<div style="color:#0F1F2E;font-size:14px;font-weight:600;margin:0 0 12px;">${esc(params.subject)}</div>` : ""}
-      ${hideBody
-        ? `<p style="margin:6px 0 22px;color:#33414E;font-size:14px;line-height:1.55;">${nudge}</p>`
-        : `<div style="background:#F8FAFA;border:1px solid #E5E7EB;border-left:3px solid #1A9B8F;border-radius:8px;padding:14px 16px;margin:14px 0 22px;color:#33414E;font-size:14px;line-height:1.55;">
-        ${esc(snippet)}
-      </div>`}
-      <a href="${link}" style="display:inline-block;background:#1A9B8F;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;">${cta}</a>
-      <p style="color:#8A94A0;font-size:12px;margin:24px 0 0;line-height:1.5;">
-        Do not reply to this email — replies aren't monitored.<br/>
-        Read and respond securely in your portal: <a href="${link}" style="color:#1A9B8F;">${link}</a>
-      </p>
-    </div>
-  </div>
-  <div style="max-width:560px;margin:12px auto 0;text-align:center;color:#9AA3AD;font-size:11px;">
-    Sent to you by your Ironbooks bookkeeping team for ${esc(params.clientName)}.
-  </div>
-</div>`;
+    const nl2br = (t: string) => escapeHtml(t).replace(/\n/g, "<br/>");
 
-    const emailSubject = params.subjectOverride || `Ironbooks sent you a ${noun} in SNAP${params.subject ? ` — ${params.subject}` : ""}`;
+    const html = renderEmailShell({
+      preheader: hideBody
+        ? `Waiting in your portal — one tap, no password.`
+        : snippet.slice(0, 140).replace(/\s+/g, " "),
+      heading,
+      clientName: params.clientName,
+      bodyHtml:
+        (params.subject
+          ? `<p style="margin:0 0 14px;color:${EMAIL_BRAND.navy};font-size:15px;font-weight:700;line-height:1.4;">${escapeHtml(params.subject)}</p>`
+          : "") +
+        (hideBody
+          ? emailParagraph(
+              `It's waiting in your portal. We keep these behind your own login rather than in an inbox.`
+            )
+          : emailQuote(nl2br(snippet))),
+      cta: { label: cta, url: link },
+      ctaNote: "One tap and you're in &mdash; <strong>no password to remember</strong>.",
+      footerHtml:
+        `Replies to this address aren't monitored. Answer in the portal so it reaches the right ` +
+        `person and stays with the rest of your file.<br/>` +
+        `Button not working? Paste this into your browser:<br/>` +
+        `<a href="${link}" style="color:${EMAIL_BRAND.tealDeep};word-break:break-all;">${link}</a>`,
+    });
+
+    // Subject leads with the sender, then their own subject line if they wrote
+    // one. "Ironbooks sent you a message in SNAP" told the client nothing about
+    // whether it mattered.
+    const emailSubject =
+      params.subjectOverride ||
+      (params.subject
+        ? `${fromWho}: ${params.subject}`
+        : `${fromWho} sent you a ${noun}`);
     const replyTo = process.env.SUPPORT_INBOX_EMAIL || "admin@ironbooks.com";
 
     // Tracked path: capture the Resend message id + write client_email_log so

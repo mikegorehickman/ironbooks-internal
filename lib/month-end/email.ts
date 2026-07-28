@@ -1,5 +1,11 @@
 import type { PeriodBounds } from "./types";
 import { resolveFromEmail } from "@/lib/email-sender";
+import {
+  renderEmailShell,
+  emailParagraph,
+  emailTickList,
+  escapeHtml,
+} from "@/lib/email-shell";
 
 export interface MonthEndEmailParams {
   clientName: string;
@@ -26,59 +32,63 @@ export async function sendMonthEndEmail(
   // Short, branded subject. No financial figures in the email itself — the
   // numbers live behind the portal login (security); the email is just the
   // "ready, come see" nudge.
-  const subject = `Your Ironbooks financial statements are ready`;
+  // Subject names the PERIOD, never the state of the books. "Closed and
+  // reconciled" was the old wording; it's a freshness claim, and Mike's rule
+  // (2026-07-28) is that we don't make those — a client who reads more into it
+  // than we meant trusts the next email less. The period is a fact.
+  const subject = `${params.recipientFirstName}, your ${params.period.label} statements are ready`;
 
   const text = [
     `Hi ${params.recipientFirstName},`,
     ``,
-    `Your books for ${params.period.label} are closed and reconciled, and your financial statements are ready to view.`,
+    `Your financial statements for ${params.period.label} are ready to look at.`,
     ``,
-    `Log in to view your statements securely in the Ironbooks portal:`,
-    params.portalUrl,
+    `They're in your portal rather than attached to this email — that keeps your numbers behind your own login instead of sitting in an inbox.`,
     ``,
-    `Questions? Reply to this email or use Ask AI in your portal.`,
+    `View your ${params.period.label} statements: ${params.portalUrl}`,
     ``,
-    `— The Ironbooks team`,
+    `What you'll find:`,
+    `• Profit and loss for ${params.period.label} — what came in, what went out, what's left`,
+    `• Balance sheet — what the business owns and owes`,
+    `• A plain-English summary of what changed and why`,
+    ``,
+    `Not sure what a number means? Reply to this email, or ask in the portal — that's what it's there for.`,
+    ``,
+    `— Your Ironbooks team`,
   ].join("\n");
 
-  // Branded HTML — inline styles only (email clients strip <style>). Mirrors
-  // the navy/teal card used by the portal-notification emails so every client
-  // email looks consistent. The plain-text above stays as the fallback.
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  // No financial figures rendered in the email (security) — just the nudge +
-  // the login CTA. The full P&L / Balance Sheet live behind the portal login.
-  const html = `
-<div style="background:#F4F5F7;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #E5E7EB;">
-    <div style="background:#0F1F2E;padding:22px 28px;">
-      <div style="color:#ffffff;font-size:18px;font-weight:700;">Ironbooks</div>
-      <div style="color:#8CD3CC;font-size:12px;margin-top:2px;">Advancing Financial Literacy In The Trades</div>
-    </div>
-    <div style="padding:28px;">
-      <h2 style="margin:0 0 8px;color:#0F1F2E;font-size:18px;">Your ${esc(params.period.label)} statements are ready ✅</h2>
-      <p style="margin:0 0 22px;color:#33414E;font-size:14px;line-height:1.55;">Hi ${esc(params.recipientFirstName)}, your books for ${esc(params.period.label)} are closed and reconciled. Your financial statements are ready to view securely in your portal.</p>
-      <a href="${params.portalUrl}" style="display:inline-block;background:#1A9B8F;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;">Log in to view your statements →</a>
-      <div style="background:#FCFCFD;border:1px solid #EEF0F2;border-radius:8px;padding:12px 14px;margin:22px 0 0;color:#8A94A0;font-size:11px;line-height:1.6;">
-        <strong style="color:#5B6770;">Notice to Reader:</strong> These statements are prepared from your QuickBooks data and haven't been audited or reviewed. For a true read on your business, look at trends over at least a 90-day period rather than any single month.
-      </div>
-      <p style="color:#8A94A0;font-size:12px;margin:18px 0 0;line-height:1.5;">
-        Questions? Just reply to this email, or use <strong>Ask AI</strong> in your portal.
-      </p>
-    </div>
-  </div>
-  <div style="max-width:560px;margin:12px auto 0;text-align:center;color:#9AA3AD;font-size:11px;">
-    Ironbooks · your painting-business bookkeeping team
-  </div>
-</div>`;
+  const html = renderEmailShell({
+    preheader: `Profit and loss, balance sheet, and a plain-English summary for ${params.period.label}.`,
+    heading: `Your ${params.period.label} statements are ready`,
+    clientName: params.clientName,
+    bodyHtml:
+      emailParagraph(`Hi ${escapeHtml(params.recipientFirstName)},`) +
+      emailParagraph(
+        `Your financial statements for <strong>${escapeHtml(params.period.label)}</strong> are ready to look at.`
+      ) +
+      emailTickList([
+        [
+          `Profit and loss for ${escapeHtml(params.period.label)}`,
+          "What came in, what went out, and what's left — in plain language.",
+        ],
+        ["Balance sheet", "What the business owns and what it owes, side by side."],
+        ["A summary of what changed", "Written out, so you don't have to interpret the numbers yourself."],
+      ]) +
+      emailParagraph(
+        `They live in your portal rather than attached here &mdash; that keeps your numbers behind your own login instead of sitting in an inbox.`
+      ),
+    cta: { label: `View my ${params.period.label} statements`, url: params.portalUrl },
+    ctaNote: "One tap and you're in &mdash; <strong>no password to remember</strong>.",
+    closingHtml: emailParagraph(
+      `Not sure what a number means, or something looks off? Reply to this email, or ask in the portal &mdash; that's what it's there for.`
+    ),
+    signoff: "Your Ironbooks team",
+  });
 
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from: fromEmail,
         to: [params.recipientEmail],
