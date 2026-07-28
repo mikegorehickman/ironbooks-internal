@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, ChevronRight, CheckCircle2, AlertTriangle, RefreshCw, Wand2 } from "lucide-react";
 
 /**
@@ -124,6 +125,41 @@ function ClientCard({ client }: { client: FleetRow }) {
   const liveOnly = (plan?.rows || []).filter((r: any) => r.status === "live_only");
   const chosenCount = Object.values(choices).filter(Boolean).length;
 
+  // Full rebuild — the step-2 action once a chart is conformed. Retargeting
+  // patches individual stale names; this re-derives the whole rule set from
+  // the client's transactions against the current master COA.
+  async function regenerate() {
+    if (!confirm(
+      `Rebuild ALL bank rules for ${client.client_name} from scratch?\n\n` +
+      `Deletes their ${client.total} existing rule(s) in SNAP and re-derives a fresh set from ` +
+      `the last 6 months of transactions against the current master COA.\n\n` +
+      `Do this AFTER their chart is conformed. When you re-export, delete their old rules in ` +
+      `QuickBooks first — QBO's import appends rather than replaces.`
+    )) return;
+    setBusy("regenerate");
+    setError(null);
+    try {
+      const res = await fetch("/api/rules/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_link_id: client.client_link_id, months: 6, regenerate: true }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setResult({
+        updated: 0,
+        regenerated: true,
+        deleted: j.deleted_rules,
+        job_id: j.job_id,
+      });
+      setPlan(null);
+    } catch (e: any) {
+      setError(e?.message || "Regenerate failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white">
       <button
@@ -155,9 +191,22 @@ function ClientCard({ client }: { client: FleetRow }) {
           {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 mb-2">{error}</div>}
           {result && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 mb-2">
-              Retargeted {result.updated} rule{result.updated === 1 ? "" : "s"}.
-              {result.failed?.length > 0 && ` ${result.failed.length} failed.`}{" "}
-              <strong>Re-export their rules</strong> to carry the fix into QBO.
+              {result.regenerated ? (
+                <>
+                  Cleared {result.deleted} old rule{result.deleted === 1 ? "" : "s"}; discovery is running
+                  in the background. Review the fresh set at{" "}
+                  <Link href={`/rules/new?client=${client.client_link_id}`} className="font-semibold underline">
+                    Bank Rules
+                  </Link>
+                  , then re-export (<strong>delete their QBO rules first</strong> — import appends).
+                </>
+              ) : (
+                <>
+                  Retargeted {result.updated} rule{result.updated === 1 ? "" : "s"}.
+                  {result.failed?.length > 0 && ` ${result.failed.length} failed.`}{" "}
+                  <strong>Re-export their rules</strong> to carry the fix into QBO.
+                </>
+              )}
             </div>
           )}
 
@@ -258,6 +307,24 @@ function ClientCard({ client }: { client: FleetRow }) {
                   <CheckCircle2 size={13} /> Every rule target resolves — this client&apos;s export will fill in cleanly.
                 </div>
               )}
+
+              {/* Step 2 of the programme: full rebuild after the chart is
+                  conformed. Retargeting fixes named accounts one at a time;
+                  this re-derives the whole set from their transactions. */}
+              <div className="pt-2 mt-1 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={regenerate}
+                  disabled={!!busy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#954E44] bg-white px-3 py-1.5 text-xs font-bold text-[#954E44] hover:bg-red-50 disabled:opacity-40"
+                >
+                  {busy === "regenerate" ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                  Rebuild all rules from transactions
+                </button>
+                <span className="text-[11px] text-ink-light">
+                  Deletes {client.total} rule{client.total === 1 ? "" : "s"} and re-derives against the current
+                  master COA — run after their chart is conformed.
+                </span>
+              </div>
             </div>
           )}
         </div>

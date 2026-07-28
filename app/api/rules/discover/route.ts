@@ -7,19 +7,68 @@ import { NextResponse, after } from "next/server";
 /**
  * POST /api/rules/discover
  *
- * Body: { client_link_id: string, months: number }
+ * Body: { client_link_id: string, months?: number, regenerate?: boolean }
  *
  * Creates a rule_discovery_jobs row, kicks off background analysis,
  * returns immediately with the job ID.
+ *
+ * INCREMENTAL (default): only vendors that don't already have a rule are
+ * analyzed — the monthly top-up.
+ *
+ * REGENERATE (`regenerate: true`, admin/lead): deletes the client's existing
+ * rules first and re-derives ALL of them from transactions against the
+ * current master COA. This is the step-2 rebuild after a chart is conformed:
+ * rules written against the old chart name accounts that no longer exist and
+ * export as blank categories, and incremental discovery can never fix them
+ * because it skips any vendor that already has a rule.
+ *
+ * Regenerate clears ALL of the client's rules, including ones already pushed
+ * to QBO. That's deliberate: keeping a pushed rule would also keep its stale
+ * target (the existing-pattern filter skips that vendor forever), which is
+ * the exact thing we're fixing. Bank rules hold no history, and the import
+ * rollout already has the bookkeeper delete QBO's rules before importing the
+ * fresh .xls — so nothing is lost. Never do this to accounts; only rules.
  */
 export async function POST(request: Request) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { client_link_id, months = 6 } = await request.json();
+  const { client_link_id, months = 6, regenerate = false } = await request.json();
   if (!client_link_id) {
     return NextResponse.json({ error: "client_link_id required" }, { status: 400 });
+  }
+
+  // Regenerate DELETES rules — senior-only, and never silent.
+  let deletedRules = 0;
+  if (regenerate) {
+    const svc = createServiceSupabase();
+    const { data: actor } = await svc.from("users").select("role").eq("id", user.id).single();
+    if (!["admin", "lead"].includes((actor as any)?.role || "")) {
+      return NextResponse.json(
+        { error: "Only admin/lead can regenerate a client's rules." },
+        { status: 403 }
+      );
+    }
+    const { data: removed, error: delErr } = await (svc as any)
+      .from("bank_rules")
+      .delete()
+      .eq("client_link_id", client_link_id)
+      .select("id, pushed_to_qbo");
+    if (delErr) {
+      return NextResponse.json({ error: `Couldn't clear existing rules: ${delErr.message}` }, { status: 500 });
+    }
+    const removedRows = ((removed as any[]) || []);
+    deletedRules = removedRows.length;
+    const wasPushed = removedRows.filter((r) => r.pushed_to_qbo).length;
+    await svc.from("audit_log").insert({
+      event_type: "bank_rules_regenerated",
+      user_id: user.id,
+      request_payload: {
+        client_link_id, deleted_rules: deletedRules,
+        deleted_previously_pushed: wasPushed, months,
+      } as any,
+    });
   }
 
   // Create the job row
@@ -55,7 +104,12 @@ export async function POST(request: Request) {
     }
   });
 
-  return NextResponse.json({ job_id: job.id, started: true });
+  return NextResponse.json({
+    job_id: job.id,
+    started: true,
+    regenerate: !!regenerate,
+    deleted_rules: deletedRules,
+  });
 }
 
 async function runDiscovery(jobId: string, clientLinkId: string, months: number) {
