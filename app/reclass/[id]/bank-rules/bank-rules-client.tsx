@@ -40,6 +40,32 @@ interface AvailableAccount {
   group?: "master" | "other";
 }
 
+/** Friendly transaction-type label for a QBO AccountType, so the bookkeeper
+ *  sees WHAT KIND of account each option is (income vs variable cost vs
+ *  expense vs equity vs asset…) right in the picker. Returns "" for blank/
+ *  unknown so we never append a junk label; passes through anything unmapped
+ *  (e.g. the "(used in this job)" placeholder). */
+function accountClass(type: string): string {
+  const t = (type || "").trim().toLowerCase();
+  if (!t) return "";
+  if (t === "income") return "Income";
+  if (t === "other income") return "Other Income";
+  if (t === "cost of goods sold") return "Variable Cost";
+  if (t === "expense") return "Expense";
+  if (t === "other expense") return "Other Expense";
+  if (t === "fixed asset") return "Fixed Asset";
+  if (t === "equity") return "Equity";
+  if (["bank", "other current asset", "other asset", "accounts receivable"].includes(t)) return "Asset";
+  if (["credit card", "accounts payable", "other current liability", "long term liability"].includes(t)) return "Liability";
+  return type;
+}
+
+/** "Name · Class" for an option label (omits the separator when no class). */
+function optionLabel(a: AvailableAccount): string {
+  const cls = accountClass(a.type);
+  return cls ? `${a.name}  ·  ${cls}` : a.name;
+}
+
 interface Props {
   reclassJobId: string;
   clientLinkId: string;
@@ -864,7 +890,7 @@ export function BankRulesFromReclassClient({
                               .filter((a) => a.group !== "other")
                               .map((a) => (
                                 <option key={a.id} value={a.id}>
-                                  {a.name}
+                                  {optionLabel(a)}
                                 </option>
                               ))}
                           </optgroup>
@@ -876,7 +902,7 @@ export function BankRulesFromReclassClient({
                               .filter((a) => a.group === "other")
                               .map((a) => (
                                 <option key={a.id} value={a.id}>
-                                  {a.name}
+                                  {optionLabel(a)}
                                 </option>
                               ))}
                           </optgroup>
