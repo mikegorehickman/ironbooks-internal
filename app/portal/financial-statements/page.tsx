@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { PortalErrorState } from "../error-state";
 import { STATEMENTS } from "./statement-switcher";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * nav stays compact while all three statements remain one click away.
  */
 export default async function FinancialStatementsHub() {
-  const ctxResult = await tryResolvePortalContext();
+  const ctxResult = await resolvePortalContextAllowNoQbo();
   if (!ctxResult.ok) return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
 
   return (

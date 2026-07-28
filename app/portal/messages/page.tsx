@@ -1,4 +1,4 @@
-import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { createServiceSupabase } from "@/lib/supabase";
 import { PortalErrorState } from "../error-state";
 import { MessagesClient } from "./messages-client";
@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
  * client component handles sending, uploading, and mark-as-read.
  */
 export default async function PortalMessagesPage() {
-  const ctxResult = await tryResolvePortalContext();
+  const ctxResult = await resolvePortalContextAllowNoQbo();
   if (!ctxResult.ok) return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
   const { ctx } = ctxResult;
 

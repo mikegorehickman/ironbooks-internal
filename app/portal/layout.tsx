@@ -8,6 +8,8 @@ import { MessagesNavLink } from "./messages-nav-link";
 import { FinancialStatementsNav } from "./financial-statements-nav";
 import { SignOutButton } from "./sign-out-button";
 import { ImpersonationBanner } from "./impersonation-banner";
+import { cookies } from "next/headers";
+import { SKIP_QBO_COOKIE, resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { OnboardingNagBanner } from "./onboarding-nag-banner";
 import { SupportWidget } from "./support-widget";
 import { tryResolvePortalContext } from "@/lib/portal-context";
@@ -45,14 +47,19 @@ export default async function PortalLayout({ children }: { children: React.React
   const actorRole = (actorProfile as any)?.role;
   const isInternal = ["admin", "lead", "bookkeeper", "viewer"].includes(actorRole);
 
-  const ctxResult = await tryResolvePortalContext();
+  let ctxResult = await tryResolvePortalContext();
 
   // QBO disconnected (token dead OR realm never set). Show a clear
   // reconnect UI for BOTH real clients and impersonating admins instead
   // of silently bouncing to /dashboard. The bounce previously hid the
   // real problem when admin clicked "View portal as client" for any
   // client whose refresh token had been revoked.
-  if (!ctxResult.ok && ctxResult.code === "no_qbo") {
+  // QBO dead. Show the reconnect card UNLESS they chose "skip for now" — then
+  // fall through into the portal in degraded mode so they can still reach
+  // messages, published statements, billing and settings. A persistent banner
+  // keeps asking them to reconnect.
+  const skipQbo = (await cookies()).get(SKIP_QBO_COOKIE)?.value === "1";
+  if (!ctxResult.ok && ctxResult.code === "no_qbo" && !skipQbo) {
     return (
       <QboDisconnectedState
         clientLinkId={ctxResult.meta.clientLinkId || null}
@@ -62,6 +69,11 @@ export default async function PortalLayout({ children }: { children: React.React
         actorIsInternal={isInternal}
       />
     );
+  }
+  // Skipped: re-resolve in degraded mode (no realm/token, qboDisconnected:true)
+  // so the shell + every DB-backed page still renders.
+  if (!ctxResult.ok && ctxResult.code === "no_qbo" && skipQbo) {
+    ctxResult = await resolvePortalContextAllowNoQbo();
   }
 
   // Internal staff with no impersonation = wrong place
@@ -180,6 +192,20 @@ export default async function PortalLayout({ children }: { children: React.React
           currentClientLinkId={ctx.clientLinkId}
           portalClients={portalClients}
         />
+      )}
+      {ctx.qboDisconnected && (
+        <div className="bg-amber-500 text-white text-sm px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="font-bold">QuickBooks isn&apos;t connected.</span>{" "}
+            Your messages and statements still work, but live figures are paused until you reconnect.
+          </div>
+          <a
+            href={`/connect-quickbooks?client_link_id=${encodeURIComponent(ctx.clientLinkId)}&reason=token_expired`}
+            className="text-xs font-bold underline underline-offset-2 hover:no-underline shrink-0"
+          >
+            Reconnect QuickBooks
+          </a>
+        </div>
       )}
       {needsOnboarding && <OnboardingNagBanner />}
       <div className="flex">
@@ -419,6 +445,19 @@ function QboDisconnectedState({
             >
               Reconnect QuickBooks
             </a>
+
+            {/* Escape hatch — a dead token shouldn't lock the client out of
+                their messages, published statements or billing. */}
+            <a
+              href="/api/portal/skip-qbo?to=/portal/messages"
+              className="block w-full text-center px-5 py-2.5 rounded-lg border border-cardline hover:bg-canvas text-ink text-sm font-medium transition-colors"
+            >
+              Skip for now — take me to my portal
+            </a>
+            <p className="-mt-2 text-xs text-ink-light text-center">
+              Your messages, statements and billing still work. Live QuickBooks
+              figures stay unavailable until you reconnect.
+            </p>
 
             {actorIsInternal && impersonating && (
               <form action="/api/admin/impersonate/stop" method="POST">

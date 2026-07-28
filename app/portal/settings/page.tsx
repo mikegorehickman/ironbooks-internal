@@ -1,4 +1,4 @@
-import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { PortalErrorState } from "../error-state";
 import { Mail, User, Briefcase, Calendar } from "lucide-react";
 import { createServiceSupabase } from "@/lib/supabase";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * in Day 7 polish if there's appetite).
  */
 export default async function PortalSettings() {
-  const ctxResult = await tryResolvePortalContext();
+  const ctxResult = await resolvePortalContextAllowNoQbo();
   if (!ctxResult.ok) return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
   const { ctx } = ctxResult;
 

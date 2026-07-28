@@ -1,4 +1,4 @@
-import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { createServiceSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { PortalErrorState } from "../error-state";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * config the billing card uses, so the two stay consistent.
  */
 export default async function CoachingCallPage() {
-  const ctxResult = await tryResolvePortalContext();
+  const ctxResult = await resolvePortalContextAllowNoQbo();
   if (!ctxResult.ok) {
     if (ctxResult.code === "no_session") redirect("/auth/login");
     return <PortalErrorState code={ctxResult.code as any} />;
