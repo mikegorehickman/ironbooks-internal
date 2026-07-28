@@ -54,16 +54,59 @@ export async function POST(request: Request) {
 
   if (action === "watch_video") {
     state.video_watched_at = state.video_watched_at || now;
+  } else if (action === "save_progress") {
+    // Autosave from the paged intake form — called on every "Next" so a client
+    // can close the tab and resume. Stores the raw answers only; nothing is
+    // validated and nothing is marked done.
+    if (body.answers && typeof body.answers === "object") {
+      state.form_draft = body.answers;
+      state.form_draft_page = Number.isFinite(body.page) ? Number(body.page) : 0;
+      state.form_saved_at = now;
+    }
   } else if (action === "submit_form") {
-    // Foundation intake → write straight to the client profile (onboarding
-    // now lives in SNAP). Whitelisted fields only.
+    // The full intake. Everything is kept verbatim in form_answers (most of the
+    // 29 fields have no column of their own), and the subset that maps onto the
+    // client profile is written through so the rest of SNAP sees it.
+    const ans = (body.answers && typeof body.answers === "object" ? body.answers : body) as any;
+
+    const mapped: Record<string, string> = {
+      legal_business_name: ans.companyName,
+      trade_type: ans.tradeType,
+      corporate_type: ans.corporationType,
+      fiscal_year_end: ans.fiscalYearEnd,
+      state_province: ans.provinceState,
+      country: ans.country,
+      annual_revenue_range: ans.annualRevenue,
+      taxes_up_to_date: ans.taxesUpToDate,
+      prior_bookkeeper: ans.lastBookkeeper,
+      accounting_software: ans.accountingSoftware,
+      employee_count_range: ans.employeeCount,
+      keeps_receipts: ans.keepsReceipts,
+      bank_connected_to_software: ans.bankConnected,
+      uses_business_cards: ans.cardsUsed,
+      payroll_provider:
+        ans.payrollProvider === "Other" ? ans.payrollProviderOther : ans.payrollProvider,
+      contact_first_name: ans.firstName,
+      contact_last_name: ans.lastName,
+      client_phone: ans.phone,
+    };
+    for (const [col, val] of Object.entries(mapped)) {
+      if (typeof val === "string" && val.trim()) updates[col] = val.trim();
+    }
+    // Legacy direct-field callers (older clients mid-flow) still work.
     for (const f of FOUNDATION_FIELDS) {
       if (typeof body[f] === "string" && body[f].trim()) updates[f] = body[f].trim();
     }
     if (ENTITY_TYPES.includes(body.entity_type)) updates.entity_type = body.entity_type;
     if (Object.keys(updates).length) updates.profile_updated_at = now;
+
+    state.form_answers = ans;
+    state.form_draft = null;
     state.form_submitted_at = now;
-    state.accounts_attested = body.accounts_attested === true;
+    // The bank-list attestation is the one that matters — record the client's
+    // own timestamp when they gave it, not when they hit submit.
+    state.accounts_attested = ans.accountAttestation === true || body.accounts_attested === true;
+    state.accounts_attested_at = ans.accountAttestationTimestamp || (state.accounts_attested ? now : null);
   } else if (action === "book_call") {
     // Client confirms the onboarding call is booked. The GHL appointment webhook
     // (/api/webhooks/ghl/ob-call) sets the same field authoritatively when it

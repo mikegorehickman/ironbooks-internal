@@ -19,6 +19,13 @@ export interface PortalOnboardingState {
   docs_provided_at?: string | null;
   completed_at?: string | null;
   accounts_attested?: boolean;
+  accounts_attested_at?: string | null;
+  /** In-progress answers from the paged intake form, saved on every "Next". */
+  form_draft?: any | null;
+  form_draft_page?: number | null;
+  form_saved_at?: string | null;
+  /** The submitted intake, verbatim — most of the 29 fields have no column. */
+  form_answers?: any | null;
   /** Thank-you reward (see lib/onboarding-reward.ts). `claimed` is the atomic
    *  latch that makes sending exactly-once; `sent` records success. */
   reward_claimed_at?: string | null;
@@ -35,6 +42,11 @@ export function readOnboardingState(row: { portal_onboarding?: any } | null | un
     docs_provided_at: s.docs_provided_at ?? null,
     completed_at: s.completed_at ?? null,
     accounts_attested: !!s.accounts_attested,
+    accounts_attested_at: s.accounts_attested_at ?? null,
+    form_draft: s.form_draft ?? null,
+    form_draft_page: s.form_draft_page ?? null,
+    form_saved_at: s.form_saved_at ?? null,
+    form_answers: s.form_answers ?? null,
     reward_claimed_at: s.reward_claimed_at ?? null,
     reward_sent_at: s.reward_sent_at ?? null,
     reward_error: s.reward_error ?? null,
@@ -80,7 +92,55 @@ export function shouldShowOnboarding(
  * embed. Empty → the wizard shows a "video coming soon" placeholder, never a
  * broken frame. */
 export function onboardingVideoUrl(): string {
-  return process.env.NEXT_PUBLIC_ONBOARDING_VIDEO_URL || "";
+  return toEmbedUrl(process.env.NEXT_PUBLIC_ONBOARDING_VIDEO_URL || "");
+}
+
+/**
+ * Turn a video link into one that can actually be iframed.
+ *
+ * The share/watch URL you copy from Vimeo, YouTube or Loom is NOT embeddable —
+ * those pages send X-Frame-Options: DENY, so the wizard renders "refused to
+ * connect" (hit live 2026-07-27). Only the player/embed host works. Rather than
+ * make whoever sets the env var remember that, accept any of the usual formats
+ * and convert:
+ *
+ *   vimeo.com/123            → player.vimeo.com/video/123
+ *   vimeo.com/123/abc        → player.vimeo.com/video/123?h=abc   (unlisted)
+ *   youtube.com/watch?v=ID   → youtube.com/embed/ID
+ *   youtu.be/ID              → youtube.com/embed/ID
+ *   loom.com/share/ID        → loom.com/embed/ID
+ *
+ * Already-embeddable URLs and anything unrecognized pass through untouched.
+ */
+export function toEmbedUrl(raw: string): string {
+  const url = (raw || "").trim();
+  if (!url) return "";
+
+  // Vimeo — unlisted videos carry a privacy hash as a second path segment.
+  const vimeo = url.match(/^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)(?:\/([A-Za-z0-9]+))?/);
+  if (vimeo) {
+    const [, id, hash] = vimeo;
+    return `https://player.vimeo.com/video/${id}${hash ? `?h=${hash}` : ""}`;
+  }
+
+  // YouTube watch pages and youtu.be short links.
+  const ytWatch = url.match(/^https?:\/\/(?:www\.)?youtube\.com\/watch\?(.*)$/);
+  if (ytWatch) {
+    const params = new URLSearchParams(ytWatch[1]);
+    const id = params.get("v");
+    if (id) {
+      const start = params.get("t") || params.get("start");
+      return `https://www.youtube.com/embed/${id}${start ? `?start=${String(start).replace(/\D/g, "")}` : ""}`;
+    }
+  }
+  const ytShort = url.match(/^https?:\/\/youtu\.be\/([A-Za-z0-9_-]+)/);
+  if (ytShort) return `https://www.youtube.com/embed/${ytShort[1]}`;
+
+  // Loom share links.
+  const loom = url.match(/^https?:\/\/(?:www\.)?loom\.com\/share\/([A-Za-z0-9]+)/);
+  if (loom) return `https://www.loom.com/embed/${loom[1]}`;
+
+  return url;
 }
 
 /**
