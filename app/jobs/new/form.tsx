@@ -198,6 +198,9 @@ export function NewJobForm({
 
   const provinceTax = getProvinceTax(province);
   const needsProvince = country === "CA";
+  // Arrived from a client's monthly close (stage 1 = Confirm COA). The redo
+  // guard below is suppressed in that case, so the form must start unblocked.
+  const fromMonthlyClose = searchParams.get("close") === "1";
   const [redoAllowed, setRedoAllowed] = useState(true);
   const canStart = !!selected && (!needsProvince || !!province);
 
@@ -587,7 +590,19 @@ export function NewJobForm({
         </div>
       )}
 
-      <RedoWarning clientId={selected?.id ?? null} kind="coa" onAllowChange={setRedoAllowed} preAcknowledged={searchParams.get("redo") === "1"} />
+      {/* The "already cleaned up — redo from scratch?" guard exists to stop
+          someone casually re-running a signed-off cleanup. Arriving from a
+          monthly close is not that: confirming the chart IS step 1 of the
+          close, so the warning is noise with a checkbox in front of it. Hide
+          it (and leave the form unblocked) when the close sent us here. */}
+      {!fromMonthlyClose && (
+        <RedoWarning
+          clientId={selected?.id ?? null}
+          kind="coa"
+          onAllowChange={setRedoAllowed}
+          preAcknowledged={searchParams.get("redo") === "1"}
+        />
+      )}
 
       <div className="flex items-center justify-between gap-3">
         <button

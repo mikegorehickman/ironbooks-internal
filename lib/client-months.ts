@@ -34,8 +34,11 @@ export const MONTH_STAGES = [
     /** Some clients genuinely need no chart work in a given month. */
     skippable: true,
     // Per-client COA review/cleanup job — NOT /coa-audit, which is the fleet
-    // drift dashboard and ignores ?client= entirely.
-    href: (clientId: string) => `/jobs/new?client=${clientId}`,
+    // drift dashboard and ignores ?client= entirely. `close=1` tells that page
+    // we're here as step 1 of a monthly close, so it suppresses the
+    // "already cleaned up — redo from scratch?" guard: re-confirming the chart
+    // is the point of this step, not an accident to warn about.
+    href: (clientId: string) => `/jobs/new?client=${clientId}&close=1`,
   },
   {
     key: "reclass_completed_at",
