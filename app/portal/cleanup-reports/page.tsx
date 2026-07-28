@@ -1,4 +1,4 @@
-import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { createServiceSupabase } from "@/lib/supabase";
 import { PortalErrorState } from "../error-state";
 import { FileText, Download, Calendar, CheckCircle2 } from "lucide-react";
@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  * window once, not per-job.
  */
 export default async function PortalCleanupReportsPage() {
-  const ctxResult = await tryResolvePortalContext();
+  const ctxResult = await resolvePortalContextAllowNoQbo();
   if (!ctxResult.ok)
     return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
   const { ctx } = ctxResult;

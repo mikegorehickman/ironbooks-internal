@@ -32,6 +32,11 @@ export interface PortalContext {
    *  + audit log). */
   realUserId?: string;
   realUserName?: string;
+  /** True when QBO is dead but the client chose "skip for now" — the portal
+   *  renders in degraded mode: DB-backed pages (messages, published
+   *  statements, billing, settings) work; live-QBO views must check this
+   *  and show a reconnect prompt instead of calling QBO with no token. */
+  qboDisconnected?: boolean;
 }
 
 /**
@@ -223,4 +228,42 @@ export async function tryResolvePortalContext(): Promise<
     }
     return { ok: false, code: "fetch_failed", message: (err as Error).message, meta: {} };
   }
+}
+
+/** Cookie set by /api/portal/skip-qbo — "let me into my portal anyway". */
+export const SKIP_QBO_COOKIE = "snap_portal_skip_qbo";
+
+/**
+ * Like tryResolvePortalContext, but a dead/absent QBO connection is NOT a
+ * dead end: it returns a DEGRADED context (no realm, no token,
+ * qboDisconnected: true) built from the error meta, so the client can still
+ * reach everything that doesn't need live QuickBooks — their messages,
+ * published statements, billing and settings.
+ *
+ * Every other failure (no session, no mapping, inactive) still fails closed.
+ * Pages that genuinely need QBO should keep using tryResolvePortalContext, or
+ * check ctx.qboDisconnected and render a reconnect prompt.
+ */
+export async function resolvePortalContextAllowNoQbo(): Promise<
+  | { ok: true; ctx: PortalContext }
+  | { ok: false; code: PortalAccessError["code"]; message: string; meta: PortalAccessErrorMeta }
+> {
+  const res = await tryResolvePortalContext();
+  if (res.ok) return res;
+  if (res.code !== "no_qbo" || !res.meta.clientLinkId) return res;
+  return {
+    ok: true,
+    ctx: {
+      userId: "",
+      userEmail: res.meta.userEmail || "",
+      userFullName: res.meta.userFullName || "",
+      clientLinkId: res.meta.clientLinkId,
+      clientName: res.meta.clientName || "Your Business",
+      qboRealmId: "",
+      accessToken: "",
+      impersonating: !!res.meta.impersonating,
+      realUserName: res.meta.realUserName || undefined,
+      qboDisconnected: true,
+    },
+  };
 }

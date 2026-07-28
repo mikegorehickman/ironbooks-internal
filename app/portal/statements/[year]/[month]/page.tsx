@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2 } from "lucide-react";
-import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { createServiceSupabase } from "@/lib/supabase";
 import { fetchPublishedPackage } from "@/lib/month-end/portal-package";
 import { PortalErrorState } from "../../../error-state";
@@ -17,7 +17,7 @@ export default async function PortalStatementsPage({
   const periodYear = Number(year);
   const periodMonth = Number(month);
 
-  const ctxResult = await tryResolvePortalContext();
+  const ctxResult = await resolvePortalContextAllowNoQbo();
   if (!ctxResult.ok) {
     return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
   }

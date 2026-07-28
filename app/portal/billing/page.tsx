@@ -9,7 +9,7 @@ import {
   type StripeBillingInfo,
   type StripeInvoice,
 } from "@/lib/stripe-billing";
-import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +28,7 @@ export default async function BillingPage() {
   // impersonation). Doing our own cookie/mapping logic here is what made
   // billing diverge from the rest of the portal — e.g. showing "Portal access
   // not available" for a client the layout rendered fine.
-  const ctxResult = await tryResolvePortalContext();
+  const ctxResult = await resolvePortalContextAllowNoQbo();
   if (!ctxResult.ok) {
     if (ctxResult.code === "no_session") redirect("/auth/login");
     return <PortalErrorState code={ctxResult.code as any} />;

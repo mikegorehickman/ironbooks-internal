@@ -1,4 +1,4 @@
-import { tryResolvePortalContext } from "@/lib/portal-context";
+import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { createServiceSupabase } from "@/lib/supabase";
 import { PortalErrorState } from "../error-state";
 import { LearnClient } from "./learn-client";
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  * everyone the full library and lets them pick.
  */
 export default async function LearnPage() {
-  const ctxResult = await tryResolvePortalContext();
+  const ctxResult = await resolvePortalContextAllowNoQbo();
   if (!ctxResult.ok) return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
 
   const service = createServiceSupabase();
