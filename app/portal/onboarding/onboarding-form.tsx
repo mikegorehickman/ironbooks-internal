@@ -88,6 +88,39 @@ export const EMPTY_ANSWERS: OnboardingAnswers = {
   additionalNotes: "",
 };
 
+/**
+ * Coerce whatever came back from the saved draft into a well-formed answers
+ * object.
+ *
+ * The page builds `initial` as `{...EMPTY_ANSWERS, ...prefill, ...form_draft}`
+ * — the stored JSON spreads LAST, so a draft holding `staff: null` (or
+ * `accounts` / `leaseFiles`) overwrites the empty-array defaults and the very
+ * first render dies on `a.staff.map(...)`. That's a white screen on the
+ * client's onboarding form, and it can't be cleared by retrying because the
+ * bad draft is reloaded every time.
+ *
+ * Drafts are arbitrary stored JSON — a partial autosave, a row written by an
+ * older shape of this form, or a JSON round-trip that nulled an empty array.
+ * So normalize at the boundary rather than trusting it, and never index into
+ * draft data without this.
+ */
+export function normalizeAnswers(raw: Partial<OnboardingAnswers> | null | undefined): OnboardingAnswers {
+  const merged = { ...EMPTY_ANSWERS, ...(raw || {}) } as OnboardingAnswers;
+  const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+  return {
+    ...merged,
+    staff: arr<StaffRow>(merged.staff),
+    accounts: arr<AccountRow>(merged.accounts),
+    leaseFiles: arr<UploadedFile>(merged.leaseFiles),
+    // Nullable single file — anything that isn't an object becomes null.
+    taxReturnFile:
+      merged.taxReturnFile && typeof merged.taxReturnFile === "object"
+        ? merged.taxReturnFile
+        : null,
+    accountAttestation: merged.accountAttestation === true,
+  };
+}
+
 const PAGES = [
   "You & your business",
   "Money & operations",
@@ -114,7 +147,10 @@ export function OnboardingForm({
   onSubmit: (answers: OnboardingAnswers) => Promise<void>;
   busy: boolean;
 }) {
-  const [a, setA] = useState<OnboardingAnswers>(initial);
+  // Normalize here, not just at the call site: this is the single choke point
+  // every caller passes through, so a malformed draft can never reach a
+  // `.map` below.
+  const [a, setA] = useState<OnboardingAnswers>(() => normalizeAnswers(initial));
   const [page, setPage] = useState(() =>
     Math.min(Math.max(Math.trunc(initialPage) || 0, 0), PAGES.length - 1)
   );
