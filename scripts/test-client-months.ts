@@ -8,6 +8,7 @@ import {
   periodMonthOf,
   priorPeriodMonth,
   monthProgress,
+  stageState,
   eligibleForMonthlyClose,
   effectiveStatus,
 } from "../lib/client-months";
@@ -38,36 +39,71 @@ eq("running on 1 Jan closes last December", priorPeriodMonth(new Date("2026-01-0
 eq("running mid-July still closes June", priorPeriodMonth(new Date("2026-07-28T07:00:00Z")), "2026-06-01");
 eq("current month of a July date", periodMonthOf(new Date("2026-07-28T07:00:00Z")), "2026-07-01");
 
-// ── Progress is DERIVED from timestamps, never asserted ───────────────────
+// ── Progress is DERIVED, and skipped is NOT done ──────────────────────────
 {
   const p = monthProgress(null);
-  ok("no row = zero progress", p.done === 0 && p.pct === 0 && !p.allDone);
+  ok("no row = zero progress", p.done === 0 && p.pct === 0 && !p.allResolved);
   eq("next stage on an empty month is COA", p.nextStage?.key, "coa_confirmed_at");
 }
 {
   const p = monthProgress({});
-  eq("empty row total matches the stage list", p.total, MONTH_STAGES.length);
+  eq("stage count is the agreed 7", p.total, 7);
   eq("empty row is 0%", p.pct, 0);
 }
 {
   const p = monthProgress({ coa_confirmed_at: "2026-07-01", reclass_completed_at: "2026-07-02" });
   eq("two stages done", p.done, 2);
   eq("next stage is bank rules", p.nextStage?.key, "bank_rules_completed_at");
-  ok("not all done", !p.allDone);
+  ok("not all resolved", !p.allResolved);
 }
 {
-  // Stages get completed OUT OF ORDER in practice — a bookkeeper may clear UF
-  // before finishing bank rules. Progress must count completions, not position.
-  const p = monthProgress({ coa_confirmed_at: "x", uf_ar_completed_at: "x", closed_at: "x" });
+  // Out-of-order completion is normal — statements requested before bank rules
+  // are finished. Progress must count completions, not position.
+  const p = monthProgress({ coa_confirmed_at: "x", statements_requested_at: "x", duplicates_checked_at: "x" });
   eq("out-of-order completions still count", p.done, 3);
   eq("next stage is the first genuine gap", p.nextStage?.key, "reclass_completed_at");
 }
 {
-  const all: any = {};
-  for (const s of MONTH_STAGES) all[s.key] = "2026-07-01";
+  // A skip resolves a stage without claiming it was done.
+  const p = monthProgress({ skipped_stages: ["coa_confirmed_at"], reclass_completed_at: "x" });
+  eq("skipped counted separately", p.skipped, 1);
+  eq("done excludes the skip", p.done, 1);
+  eq("resolved includes both", p.resolved, 2);
+  ok("a skipped stage is not the next action", p.nextStage?.key !== "coa_confirmed_at");
+}
+{
+  const all: any = { skipped_stages: [] };
+  for (const st of MONTH_STAGES) all[st.key] = "2026-07-01";
   const p = monthProgress(all);
-  ok("every stage stamped = allDone", p.allDone && p.pct === 100);
+  ok("every stage stamped = allResolved", p.allResolved && p.pct === 100);
   eq("no next stage when finished", p.nextStage, null);
+  eq("nothing skipped", p.skipped, 0);
+}
+{
+  // A month can close on a mix of done and skipped.
+  const mixed: any = { skipped_stages: ["coa_confirmed_at", "bank_rules_completed_at", "ask_client_at", "statements_requested_at"] };
+  for (const st of MONTH_STAGES) if (!mixed.skipped_stages.includes(st.key)) mixed[st.key] = "x";
+  const p = monthProgress(mixed);
+  ok("done + skipped can complete a month", p.allResolved && p.pct === 100);
+  eq("skipped count is honest", p.skipped, 4);
+  eq("done count is honest", p.done, 3);
+}
+
+// ── stageState: three states, never conflated ────────────────────────────
+eq("done wins", stageState({ coa_confirmed_at: "x", skipped_stages: ["coa_confirmed_at"] } as any, "coa_confirmed_at"), "done");
+eq("skipped when no timestamp", stageState({ skipped_stages: ["ask_client_at"] } as any, "ask_client_at"), "skipped");
+eq("todo when neither", stageState({ skipped_stages: [] } as any, "ask_client_at"), "todo");
+eq("null row is todo", stageState(null, "ask_client_at"), "todo");
+eq("missing skipped_stages is safe", stageState({} as any, "ask_client_at"), "todo");
+
+// ── Only the non-substantive stages may be skipped ───────────────────────
+{
+  const skippable = MONTH_STAGES.filter((s) => s.skippable).map((s) => s.key);
+  const required = MONTH_STAGES.filter((s) => !s.skippable).map((s) => s.key);
+  ok("COA confirm is skippable (per spec)", skippable.includes("coa_confirmed_at"));
+  ok("reclass is NOT skippable", required.includes("reclass_completed_at"));
+  ok("duplicates check is NOT skippable", required.includes("duplicates_checked_at"));
+  ok("sending month-end is NOT skippable", required.includes("month_end_sent_at"));
 }
 
 // ── Eligibility: who gets a month opened ──────────────────────────────────
@@ -82,10 +118,16 @@ ok("inactive client is NOT eligible",
 
 // ── Status: a month can't declare victory before the work is stamped ──────
 {
-  const all: any = { status: "in_progress" };
-  for (const s of MONTH_STAGES) all[s.key] = "2026-07-01";
+  const all: any = { status: "in_progress", skipped_stages: [] };
+  for (const st of MONTH_STAGES) all[st.key] = "2026-07-01";
   eq("all stages stamped ⇒ complete", effectiveStatus(all), "complete");
 }
+eq("all stages SKIPPED-or-done also completes",
+  effectiveStatus({
+    status: "in_progress",
+    skipped_stages: MONTH_STAGES.filter((s) => s.skippable).map((s) => s.key),
+    reclass_completed_at: "x", duplicates_checked_at: "x", month_end_sent_at: "x",
+  } as any), "complete");
 eq("status=complete but nothing done ⇒ in_progress (cannot fake it)",
   effectiveStatus({ status: "complete" }), "in_progress");
 eq("waiting_client is respected over derived state",
@@ -94,7 +136,7 @@ eq("failed_review is respected",
   effectiveStatus({ status: "failed_review", coa_confirmed_at: "x" }), "failed_review");
 eq("some work done ⇒ in_progress",
   effectiveStatus({ status: "not_started", coa_confirmed_at: "x" }), "in_progress");
-eq("nothing done ⇒ not_started", effectiveStatus({ status: "not_started" }), "not_started");
+eq("nothing done ⇒ not_started", effectiveStatus({ status: "not_started", skipped_stages: [] } as any), "not_started");
 eq("ready_for_review is kept while incomplete",
   effectiveStatus({ status: "ready_for_review", coa_confirmed_at: "x" }), "ready_for_review");
 
@@ -102,6 +144,7 @@ eq("ready_for_review is kept while incomplete",
 ok("stage keys are unique", new Set(MONTH_STAGES.map((s) => s.key)).size === MONTH_STAGES.length);
 ok("every stage has a label and a blurb", MONTH_STAGES.every((s) => !!s.label && !!s.blurb));
 ok("every stage key ends in _at (it is a timestamp)", MONTH_STAGES.every((s) => s.key.endsWith("_at")));
+ok("stage list matches the agreed 7", MONTH_STAGES.length === 7);
 
 console.log(`\nclient-months: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

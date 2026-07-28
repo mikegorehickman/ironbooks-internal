@@ -7,6 +7,7 @@ import {
   Loader2, AlertCircle, Sparkles, GitMerge, ChevronRight, Layers,
   Calendar, DollarSign, Scale,
 } from "lucide-react";
+import { monthBounds } from "@/lib/client-months";
 
 interface ClientLink {
   id: string;
@@ -96,6 +97,16 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
     }
     if (cId && clientLinks.some((c) => c.id === cId)) {
       setClientLinkId(cId);
+    }
+    // ?month=YYYY-MM — arriving from the monthly-close board. Pre-scope the job
+    // to exactly that month so nobody types a range by hand (and nobody
+    // accidentally re-runs the whole year for one month's work).
+    const monthParam = searchParams.get("month");
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      const { start, end } = monthBounds(`${monthParam}-01`);
+      setDateRangeStart(start);
+      setDateRangeEnd(end);
+      setWorkflow("full_categorization");
     }
   }, [searchParams, clientLinks]);
 

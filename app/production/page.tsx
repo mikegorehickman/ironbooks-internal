@@ -1,8 +1,6 @@
-import { AppShell } from "@/components/AppShell";
-import { TopBar } from "@/components/TopBar";
 import { createServerSupabase } from "@/lib/supabase";
 import { redirect } from "next/navigation";
-import { ProductionBoard } from "./production-board";
+import { redirect as nav } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -19,15 +17,9 @@ export default async function ProductionPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
 
-  return (
-    <AppShell>
-      <TopBar
-        title="Production"
-        subtitle="Monthly close board · graduated clients, month by month"
-      />
-      <div className="px-8 py-6 max-w-7xl">
-        <ProductionBoard />
-      </div>
-    </AppShell>
-  );
+  // The monthly close now drives production work: one bucket per client per
+  // month, with the 7-stage checklist and a single obvious next action. Kept as
+  // a redirect rather than two competing boards — the previous version tracked a
+  // generic status with the month held in the bookkeeper's head.
+  nav("/monthly-close");
 }

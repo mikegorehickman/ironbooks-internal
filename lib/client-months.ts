@@ -15,50 +15,52 @@
 export const MONTH_STAGES = [
   {
     key: "coa_confirmed_at",
-    label: "COA confirmed",
+    label: "Confirm COA",
     blurb: "Chart matches the current master COA",
+    /** Some clients genuinely need no chart work in a given month. */
+    skippable: true,
     href: (clientId: string) => `/coa-audit?client=${clientId}`,
   },
   {
     key: "reclass_completed_at",
-    label: "Reclass",
-    blurb: "Month's transactions categorized and pushed",
+    label: "Transaction reclass",
+    blurb: "The month's transactions categorized and pushed to QBO",
+    skippable: false,
     href: (clientId: string, month: string) => `/reclass/new?client=${clientId}&month=${month}`,
   },
   {
     key: "bank_rules_completed_at",
-    label: "Bank rules",
-    blurb: "New vendor→account rules captured from this month",
+    label: "New bank rules",
+    blurb: "Capture this month's vendor→account mappings as rules",
+    skippable: true,
     href: (clientId: string) => `/rules/new?client=${clientId}`,
   },
   {
-    key: "uf_ar_completed_at",
-    label: "UF / A-R",
-    blurb: "Undeposited funds cleared, A/R reconciled, statements requested",
-    href: (clientId: string) => `/clients/${clientId}?tab=ar`,
+    key: "ask_client_at",
+    label: "Ask client",
+    blurb: "Send the client their open questions and get answers back",
+    skippable: true,
+    href: (clientId: string) => `/clients/${clientId}?tab=messages`,
   },
   {
-    key: "payroll_dup_checked_at",
-    label: "Payroll dupes",
-    blurb: "No gross-plus-net double counting",
-    href: (clientId: string) => `/admin/payroll-double-scan?client=${clientId}`,
+    key: "statements_requested_at",
+    label: "BS / statement request",
+    blurb: "Balance-sheet review and bank/CC statements requested",
+    skippable: true,
+    href: (clientId: string) => `/clients/${clientId}?tab=balance-sheet`,
   },
   {
-    key: "txn_dup_checked_at",
-    label: "Txn dupes",
-    blurb: "No duplicate expenses or revenue",
+    key: "duplicates_checked_at",
+    label: "Duplicates",
+    blurb: "No duplicate transactions or invoices (incl. payroll double-counting)",
+    skippable: false,
     href: (clientId: string) => `/clients/${clientId}?tab=duplicates`,
   },
   {
-    key: "closed_at",
-    label: "Closed",
-    blurb: "Books closed for the month",
-    href: (clientId: string) => `/month-end?client=${clientId}`,
-  },
-  {
-    key: "statements_sent_at",
-    label: "Statements sent",
-    blurb: "Published to the portal and emailed, with the notice to reader",
+    key: "month_end_sent_at",
+    label: "Send month-end",
+    blurb: "Statements published and emailed with the notice to reader",
+    skippable: false,
     href: (clientId: string) => `/month-end?client=${clientId}`,
   },
 ] as const;
@@ -87,12 +89,14 @@ export interface ClientMonth {
   coa_confirmed_at: string | null;
   reclass_completed_at: string | null;
   bank_rules_completed_at: string | null;
-  uf_ar_completed_at: string | null;
+  ask_client_at: string | null;
   statements_requested_at: string | null;
-  payroll_dup_checked_at: string | null;
-  txn_dup_checked_at: string | null;
-  closed_at: string | null;
-  statements_sent_at: string | null;
+  duplicates_checked_at: string | null;
+  month_end_sent_at: string | null;
+  /** Stage keys deliberately not applicable this month. */
+  skipped_stages: string[];
+  /** Stage key → why it was skipped. */
+  skip_reasons: Record<string, string>;
 }
 
 /** "2026-06-01" → "June 2026". Deliberately parsed as parts, not `new Date()`:
@@ -130,50 +134,68 @@ export function priorPeriodMonth(date: Date): string {
   return m === 0 ? `${y - 1}-12-01` : `${y}-${String(m).padStart(2, "0")}-01`;
 }
 
+export type StageState = "done" | "skipped" | "todo";
+
+/** Three states, not two. "We checked the chart and it's fine" and "this client
+ *  needs no chart work this month" are different facts, and collapsing them is
+ *  how a checklist becomes theatre. */
+export function stageState(row: Partial<ClientMonth> | null | undefined, key: string): StageState {
+  if (!row) return "todo";
+  if ((row as any)[key]) return "done";
+  if ((row.skipped_stages || []).includes(key)) return "skipped";
+  return "todo";
+}
+
 export interface MonthProgress {
+  /** Stages actually completed. */
   done: number;
+  /** Stages deliberately skipped — resolved, but not done. */
+  skipped: number;
+  /** done + skipped: how much no longer needs attention. */
+  resolved: number;
   total: number;
-  /** 0–100, for a bar. */
+  /** 0–100, based on RESOLVED, since a skip genuinely needs no more work. */
   pct: number;
-  /** The first incomplete stage — what the bookkeeper should do next. */
+  /** The first unresolved stage — what to do next. */
   nextStage: (typeof MONTH_STAGES)[number] | null;
-  /** True when every stage carries a timestamp. */
-  allDone: boolean;
+  /** Every stage resolved: the month can close. */
+  allResolved: boolean;
 }
 
 /**
- * Derive progress from the timestamps.
+ * Derive progress from the timestamps and the skip list.
  *
- * Note it counts COMPLETED stages rather than "position in the list": stages get
- * done out of order in practice (a bookkeeper may clear UF before finishing bank
- * rules), and a position-based bar would lie about how much is left.
+ * Counts RESOLVED stages rather than "position in the list": stages get done out
+ * of order in practice (statements requested before bank rules are finished), and
+ * a position-based bar would misreport what's left.
  */
 export function monthProgress(row: Partial<ClientMonth> | null | undefined): MonthProgress {
   const total = MONTH_STAGES.length;
-  if (!row) return { done: 0, total, pct: 0, nextStage: MONTH_STAGES[0], allDone: false };
+  if (!row) {
+    return { done: 0, skipped: 0, resolved: 0, total, pct: 0, nextStage: MONTH_STAGES[0], allResolved: false };
+  }
 
   let done = 0;
+  let skipped = 0;
   let nextStage: (typeof MONTH_STAGES)[number] | null = null;
   for (const stage of MONTH_STAGES) {
-    if ((row as any)[stage.key]) done++;
+    const st = stageState(row, stage.key);
+    if (st === "done") done++;
+    else if (st === "skipped") skipped++;
     else if (!nextStage) nextStage = stage;
   }
+  const resolved = done + skipped;
   return {
     done,
+    skipped,
+    resolved,
     total,
-    pct: Math.round((done / total) * 100),
+    pct: Math.round((resolved / total) * 100),
     nextStage,
-    allDone: done === total,
+    allResolved: resolved === total,
   };
 }
 
-/**
- * Is this client eligible to have months opened at all?
- *
- * Mirrors "a client whose books we actually run": active, and either signed off
- * on cleanup or on the daily engine. An onboarding client has no month to close
- * yet, and opening empty buckets for them just pads the board.
- */
 export function eligibleForMonthlyClose(client: {
   is_active?: boolean | null;
   cleanup_completed_at?: string | null;
@@ -187,10 +209,12 @@ export function eligibleForMonthlyClose(client: {
  *  A month is only `complete` when every stage is actually stamped — the status
  *  column can't be used to declare victory early. */
 export function effectiveStatus(row: Partial<ClientMonth>): MonthStatus {
-  const { allDone, done } = monthProgress(row);
+  const { allResolved, resolved } = monthProgress(row);
   if (row.status === "waiting_client" || row.status === "failed_review") return row.status;
-  if (allDone) return "complete";
+  if (allResolved) return "complete";
   if (row.status === "ready_for_review") return "ready_for_review";
-  if (done > 0) return "in_progress";
+  if (resolved > 0) return "in_progress";
+  // A status of `complete` with unresolved stages is not honoured — the whole
+  // point is that the checklist, not a dropdown, decides when a month is done.
   return row.status === "complete" ? "in_progress" : row.status || "not_started";
 }
