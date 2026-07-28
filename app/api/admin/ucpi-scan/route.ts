@@ -85,12 +85,47 @@ export async function POST(request: Request) {
     const items = buildUcpiItems(payments, openInvoices);
     const unappliedTotal = r2(items.reduce((s, it) => s + it.unapplied_total, 0));
 
+    // Optional: persist one pending question row per customer (the "create the
+    // questions" step; the client answers them after statement delivery). Never
+    // clobbers a row the client has already answered/resolved.
+    let persisted = 0;
+    if (body.persist === true) {
+      const period = /^\d{4}-\d{2}$/.test(body.period || "") ? body.period : start.slice(0, 7);
+      const { data: existing } = await (service as any)
+        .from("ucpi_resolutions")
+        .select("customer_id, status")
+        .eq("client_link_id", clientLinkId)
+        .eq("period", period);
+      const locked = new Set(((existing as any[]) || []).filter((r) => r.status !== "pending").map((r) => String(r.customer_id)));
+      const rows = items
+        .filter((it) => !locked.has(String(it.customer_id)))
+        .map((it) => ({
+          client_link_id: clientLinkId,
+          period,
+          customer: it.customer,
+          customer_id: it.customer_id,
+          payment_ids: it.payments.map((p) => p.payment_id),
+          unapplied_amount: it.unapplied_total,
+          open_invoices: it.open_invoices,
+          status: "pending",
+          updated_at: new Date().toISOString(),
+        }));
+      if (rows.length > 0) {
+        const { error: upErr } = await (service as any)
+          .from("ucpi_resolutions")
+          .upsert(rows, { onConflict: "client_link_id,customer_id,period" });
+        if (upErr) return NextResponse.json({ error: `persist failed: ${upErr.message}` }, { status: 500 });
+        persisted = rows.length;
+      }
+    }
+
     return NextResponse.json({
       client_link_id: clientLinkId,
       client_name: (client as any).client_name,
       window: { start, end },
       count: items.length,
       unapplied_total: unappliedTotal,
+      persisted,
       items,
     });
   } catch (err: any) {
