@@ -273,21 +273,33 @@ export async function runDailyRecon(
       );
     }
 
-    // 5. Filter out already-processed lines (idempotency)
-    const lineIds = rawLines.map((l) => l.line_id);
+    // 5. Filter out already-processed lines (idempotency).
+    //
+    // The key is (transaction_id, line_id) — NOT line_id alone. QBO's Line.Id is
+    // a per-transaction ORDINAL: fleet-wide the column holds six distinct values
+    // (1, 2, 3, 5, 6, 7). Keying on it alone made every transaction's first line
+    // collide, which capped processed_qbo_lines at 43 rows (batch inserts died on
+    // the primary key), so idempotency excluded nothing and every nightly run
+    // re-queued the same transactions — 6,452 queue rows for 1,940 real lines.
+    // Migration 141 widens the primary key to match. See that file for the full
+    // write-up.
+    const lineKey = (txnId: string, lineId: string) => `${txnId}::${lineId}`;
+    const txnIds = [...new Set(rawLines.map((l) => l.transaction_id))];
     let alreadyProcessed = new Set<string>();
-    if (lineIds.length > 0) {
+    if (txnIds.length > 0) {
+      // Query by transaction id (selective, and safe against the ordinal
+      // collision), then match on the composite key in memory.
       const { data: already } = await service
         .from("processed_qbo_lines" as any)
-        .select("qbo_line_id")
+        .select("qbo_line_id, qbo_transaction_id")
         .eq("client_link_id", clientLinkId)
-        .in("qbo_line_id", lineIds);
+        .in("qbo_transaction_id", txnIds);
       alreadyProcessed = new Set(
-        ((already as any[]) || []).map((r) => r.qbo_line_id)
+        ((already as any[]) || []).map((r) => lineKey(r.qbo_transaction_id, r.qbo_line_id))
       );
     }
     const newLines = rawLines
-      .filter((l) => !alreadyProcessed.has(l.line_id))
+      .filter((l) => !alreadyProcessed.has(lineKey(l.transaction_id, l.line_id)))
       .slice(0, maxLines);
 
     result.transactions_pulled = newLines.length;
@@ -746,15 +758,48 @@ export async function runDailyRecon(
       if (queueRows.length > 0) {
         const BATCH = 200;
         for (let i = 0; i < queueRows.length; i += BATCH) {
-          await service.from("daily_review_queue" as any).insert(queueRows.slice(i, i + BATCH) as any);
+          // Upsert, not insert: migration 141 adds a unique index on
+          // (client_link_id, qbo_transaction_id, qbo_line_id), so a line that is
+          // already awaiting review must not be queued a second time — that
+          // duplication is what grew this table to 6,452 rows for 1,940 real
+          // lines. ignoreDuplicates keeps the existing (possibly already
+          // actioned) row rather than resetting it to pending.
+          const { error: qErr } = await service
+            .from("daily_review_queue" as any)
+            .upsert(queueRows.slice(i, i + BATCH) as any, {
+              onConflict: "client_link_id,qbo_transaction_id,qbo_line_id",
+              ignoreDuplicates: true,
+            });
+          if (qErr) console.error(`[daily-recon ${clientLinkId}] queue upsert failed: ${qErr.message}`);
         }
       }
 
-      // 13c. Mark processed
+      // 13c. Mark processed.
+      //
+      // Upsert + surfaced errors. This was a bare insert, and because the old
+      // primary key was (client_link_id, qbo_line_id) — with qbo_line_id being a
+      // per-transaction ordinal — a 200-row batch containing two lines numbered
+      // "1" violated the key and the ENTIRE batch was silently discarded. That is
+      // why the ledger held 43 rows while thousands of lines were processed, and
+      // why idempotency never excluded anything. The error was never checked, so
+      // nothing surfaced for weeks.
       if (processedRows.length > 0) {
         const BATCH = 200;
         for (let i = 0; i < processedRows.length; i += BATCH) {
-          await service.from("processed_qbo_lines" as any).insert(processedRows.slice(i, i + BATCH) as any);
+          const { error: pErr } = await service
+            .from("processed_qbo_lines" as any)
+            .upsert(processedRows.slice(i, i + BATCH) as any, {
+              onConflict: "client_link_id,qbo_transaction_id,qbo_line_id",
+              ignoreDuplicates: true,
+            });
+          if (pErr) {
+            // Loud: a silent failure here means the engine re-processes the same
+            // lines every night, which is the exact bug being fixed.
+            console.error(
+              `[daily-recon ${clientLinkId}] processed_qbo_lines upsert FAILED — idempotency ` +
+                `is not being recorded, lines will be re-examined next run: ${pErr.message}`
+            );
+          }
         }
       }
 
