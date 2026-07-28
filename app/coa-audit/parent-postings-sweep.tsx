@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, AlertTriangle, ChevronDown, ChevronRight, ListChecks } from "lucide-react";
+import { ParentPostingsDrawer } from "./parent-postings-drawer";
 
 interface Client { id: string; client_name: string; }
 interface Child { id: string; name: string; }
@@ -26,6 +27,8 @@ export function ParentPostingsSweep({ clients }: { clients: Client[] }) {
   const [pick, setPick] = useState<Record<string, string>>({});
   const [fixMsg, setFixMsg] = useState<Record<string, string>>({});
   const [fixBusy, setFixBusy] = useState<string>("");
+  // Granular fixer — one parent at a time, transaction by transaction.
+  const [drawer, setDrawer] = useState<{ clientId: string; clientName: string; p: ParentPosting } | null>(null);
 
   async function runScan() {
     setScanning(true); setResults(null); setOpen(true);
@@ -94,7 +97,7 @@ export function ParentPostingsSweep({ clients }: { clients: Client[] }) {
           <div className="min-w-0">
             <div className="font-bold text-sm text-navy">Parent-account postings</div>
             <div className="text-[11px] text-ink-slate">
-              Transactions booked directly on a parent (QBO&rsquo;s &ldquo;[Parent] &ndash; Other&rdquo;). Scans the whole fleet for just this, then moves them onto the right sub-account.
+              Transactions booked directly on a parent (QBO&rsquo;s &ldquo;[Parent] &ndash; Other&rdquo;). Scans the whole fleet for just this. Use <strong>Review transactions</strong> to assign them one by one &mdash; a parent like Payroll splits across several sub-accounts. <strong>Move all</strong> is only for a pile that genuinely belongs in one place.
             </div>
           </div>
         </div>
@@ -135,13 +138,22 @@ export function ParentPostingsSweep({ clients }: { clients: Client[] }) {
                             <span className="text-[11px] text-red-600">no sub-accounts — add one in QBO first</span>
                           ) : (
                             <>
+                              {/* Default path for anything non-trivial: decide per
+                                  transaction. One parent rarely maps to one child. */}
+                              <button
+                                onClick={() => setDrawer({ clientId: r.client_link_id, clientName: r.client_name, p })}
+                                title="Open the transactions on this parent and assign each one"
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded border border-teal text-teal hover:bg-teal-light/40"
+                              >
+                                <ListChecks size={11} /> Review transactions
+                              </button>
                               <select
                                 value={pick[key] || ""}
                                 onChange={(e) => setPick((m) => ({ ...m, [key]: e.target.value }))}
                                 className="text-[11px] rounded border border-gray-300 px-1.5 py-1 bg-white max-w-[220px]"
-                                title="Move the parent's postings onto this sub-account"
+                                title="Move ALL of this parent's postings onto one sub-account — only right when the whole pile belongs there"
                               >
-                                <option value="">Move to sub-account…</option>
+                                <option value="">Move all to…</option>
                                 {p.children.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                               <button
@@ -163,6 +175,17 @@ export function ParentPostingsSweep({ clients }: { clients: Client[] }) {
             </div>
           )}
         </div>
+      )}
+
+      {drawer && (
+        <ParentPostingsDrawer
+          clientLinkId={drawer.clientId}
+          clientName={drawer.clientName}
+          parentId={drawer.p.parent_id}
+          parentName={drawer.p.parent_name}
+          onClose={() => setDrawer(null)}
+          onDone={() => setFixMsg((m) => ({ ...m, [`${drawer.clientId}:${drawer.p.parent_id}`]: "✓ moved — re-scan to refresh the totals" }))}
+        />
       )}
     </div>
   );
