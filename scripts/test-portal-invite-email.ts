@@ -82,7 +82,26 @@ async function main() {
 
   // ── Value, not just a link — the whole point of the rewrite.
   ok("resend body names what's waiting, not just the link",
-    resend.text.includes("Who owes you money") && resend.text.includes("Ask us anything"));
+    resend.text.includes("Know what you're owed") && resend.text.includes("Ask us anything"));
+  ok("covers financial literacy, not only reporting",
+    resend.text.includes("Learn the numbers that move profit"));
+
+  // ── NO FRESHNESS CLAIMS (Mike, 2026-07-28) ────────────────────────────────
+  // We cannot guarantee at send time that a client's books are current — and a
+  // client who logs in expecting a finished month and finds work in progress
+  // trusts the next email less. This guard exists because that copy is the
+  // tempting thing to write, so it will get re-suggested.
+  const FRESHNESS_CLAIMS = [
+    "up to date", "up-to-date", "all caught up", "fully reconciled",
+    "books are ready", "books are current", "everything is done",
+    "this month is closed", "finalised", "finalized",
+  ];
+  for (const m of [resend, first, hostile]) {
+    for (const claim of FRESHNESS_CLAIMS) {
+      ok(`no freshness claim "${claim}" in html`, !m.html.toLowerCase().includes(claim));
+      ok(`no freshness claim "${claim}" in text`, !m.text.toLowerCase().includes(claim));
+    }
+  }
   ok("reassures there's no password", resend.text.includes("no password to remember"));
   ok("resend acknowledges the expired link", resend.text.includes("expired"));
 

@@ -285,26 +285,33 @@ export async function sendPortalInviteEmail(params: {
   // The three items are real portal pages (Profit & Loss, Who owes you, Ask the
   // AI), not aspirational copy — promising a feature that isn't there is how you
   // teach someone to ignore your emails.
+  // NOTE: deliberately makes NO claim about how current the books are. We can't
+  // guarantee that at send time, and a client who logs in expecting a finished
+  // month and finds work in progress trusts the next email less. The pull is the
+  // value that IS always true: the tools, the learning, the ability to ask.
   const subject = params.isResend
-    ? `${firstName}, your books are up to date — here's your new link`
-    : `${firstName}, your Ironbooks portal is ready`;
+    ? `${firstName}, a clearer picture of your numbers is waiting`
+    : `${firstName}, your Ironbooks portal is open`;
 
   // Preheader: the grey line after the subject in most inboxes. Left unset it
   // leaks whatever the HTML starts with, which looks broken.
   const preheader = params.isResend
-    ? `A fresh sign-in link for ${params.clientName}. One tap, no password.`
-    : `See your profit, who owes you money, and ask us anything. One tap, no password.`;
+    ? `See where your money goes, what you're owed, and how to lift your margins. One tap, no password.`
+    : `See where your money goes, what you're owed, and how to lift your margins. One tap, no password.`;
 
   const openingLine = params.isResend
-    ? `Your last sign-in link expired, so here's a fresh one. Your books for <strong>${client}</strong> are up to date and waiting for you.`
-    : `Your Ironbooks team has your books for <strong>${client}</strong> up to date, and set you up with somewhere to see them any time you want.`;
+    ? `Your last sign-in link expired, so here's a fresh one. There's a lot waiting for you inside &mdash; everything we track for <strong>${client}</strong>, plus the tools to make sense of it.`
+    : `Your Ironbooks team has set up a home for everything we track for <strong>${client}</strong> &mdash; and the tools to help you read it, question it, and make more money from it.`;
 
   const cta = params.isResend ? "Open my books" : "Open my books";
 
+  // Every line describes something that EXISTS in the portal and is true
+  // regardless of where this month's bookkeeping has got to. No freshness claims.
   const BULLETS: Array<[string, string]> = [
-    ["Where you actually stand", "Profit and loss for any month — no spreadsheets, no waiting."],
-    ["Who owes you money", "Every unpaid invoice, oldest first, so nothing slips."],
-    ["Ask us anything", "Type a question about your numbers and get a straight answer."],
+    ["See where your money actually goes", "Profit and loss for any month, in plain language — not accountant-speak."],
+    ["Know what you're owed", "Every unpaid invoice in one place, oldest first, so nothing slips."],
+    ["Learn the numbers that move profit", "Short, practical lessons written for trades — margins, pricing, cash flow."],
+    ["Ask us anything", "Type a question about your business and get a straight answer back."],
   ];
 
   const signoff = bk
@@ -318,8 +325,8 @@ export async function sendPortalInviteEmail(params: {
     `Hi ${firstName},`,
     ``,
     params.isResend
-      ? `Your last sign-in link expired, so here's a fresh one. Your books for ${params.clientName} are up to date and waiting for you.`
-      : `Your Ironbooks team has your books for ${params.clientName} up to date, and set you up with somewhere to see them any time you want.`,
+      ? `Your last sign-in link expired, so here's a fresh one. There's a lot waiting for you inside — everything we track for ${params.clientName}, plus the tools to make sense of it.`
+      : `Your Ironbooks team has set up a home for everything we track for ${params.clientName} — and the tools to help you read it, question it, and make more money from it.`,
     ``,
     ...BULLETS.map(([t, d]) => `• ${t} — ${d}`),
     ``,
@@ -357,7 +364,7 @@ export async function sendPortalInviteEmail(params: {
 
     <div style="padding:30px 28px 8px;">
       <h1 style="margin:0 0 16px;color:#152F46;font-size:21px;line-height:1.3;font-weight:700;">
-        ${params.isResend ? "Your books are ready when you are" : "Your books, whenever you want them"}
+        ${params.isResend ? "There's a lot waiting for you inside" : "Your numbers, and how to use them"}
       </h1>
       <p style="color:#33414E;font-size:15px;line-height:1.6;margin:0 0 6px;">Hi ${esc(firstName)},</p>
       <p style="color:#33414E;font-size:15px;line-height:1.6;margin:0 0 24px;">${openingLine}</p>
