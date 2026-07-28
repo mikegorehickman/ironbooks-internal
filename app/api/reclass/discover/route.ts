@@ -4,6 +4,7 @@ import { after } from "next/server";
 import {
   fetchTransactionsForAccount,
   fetchAllTransactionLines,
+  scanUncoveredEntities,
   getCompanyClosingDate,
   isInClosedPeriod,
   findDoubleClose,
@@ -691,19 +692,52 @@ async function runFullCategorization(
       );
     }
 
-    // Item-based / unknown-detail lines exist in the period but can't be
-    // auto-reclassified. They used to be dropped silently; record them on the
-    // job so the review screen can say so out loud.
-    if (result.unreclassifiableLines.length > 0) {
+    // Everything the pipeline structurally cannot touch, recorded on the job so
+    // "this period is done" is never claimed on the strength of the expense
+    // family alone. Two separate gaps:
+    //   1. item-based / unknown-detail lines inside the types we DO fetch
+    //   2. entity types we never fetch at all (Deposit / JournalEntry /
+    //      Transfer / CreditCardPayment) — i.e. uncategorized INCOME and both
+    //      legs of every transfer
+    const coverage = await scanUncoveredEntities(
+      clientLink.qbo_realm_id,
+      accessToken,
+      job.date_range_start,
+      job.date_range_end,
+      isUncategorizedAccount
+    ).catch((err: any) => {
+      // A diagnostic must never break the job it is reporting on.
+      console.error(`[reclass ${jobId}] coverage scan failed: ${err?.message}`);
+      return null;
+    });
+
+    const hasGap =
+      result.unreclassifiableLines.length > 0 ||
+      (coverage && (coverage.inHoldingAccount > 0 || coverage.failedTypes.length > 0));
+
+    if (hasGap) {
       await service
         .from("reclass_jobs")
         .update({
           warnings: {
             unreclassifiable_count: result.unreclassifiableLines.length,
             unreclassifiable_sample: result.unreclassifiableLines.slice(0, 25),
-            note:
-              "These lines are in the period but are booked against Products/Services (or an " +
-              "unsupported line type), so SNAP cannot re-point them. Handle them directly in QBO.",
+            unreclassifiable_note:
+              result.unreclassifiableLines.length > 0
+                ? "These lines are in the period but are booked against Products/Services (or an " +
+                  "unsupported line type), so SNAP cannot re-point them. Handle them directly in QBO."
+                : null,
+            uncovered_entity_counts: coverage?.counts ?? null,
+            uncovered_in_holding_account: coverage?.inHoldingAccount ?? null,
+            uncovered_holding_account_value: coverage?.holdingAccountValue ?? null,
+            uncovered_sample: coverage?.samples ?? null,
+            uncovered_scan_failures: coverage?.failedTypes ?? null,
+            uncovered_note:
+              coverage && coverage.inHoldingAccount > 0
+                ? `${coverage.inHoldingAccount} deposit/journal-entry/transfer line(s) in this period are ` +
+                  `sitting in an uncategorized account. Reclass only covers Bills, Purchases, Expenses and ` +
+                  `Vendor Credits, so these were NOT touched — this period is not fully categorized.`
+                : null,
           } as any,
         } as any)
         .eq("id", jobId);

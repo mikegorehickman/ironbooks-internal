@@ -1061,6 +1061,170 @@ export function groupLinesByVendor(lines: ReclassLine[]): VendorGroup[] {
   return Array.from(groups.values()).sort((a, b) => b.lines.length - a.lines.length);
 }
 
+// ============== UNCOVERED ENTITY COVERAGE SCAN ==============
+
+/**
+ * QBO entity types the reclass/recon pipelines DO NOT fetch or reclassify.
+ *
+ * SUPPORTED_TX_TYPES is Bill / Purchase / Expense / VendorCredit — the
+ * expense family. Everything below moves real money and can sit in a holding
+ * account indefinitely, and until now SNAP produced no row, no skip, and no
+ * warning for any of it. That is why a client can "finish" a reclass and still
+ * have hundreds of uncategorized transactions in QBO:
+ *
+ *   - Deposit          → uncategorized INCOME, and the credit leg of transfers
+ *   - JournalEntry     → manual entries, including ones SNAP's own tools posted
+ *   - Transfer         → both legs of an inter-account move
+ *   - CreditCardPayment→ card payments, which are balance-sheet, not expense
+ *
+ * This scan is deliberately READ-ONLY. It exists so an incomplete period is
+ * VISIBLE rather than silent; re-pointing these safely needs a different write
+ * path per type (a Deposit line is not a Purchase line), which is separate work.
+ */
+export const UNCOVERED_TX_TYPES = [
+  "Deposit",
+  "JournalEntry",
+  "Transfer",
+  "CreditCardPayment",
+] as const;
+export type UncoveredTxType = (typeof UNCOVERED_TX_TYPES)[number];
+
+export interface UncoveredEntitySample {
+  transaction_id: string;
+  transaction_type: string;
+  transaction_date: string;
+  amount: number;
+  /** Best-effort account name this transaction touches. */
+  account_name: string;
+  description: string;
+  /** True when the touched account looks like a holding pen. */
+  in_holding_account: boolean;
+}
+
+export interface UncoveredEntityCoverage {
+  /** Per-type transaction counts found in the period. */
+  counts: Record<string, number>;
+  /** Subset sitting in an Uncategorized / Ask-My-Accountant style account. */
+  inHoldingAccount: number;
+  /** Absolute dollar value of the holding-account subset. */
+  holdingAccountValue: number;
+  samples: UncoveredEntitySample[];
+  /** Types whose query failed — coverage for these is UNKNOWN, not zero. */
+  failedTypes: Array<{ tx_type: string; message: string }>;
+}
+
+/**
+ * Extract the account-bearing legs of a transaction whose shape we don't
+ * otherwise model. Each uncovered type stores its account reference in a
+ * different place, so this is intentionally shape-tolerant rather than typed.
+ */
+function accountLegsOf(tx: any, txType: string): Array<{ name: string; amount: number; description: string }> {
+  const legs: Array<{ name: string; amount: number; description: string }> = [];
+
+  // Transfer is header-level: no Line array, two account refs.
+  if (txType === "Transfer") {
+    if (tx.FromAccountRef?.name) legs.push({ name: tx.FromAccountRef.name, amount: tx.Amount || 0, description: tx.PrivateNote || "" });
+    if (tx.ToAccountRef?.name) legs.push({ name: tx.ToAccountRef.name, amount: tx.Amount || 0, description: tx.PrivateNote || "" });
+    return legs;
+  }
+  // CreditCardPayment likewise carries header refs.
+  if (txType === "CreditCardPayment") {
+    if (tx.BankAccountRef?.name) legs.push({ name: tx.BankAccountRef.name, amount: tx.Amount || 0, description: tx.PrivateNote || "" });
+    if (tx.CreditCardAccountRef?.name) legs.push({ name: tx.CreditCardAccountRef.name, amount: tx.Amount || 0, description: tx.PrivateNote || "" });
+    return legs;
+  }
+
+  for (const line of tx.Line || []) {
+    const ref =
+      line.DepositLineDetail?.AccountRef ||
+      line.JournalEntryLineDetail?.AccountRef ||
+      line.AccountBasedExpenseLineDetail?.AccountRef;
+    if (ref?.name || ref?.value) {
+      legs.push({
+        name: ref.name || `(account ${ref.value})`,
+        amount: line.Amount || 0,
+        description: line.Description || tx.PrivateNote || "",
+      });
+    }
+  }
+  // A Deposit whose lines carry no account still lands somewhere.
+  if (legs.length === 0 && tx.DepositToAccountRef?.name) {
+    legs.push({ name: tx.DepositToAccountRef.name, amount: tx.TotalAmt || 0, description: tx.PrivateNote || "" });
+  }
+  return legs;
+}
+
+/**
+ * Count (and sample) transactions in the period that SNAP's reclass pipeline
+ * structurally cannot touch. Never throws: a failed type is reported in
+ * `failedTypes` so "we don't know" stays distinguishable from "there are none".
+ */
+export async function scanUncoveredEntities(
+  realmId: string,
+  accessToken: string,
+  dateStart: string,
+  dateEnd: string,
+  isHoldingAccount: (accountName: string | null | undefined) => boolean
+): Promise<UncoveredEntityCoverage> {
+  const counts: Record<string, number> = {};
+  const samples: UncoveredEntitySample[] = [];
+  const failedTypes: Array<{ tx_type: string; message: string }> = [];
+  let inHoldingAccount = 0;
+  let holdingAccountValue = 0;
+
+  for (const txType of UNCOVERED_TX_TYPES) {
+    counts[txType] = 0;
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const query = encodeURIComponent(
+        `SELECT * FROM ${txType} WHERE TxnDate >= '${dateStart}' AND TxnDate <= '${dateEnd}' ` +
+          `STARTPOSITION ${page * pageSize + 1} MAXRESULTS ${pageSize}`
+      );
+      let txs: any[];
+      try {
+        const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
+        txs = data.QueryResponse?.[txType] || [];
+      } catch (err: any) {
+        // Not every QBO company file exposes every entity (CreditCardPayment in
+        // particular is region/version dependent). Record and move on — this is
+        // a diagnostic, and it must never fail the job it is reporting on.
+        failedTypes.push({ tx_type: txType, message: String(err?.message || err).slice(0, 200) });
+        break;
+      }
+
+      counts[txType] += txs.length;
+      for (const tx of txs) {
+        for (const leg of accountLegsOf(tx, txType)) {
+          const holding = isHoldingAccount(leg.name);
+          if (holding) {
+            inHoldingAccount++;
+            holdingAccountValue += Math.abs(Number(leg.amount) || 0);
+          }
+          if (samples.length < 40 && holding) {
+            samples.push({
+              transaction_id: tx.Id,
+              transaction_type: txType,
+              transaction_date: tx.TxnDate,
+              amount: Number(leg.amount) || 0,
+              account_name: leg.name,
+              description: leg.description,
+              in_holding_account: true,
+            });
+          }
+        }
+      }
+
+      hasMore = txs.length >= pageSize;
+      page++;
+    }
+  }
+
+  return { counts, inHoldingAccount, holdingAccountValue, samples, failedTypes };
+}
+
 // ============== EXPORTS ==============
 
 export { getValidToken, sourceFromRequest };
