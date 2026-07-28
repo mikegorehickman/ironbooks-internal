@@ -43,6 +43,14 @@ import {
 import { lookupVendor, normalizeVendorForLookup } from "./vendor-knowledge";
 import { normalizeAccountName } from "./account-name";
 import { classifyMoneyMovement, type BsAccount } from "./transfer-detection";
+import { isUncategorizedAccount } from "./uncategorized-accounts";
+import {
+  buildParentAccountIds,
+  buildParentAccountNames,
+  isParentAccountId,
+  isParentAccountName,
+  parentAccountBlockReason,
+} from "./parent-account-guard";
 
 // ─── CONSTANTS ─────────────────────────────────────────────────────────────
 
@@ -66,22 +74,9 @@ const DEFAULT_LOOKBACK_DAYS = 7;    // if no last_synced_at, look back this far
 // recon), we respect their decision and leave it alone. This prevents the
 // engine from clobbering human edits between sync and the next run.
 //
-// Match is lower-case substring so we catch "Uncategorized Expense",
-// "Uncategorised Expense" (UK spelling), "Uncategorized Asset", custom
-// names like "Unassigned Expenses", etc. without an exhaustive enum.
-const UNCATEGORIZED_ACCOUNT_PATTERNS = [
-  "uncategorized",
-  "uncategorised",   // UK spelling — QBO Global uses this
-  "unassigned",
-  "ask my accountant",
-  "ask my client",   // SNAP convention for "client confirmation needed"
-];
-
-function isUncategorizedAccount(accountName: string | null | undefined): boolean {
-  if (!accountName) return true; // null/empty = effectively uncategorized
-  const lower = accountName.toLowerCase();
-  return UNCATEGORIZED_ACCOUNT_PATTERNS.some((p) => lower.includes(p));
-}
+// The uncategorized-account test now lives in lib/uncategorized-accounts.ts so
+// the reclass discovery pre-pass uses the identical rule (see that file for the
+// production defect that divergence caused).
 
 // Sensitive vendor patterns that NEVER auto-execute regardless of confidence.
 // Same list as scrub mode's "needs review" flagging — payroll, tax, owner
@@ -255,12 +250,28 @@ export async function runDailyRecon(
     const fromYmd = fetchedFrom.toISOString().slice(0, 10);
     const toYmd = fetchedTo.toISOString().slice(0, 10);
 
-    const { lines: rawLines } = await fetchAllTransactionLines(
+    const { lines: rawLines, truncations } = await fetchAllTransactionLines(
       c.qbo_realm_id,
       accessToken,
       fromYmd,
       toYmd
     );
+
+    // A partly-read window must not advance last_synced_at, or the unread
+    // transactions fall permanently outside every future window. Fail the run
+    // loudly and leave the watermark where it was so the next run retries the
+    // same span. (Previously a total QBO failure was written as
+    // status='complete', transactions_pulled=0 WITH the watermark advanced —
+    // making an outage indistinguishable from a quiet day.)
+    if (truncations.length > 0) {
+      // Throw into the existing catch: it records status='failed' with the
+      // message and, crucially, does NOT touch last_synced_at.
+      throw new Error(
+        `Incomplete pull from QuickBooks (${truncations
+          .map((t) => `${t.tx_type} @ page ${t.failed_at_page + 1}: ${t.message.slice(0, 100)}`)
+          .join("; ")}) — watermark not advanced, will retry next run.`
+      );
+    }
 
     // 5. Filter out already-processed lines (idempotency)
     const lineIds = rawLines.map((l) => l.line_id);
@@ -298,8 +309,17 @@ export async function runDailyRecon(
 
     // 7. Load live QBO COA for target-account validation
     const allQboAccounts = await fetchAllAccounts(c.qbo_realm_id, accessToken);
+
+    // HARD RULE: never post a transaction to a parent account (a parent is a
+    // heading, not a bucket — see lib/parent-account-guard.ts). Excluding
+    // parents from the candidate list means the AI, the knowledge base and the
+    // bank-rule cache all resolve to leaves only; the auto-execute gate below is
+    // the backstop for name-keyed hits.
+    const parentAccountIds = buildParentAccountIds(allQboAccounts);
+    const parentAccountNames = buildParentAccountNames(allQboAccounts);
+
     const availableAccounts: AvailableAccount[] = allQboAccounts
-      .filter((a) => a.Active !== false)
+      .filter((a) => a.Active !== false && !isParentAccountId(a.Id, parentAccountIds))
       .map((a) => ({
         qbo_account_id: a.Id,
         account_name: a.Name,
@@ -555,11 +575,28 @@ export async function runDailyRecon(
       const isHardBlocked = isHardBlock(line);
       const targetValid = !!(d.target_account_id && accountById.has(d.target_account_id));
 
+      // HARD RULE: never post to a parent account. Parents are already excluded
+      // from `availableAccounts`, but a bank rule or KB entry resolves by NAME
+      // and can still name one, so this is the write-side backstop. Anomaly
+      // (rather than a silent skip) because lineAnomalies.length === 0 is a
+      // precondition of auto-execute — so it both blocks the post AND tells the
+      // bookkeeper exactly why the line is waiting for them.
+      const targetsParent =
+        isParentAccountId(d.target_account_id, parentAccountIds) ||
+        isParentAccountName(d.target_account_name, parentAccountNames);
+      if (targetsParent) {
+        lineAnomalies.push({
+          code: "parent_account_target",
+          message: parentAccountBlockReason(d.target_account_name || "the suggested account"),
+        });
+      }
+
       const confidenceFloor =
         d.source === "web_search" ? WEB_SEARCH_AUTO_FLOOR : AUTO_EXECUTE_CONFIDENCE;
 
       const eligibleForAuto =
         targetValid &&
+        !targetsParent &&
         d.confidence >= confidenceFloor &&
         lineAnomalies.length === 0 &&
         !isHardBlocked &&

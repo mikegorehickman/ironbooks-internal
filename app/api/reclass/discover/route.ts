@@ -27,6 +27,13 @@ import { runWebSearchAuto } from "@/lib/web-search-runner";
 import { normalizeAccountName } from "@/lib/account-name";
 import { classifyMoneyMovement, isNamelessETransfer, type BsAccount } from "@/lib/transfer-detection";
 import { getClientEndCloses, type DoubleEndCloseSummary } from "@/lib/double";
+import { isUncategorizedAccount } from "@/lib/uncategorized-accounts";
+import {
+  buildParentAccountIds,
+  buildParentAccountNames,
+  isParentAccountId,
+  enforceNoParentPostings,
+} from "@/lib/parent-account-guard";
 
 /**
  * POST /api/reclass/discover
@@ -335,9 +342,16 @@ async function runDiscovery(jobId: string) {
     // Workflow C: scrub mode with AI
     const vendorGroups = groupLinesByVendor(inScopeLines);
 
-    // Build available accounts list (excluding source)
+    // Build available accounts list (excluding source AND parent accounts —
+    // transactions must never post to a parent, see lib/parent-account-guard.ts)
+    const discoveryParentIds = buildParentAccountIds(allAccounts);
     const availableAccounts: AvailableAccount[] = allAccounts
-      .filter((a) => a.Id !== job.source_account_id && a.Active !== false)
+      .filter(
+        (a) =>
+          a.Id !== job.source_account_id &&
+          a.Active !== false &&
+          !isParentAccountId(a.Id, discoveryParentIds)
+      )
       .map((a) => ({
         qbo_account_id: a.Id,
         account_name: a.Name,
@@ -465,17 +479,33 @@ function buildReclassRow(
   // transaction is already sitting in, there's nothing to do. Skip it with
   // a clear reason so re-runs after a successful migration show zero work
   // and we don't fire pointless QBO API calls.
-  const isNoOp =
+  //
+  // CRITICAL EXCEPTION: "target == current" only means "already correct" when
+  // the current account is a real category. When the AI can't classify a line
+  // it falls back to Uncategorized, so target == current == "Uncategorized
+  // Expense" — and this check used to declare that CORRECT and abandon the
+  // line silently. Fleet audit 2026-07-28 found 920 such lines worth $568,385
+  // across 33 clients, sitting in Uncategorized while SNAP reported them done.
+  // A no-op INTO a holding account is the opposite of correct: it needs review.
+  const targetEqualsCurrent =
     hasTarget &&
     !!line.current_account_id &&
     line.current_account_id === classification.target_account_id;
+  const stuckInHoldingAccount =
+    targetEqualsCurrent && isUncategorizedAccount(line.current_account_name);
+
   let status = "pending";
   let skipReason: string | undefined;
-  if (isNoOp) {
+  if (targetEqualsCurrent && !stuckInHoldingAccount) {
     decision = "skip";
     status = "skipped";
     skipReason = "already_correct";
+  } else if (stuckInHoldingAccount) {
+    // Needs a human: we have no better idea than where it already is.
+    decision = "needs_review";
+    status = "pending";
   }
+
 
   return {
     job_id: jobId, // legacy column - we satisfy NOT NULL by reusing
@@ -637,6 +667,47 @@ async function runFullCategorization(
     lines = result.lines;
     transactionsPulled = result.transactionsPulled;
     transactionsSkippedUnsupported = result.transactionsSkippedUnsupported;
+
+    // An incomplete pull must never look like a finished period. If QBO cut us
+    // off mid-pagination we refuse the job outright rather than categorizing a
+    // partial set and reporting success — a bookkeeper who signs off on a
+    // half-read month is worse off than one who is told to retry.
+    if (result.truncations.length > 0) {
+      const detail = result.truncations
+        .map((t) => `${t.tx_type} stopped at page ${t.failed_at_page + 1} (${t.message.slice(0, 120)})`)
+        .join("; ");
+      await service
+        .from("reclass_jobs")
+        .update({
+          status: "failed",
+          error_message:
+            `Incomplete pull from QuickBooks — this period was only partly read, so it was NOT categorized. ` +
+            `Retry in a few minutes. Detail: ${detail}`,
+        } as any)
+        .eq("id", jobId);
+      return NextResponse.json(
+        { error: "Incomplete pull from QuickBooks — job failed rather than categorize a partial period.", truncations: result.truncations },
+        { status: 502 }
+      );
+    }
+
+    // Item-based / unknown-detail lines exist in the period but can't be
+    // auto-reclassified. They used to be dropped silently; record them on the
+    // job so the review screen can say so out loud.
+    if (result.unreclassifiableLines.length > 0) {
+      await service
+        .from("reclass_jobs")
+        .update({
+          warnings: {
+            unreclassifiable_count: result.unreclassifiableLines.length,
+            unreclassifiable_sample: result.unreclassifiableLines.slice(0, 25),
+            note:
+              "These lines are in the period but are booked against Products/Services (or an " +
+              "unsupported line type), so SNAP cannot re-point them. Handle them directly in QBO.",
+          } as any,
+        } as any)
+        .eq("id", jobId);
+    }
   } finally {
     clearInterval(fetchHeartbeat);
   }
@@ -678,8 +749,21 @@ async function runFullCategorization(
       norm === "equity"
     );
   };
+  // HARD RULE: never post to a parent account. Parents are headings, not
+  // buckets — see lib/parent-account-guard.ts. Excluding them from the target
+  // list is the cheapest enforcement point: the AI, the KB and the bank-rule
+  // cache all resolve against this list, so a parent can't be proposed at all.
+  // The guard at row-build time below is the backstop for name-keyed paths.
+  const parentAccountIds = buildParentAccountIds(allAccounts);
+  const parentAccountNames = buildParentAccountNames(allAccounts);
+
   const availableAccounts: AvailableAccount[] = allAccounts
-    .filter((a) => a.Active !== false && isReclassTargetType(a.AccountType))
+    .filter(
+      (a) =>
+        a.Active !== false &&
+        isReclassTargetType(a.AccountType) &&
+        !isParentAccountId(a.Id, parentAccountIds)
+    )
     .map((a) => ({
       qbo_account_id: a.Id,
       account_name: a.Name,
@@ -687,7 +771,9 @@ async function runFullCategorization(
       account_subtype: a.AccountSubType || "",
     }));
   console.log(
-    `[reclass ${jobId}] QBO accounts: ${allAccounts.length} total, ${availableAccounts.length} eligible. Types present: ${[...new Set(allAccounts.map((a) => a.AccountType))].join(", ")}`
+    `[reclass ${jobId}] QBO accounts: ${allAccounts.length} total, ${availableAccounts.length} eligible ` +
+      `(${parentAccountIds.size} parent accounts excluded as post targets). ` +
+      `Types present: ${[...new Set(allAccounts.map((a) => a.AccountType))].join(", ")}`
   );
 
   // Get or create the "Uncategorized Expenses" catch-all account in QBO
@@ -982,7 +1068,14 @@ async function runFullCategorization(
     for (let i = 0; i < reclassRows.length; i += PREP_BATCH) {
       const { error: insErr } = await service
         .from("reclassifications")
-        .insert(reclassRows.slice(i, i + PREP_BATCH));
+        .insert(
+          (() => {
+            const batch = reclassRows.slice(i, i + PREP_BATCH);
+            const n = enforceNoParentPostings(batch as any, parentAccountIds, parentAccountNames);
+            if (n) console.log(`[reclass ${jobId}] no-parent-postings rule demoted ${n} row(s) to review`);
+            return batch;
+          })()
+        );
       if (insErr) throw new Error(`Decided-row insert failed: ${insErr.message}`);
     }
 
@@ -1116,6 +1209,8 @@ async function runFullCategorization(
   const totalInsertBatches = Math.ceil(reclassRows.length / BATCH_SIZE);
   for (let i = 0; i < reclassRows.length; i += BATCH_SIZE) {
     const batch = reclassRows.slice(i, i + BATCH_SIZE);
+    const blockedParents = enforceNoParentPostings(batch as any, parentAccountIds, parentAccountNames);
+    if (blockedParents) console.log(`[reclass ${jobId}] no-parent-postings rule demoted ${blockedParents} row(s) to review`);
     const { error: insertErr } = await service.from("reclassifications").insert(batch);
     if (insertErr) throw new Error(`Insert batch failed: ${insertErr.message}`);
     const insertBatchIdx = Math.floor(i / BATCH_SIZE) + 1;
@@ -1355,8 +1450,15 @@ export async function runAiChunks(jobId: string): Promise<void> {
       norm === "equity"
     );
   };
+  const chunkParentIds = buildParentAccountIds(allAccounts);
+  const chunkParentNames = buildParentAccountNames(allAccounts);
   const availableAccounts: AvailableAccount[] = allAccounts
-    .filter((a) => a.Active !== false && isReclassTargetType(a.AccountType))
+    .filter(
+      (a) =>
+        a.Active !== false &&
+        isReclassTargetType(a.AccountType) &&
+        !isParentAccountId(a.Id, chunkParentIds)
+    )
     .map((a) => ({
       qbo_account_id: a.Id,
       account_name: a.Name,
@@ -1468,6 +1570,8 @@ export async function runAiChunks(jobId: string): Promise<void> {
     // kept (bookkeeper starts fresh) — never lost work. ai_paused is only set
     // at the top-of-loop budget check, after a clean insert+delete, so the
     // normal Continue flow can't re-process a chunk and duplicate rows.
+    const blockedChunkParents = enforceNoParentPostings(rows as any, chunkParentIds, chunkParentNames);
+    if (blockedChunkParents) console.log(`[reclass ${jobId}] no-parent-postings rule demoted ${blockedChunkParents} chunk row(s) to review`);
     const { error: insErr } = await service.from("reclassifications").insert(rows as any);
     if (insErr) throw new Error(`Chunk insert failed: ${insErr.message}`);
 
