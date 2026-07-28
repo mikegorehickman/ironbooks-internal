@@ -29,6 +29,7 @@ import {
   type QBOAccount,
 } from "./qbo";
 import { fetchPLDetailAll } from "./qbo-reports";
+import { drainAndRetireAccount, type DrainRetireResult } from "./coa-reclass-je";
 
 const APPLY_START = "2026-07-11";
 
@@ -45,9 +46,11 @@ export interface RevertPlan {
   client_name: string;
   created_count: number;
   safe: RevertAccount[];
-  activity: { name: string; id: string; type: string; balance: number; posted: boolean }[];
+  activity: { name: string; id: string; type: string; classification: string; balance: number; posted: boolean }[];
   ambiguous: string[];
   gone: string[];
+  /** Active accounts NOT created by the push — step-2 drain targets. */
+  targets: { id: string; name: string; fq: string; type: string; classification: string }[];
 }
 
 /** Created-account names for one client, unioned across every apply event. */
@@ -76,7 +79,7 @@ export async function buildRevertPlan(
     client_link_id: client.id,
     client_name: client.client_name,
     created_count: createdNames.length,
-    safe: [], activity: [], ambiguous: [], gone: [],
+    safe: [], activity: [], ambiguous: [], gone: [], targets: [],
   };
   if (createdNames.length === 0) return plan;
 
@@ -110,7 +113,10 @@ export async function buildRevertPlan(
       const bal = Math.abs(a.CurrentBalanceWithSubAccounts ?? a.CurrentBalance ?? 0);
       const posted = postedNames.has(a.Name) || postedNames.has(a.FullyQualifiedName);
       if (posted || bal >= 0.01) {
-        plan.activity.push({ name, id: a.Id, type: a.AccountType, balance: a.CurrentBalance, posted });
+        plan.activity.push({
+          name, id: a.Id, type: a.AccountType,
+          classification: a.Classification || "", balance: a.CurrentBalance, posted,
+        });
       } else {
         plan.safe.push({
           name, id: a.Id, type: a.AccountType,
@@ -142,11 +148,84 @@ export async function buildRevertPlan(
     plan.safe = plan.safe.filter((s) => removing.has(s.id));
     for (const k of keep) {
       plan.activity.push({
-        name: k.name, id: k.id, type: k.type, balance: 0, posted: false,
+        name: k.name, id: k.id, type: k.type, classification: "", balance: 0, posted: false,
       });
     }
   }
+
+  // Step-2 drain targets: every active account that was NOT created by the
+  // push (the client's own chart — where the postings belong).
+  const createdSet = new Set(createdNames);
+  plan.targets = accounts
+    .filter((a) => a.Active !== false && !createdSet.has(a.Name))
+    .map((a) => ({
+      id: a.Id, name: a.Name, fq: a.FullyQualifiedName,
+      type: a.AccountType, classification: a.Classification || "",
+    }))
+    .sort((x, y) => (x.fq || x.name).localeCompare(y.fq || y.name));
   return plan;
+}
+
+/**
+ * Step 2 — an activity account can't just be switched off; its postings must
+ * move first. Drain the account into a bookkeeper-chosen target (line-reclass
+ * the real transactions, JE-sweep what can't be line-edited, verify-zero),
+ * then retire it. Reuses drainAndRetireAccount — the same guarded path as the
+ * COA-audit merge.
+ *
+ * Only accounts the fleet push CREATED can be drained through this tool —
+ * enforced here, not just in the route.
+ */
+export async function drainRevertAccount(
+  service: any,
+  client: { id: string; client_name: string; qbo_realm_id: string },
+  accountId: string,
+  targetAccountId: string,
+  opts: { actorUserId: string | null }
+): Promise<DrainRetireResult & { source_name: string; target_name: string }> {
+  const createdNames = new Set(await createdNamesFor(service, client.id));
+  const token = await getValidToken(client.id, service);
+  const accounts = await fetchAllAccountsIncludingInactive(client.qbo_realm_id, token);
+
+  const source = accounts.find((a) => a.Id === accountId && a.Active !== false);
+  const target = accounts.find((a) => a.Id === targetAccountId && a.Active !== false);
+  if (!source) throw new Error("Source account not found or already inactive");
+  if (!target) throw new Error("Target account not found or inactive");
+  if (source.Id === target.Id) throw new Error("Source and target are the same account");
+  if (!createdNames.has(source.Name)) {
+    throw new Error(`"${source.Name}" wasn't created by the fleet push — out of scope for this revert`);
+  }
+  if (createdNames.has(target.Name)) {
+    throw new Error(`"${target.Name}" was itself created by the push — pick one of the client's own accounts`);
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const result = await drainAndRetireAccount({
+    realmId: client.qbo_realm_id,
+    accessToken: token,
+    source,
+    target,
+    // Postings can only have landed after the account was created.
+    startDate: APPLY_START,
+    endDate: today,
+    memo: `SNAP fleet-COA revert: "${source.Name}" → "${target.Name}"`,
+    allAccounts: accounts,
+  });
+
+  await service.from("audit_log").insert({
+    event_type: "coa_fleet_revert_drained",
+    user_id: opts.actorUserId,
+    request_payload: {
+      client_link_id: client.id,
+      client_name: client.client_name,
+      source_id: source.Id, source_name: source.Name,
+      target_id: target.Id, target_name: target.Name,
+      lines_moved: result.linesMoved, jes_posted: result.jesPosted,
+      inactivated: result.inactivated, failures: result.failures,
+    } as any,
+  });
+
+  return { ...result, source_name: source.Name, target_name: target.Name };
 }
 
 export interface RevertResult {

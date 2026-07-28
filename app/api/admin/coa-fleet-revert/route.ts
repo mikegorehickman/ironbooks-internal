@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { buildRevertPlan, executeRevertPlan, createdNamesFor } from "@/lib/coa-fleet-revert";
+import { buildRevertPlan, executeRevertPlan, drainRevertAccount } from "@/lib/coa-fleet-revert";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,6 +16,12 @@ export const maxDuration = 300;
  * POST { client_link_id, action: "execute", dry_run? (default TRUE) }
  *                          → inactivate the SAFE accounts (children first).
  *                            dry_run must be explicitly false to write.
+ * POST { client_link_id, action: "drain", account_id, target_account_id }
+ *                          → STEP 2: move an activity-account's postings to a
+ *                            chosen target (line-reclass + JE sweep via
+ *                            drainAndRetireAccount) and retire it. Only
+ *                            accounts the push created; target must be one of
+ *                            the client's own accounts.
  *
  * Per-client only, by design — no fleet-wide execute (Clean Cut incident).
  */
@@ -135,6 +141,22 @@ export async function POST(request: Request) {
         });
       }
       return NextResponse.json({ ok: true, plan, result });
+    } catch (e: any) {
+      return NextResponse.json({ error: String(e?.message || e).slice(0, 300) }, { status: 502 });
+    }
+  }
+
+  if (action === "drain") {
+    const accountId = String(body.account_id || "");
+    const targetAccountId = String(body.target_account_id || "");
+    if (!accountId || !targetAccountId) {
+      return NextResponse.json({ error: "account_id and target_account_id required" }, { status: 400 });
+    }
+    try {
+      const result = await drainRevertAccount(service, client as any, accountId, targetAccountId, {
+        actorUserId: user.id,
+      });
+      return NextResponse.json({ ok: true, result });
     } catch (e: any) {
       return NextResponse.json({ error: String(e?.message || e).slice(0, 300) }, { status: 502 });
     }

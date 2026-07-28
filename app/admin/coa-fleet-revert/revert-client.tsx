@@ -155,13 +155,32 @@ function ClientRevertCard({ client }: { client: ClientRow }) {
               {plan.activity.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
                   <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5 mb-1">
-                    <AlertTriangle size={12} /> Postings landed on these since Jul 11 — reclass before removing
+                    <AlertTriangle size={12} /> Step 2 — postings landed on these since Jul 11. Move them to
+                    the right account, then the account retires automatically.
                   </div>
-                  <ul className="text-[11px] text-amber-900 space-y-0.5">
+                  <p className="text-[11px] text-amber-800 mb-2">
+                    Real transactions are line-reclassed (detail preserved); anything QBO won&apos;t let us
+                    line-edit is swept by JE. Pick where each account&apos;s postings belong — usually the
+                    client&apos;s original account for that kind of expense.
+                  </p>
+                  <ul className="space-y-1.5">
                     {plan.activity.map((a: any) => (
-                      <li key={a.id}>
-                        {a.name} <span className="text-amber-700">({a.type}{a.balance ? ` · bal ${fmt(a.balance)}` : ""}{a.posted ? " · has postings" : ""})</span>
-                      </li>
+                      <DrainRow
+                        key={a.id}
+                        account={a}
+                        targets={plan.targets || []}
+                        busy={busy}
+                        onDrain={async (targetId: string) => {
+                          if (
+                            !confirm(
+                              `Move everything on "${a.name}" to the selected account, then remove "${a.name}"?\n\nThis writes to ${client.client_name}'s live QuickBooks.`
+                            )
+                          )
+                            return;
+                          const j = await call("drain", { account_id: a.id, target_account_id: targetId });
+                          if (j) await loadPlan();
+                        }}
+                      />
                     ))}
                   </ul>
                 </div>
@@ -219,6 +238,67 @@ function ClientRevertCard({ client }: { client: ClientRow }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * One step-2 row: an activity account + a target picker + the drain button.
+ * Targets default to the same classification (an Expense drains into an
+ * Expense); "show all" lifts the filter for the odd cross-type case.
+ */
+function DrainRow({
+  account,
+  targets,
+  busy,
+  onDrain,
+}: {
+  account: any;
+  targets: any[];
+  busy: string | null;
+  onDrain: (targetId: string) => Promise<void>;
+}) {
+  const [targetId, setTargetId] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const filtered = showAll || !account.classification
+    ? targets
+    : targets.filter((t) => t.classification === account.classification);
+
+  return (
+    <li className="rounded-lg border border-amber-200 bg-white px-2.5 py-2">
+      <div className="text-[12px] font-semibold text-navy">
+        {account.name}{" "}
+        <span className="font-normal text-amber-800">
+          ({account.type}{account.balance ? ` · bal ${fmt(account.balance)}` : ""}{account.posted ? " · has postings" : " · blocked parent"})
+        </span>
+      </div>
+      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+        <span className="text-[11px] text-ink-slate shrink-0">Move postings to</span>
+        <select
+          value={targetId}
+          onChange={(e) => setTargetId(e.target.value)}
+          className="text-[11px] px-1.5 py-1 rounded border border-gray-200 bg-white text-navy max-w-[260px] flex-1 min-w-[160px]"
+        >
+          <option value="">— pick the client&apos;s own account —</option>
+          {filtered.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.fq || t.name} ({t.type})
+            </option>
+          ))}
+        </select>
+        <label className="text-[10px] text-ink-light inline-flex items-center gap-1 cursor-pointer">
+          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+          all types
+        </label>
+        <button
+          onClick={() => targetId && onDrain(targetId)}
+          disabled={!targetId || !!busy}
+          className="inline-flex items-center gap-1 rounded bg-[#954E44] px-2.5 py-1 text-[11px] font-bold text-white hover:opacity-90 disabled:opacity-40"
+        >
+          {busy === "drain" ? <Loader2 size={10} className="animate-spin" /> : <Undo2 size={10} />}
+          Move &amp; remove
+        </button>
+      </div>
+    </li>
   );
 }
 
