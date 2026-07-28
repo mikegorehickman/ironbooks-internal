@@ -124,7 +124,11 @@ export function StageBanner({
     }
   } else {
     title = "Production — live books";
-    primary = { label: "Monthly close", href: "/production", icon: CheckCircle2 };
+    // Open THIS client's close sequence (the Cleanup tab renders MonthCloseFlow
+    // for production clients), not /production — that's the fleet board, which
+    // is where this button used to dump you with no way back to the client you
+    // were already looking at.
+    primary = { label: "Monthly close", tab: "cleanup", icon: CheckCircle2 };
     secondary = { label: "View P&L", tab: "pl", icon: FileText };
   }
 
