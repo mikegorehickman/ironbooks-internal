@@ -11,6 +11,7 @@ import type { Database } from "@/lib/database.types";
 import { CANADIAN_PROVINCES, getProvinceTax } from "@/lib/canadian-tax";
 import { INDUSTRIES, getIndustry, suggestIndustryFromName, type IndustryKey } from "@/lib/industries";
 import { CleanupSections } from "./cleanup-sections";
+import { GstYearFix } from "./gst-year-fix";
 import type { RosterClient } from "@/lib/cleanup-roster";
 
 type ClientLink = Database["public"]["Tables"]["client_links"]["Row"];
@@ -572,6 +573,19 @@ export function NewJobForm({
           )}
         </div>
       </div>
+
+      {/* Canadian clients: the year-wide sales-tax retrofit. Deliberately
+          OUTSIDE the cleanup scope above — tax has to be right for the whole
+          year even when you're only cleaning one month. */}
+      {country === "CA" && selected && (
+        <div className="mb-6">
+          <GstYearFix
+            clientLinkId={selected.id}
+            clientName={selected.client_name}
+            province={province}
+          />
+        </div>
+      )}
 
       <RedoWarning clientId={selected?.id ?? null} kind="coa" onAllowChange={setRedoAllowed} preAcknowledged={searchParams.get("redo") === "1"} />
 
