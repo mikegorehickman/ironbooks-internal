@@ -12,6 +12,20 @@
  * all read it, so adding a stage is one edit rather than six.
  */
 
+/**
+ * The seven stages of a monthly close.
+ *
+ * RULE: every href here must land on a ONE-CLIENT tool. A monthly close is
+ * work on a single client, so handing the bookkeeper a fleet dashboard is a
+ * dead end — they have to find their client again in a list of 78, and
+ * nothing they do there is scoped to the month they're closing. (Mike,
+ * 2026-07-28: "Fleet tools don't belong ANYWHERE in monthly closes.")
+ *
+ * Several of these used to point at fleet pages or at client tabs that don't
+ * exist (`?tab=duplicates`, `?tab=balance-sheet`, `?tab=messages` — the real
+ * tab ids are `bs`, and there is no duplicates or messages tab), so the links
+ * either dumped you on the wrong screen or silently opened Overview.
+ */
 export const MONTH_STAGES = [
   {
     key: "coa_confirmed_at",
@@ -19,7 +33,9 @@ export const MONTH_STAGES = [
     blurb: "Chart matches the current master COA",
     /** Some clients genuinely need no chart work in a given month. */
     skippable: true,
-    href: (clientId: string) => `/coa-audit?client=${clientId}`,
+    // Per-client COA review/cleanup job — NOT /coa-audit, which is the fleet
+    // drift dashboard and ignores ?client= entirely.
+    href: (clientId: string) => `/jobs/new?client=${clientId}`,
   },
   {
     key: "reclass_completed_at",
@@ -40,28 +56,34 @@ export const MONTH_STAGES = [
     label: "Ask client",
     blurb: "Send the client their open questions and get answers back",
     skippable: true,
-    href: (clientId: string) => `/clients/${clientId}?tab=messages`,
+    // The close flow opens the Ask-Client composer in place; this is the
+    // fallback for surfaces that only have a link.
+    href: (clientId: string) => `/clients/${clientId}`,
   },
   {
     key: "statements_requested_at",
     label: "BS / statement request",
     blurb: "Balance-sheet review and bank/CC statements requested",
     skippable: true,
-    href: (clientId: string) => `/clients/${clientId}?tab=balance-sheet`,
+    // Per-client balance-sheet workspace.
+    href: (clientId: string) => `/balance-sheet/${clientId}`,
   },
   {
     key: "duplicates_checked_at",
     label: "Duplicates",
     blurb: "No duplicate transactions or invoices (incl. payroll double-counting)",
     skippable: false,
-    href: (clientId: string) => `/clients/${clientId}?tab=duplicates`,
+    // ?client= renders the single-client duplicate scan, not the fleet list.
+    href: (clientId: string) => `/admin/duplicates?client=${clientId}`,
   },
   {
     key: "month_end_sent_at",
     label: "Send month-end",
     blurb: "Statements published and emailed with the notice to reader",
     skippable: false,
-    href: (clientId: string) => `/month-end?client=${clientId}`,
+    // Opens THIS client's close card on the production board (?focus= deep
+    // link) rather than the fleet month-end list.
+    href: (clientId: string) => `/production?focus=${clientId}`,
   },
 ] as const;
 
