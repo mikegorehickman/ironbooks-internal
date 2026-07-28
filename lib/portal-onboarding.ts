@@ -71,21 +71,29 @@ export function onboardingComplete(s: PortalOnboardingState): boolean {
 }
 
 /**
- * Should this client see the onboarding wizard at all? Only pre-production
- * clients who haven't finished it — an established/live client never gets an
- * onboarding screen. Gate on the client_links row (no extra query).
+ * Should this client see the onboarding wizard at all?
+ *
+ * Only clients whose status is literally "onboarding". This used to fall back
+ * to `!cleanup_completed_at`, which reads as "new client" but actually means
+ * "cleanup not signed off yet" — a much wider net that caught established
+ * clients mid-cleanup. An existing relationship being greeted with "Welcome to
+ * Ironbooks 👋, four quick steps" and asked to re-supply intake we already hold
+ * is worse than not asking at all. Narrowed 2026-07-28.
+ *
+ * The two production signals are checked independently on purpose: per the
+ * lifecycle rules `daily_recon_enabled` and `cleanup_completed_at` can each be
+ * set without the other, and either one means this client is past onboarding.
+ *
+ * Gate on the client_links row so callers need no extra query.
  */
 export function shouldShowOnboarding(
   client: { status?: string | null; cleanup_completed_at?: string | null; daily_recon_enabled?: boolean | null; portal_onboarding?: any } | null | undefined
 ): boolean {
   if (!client) return false;
-  const s = readOnboardingState(client);
-  if (onboardingComplete(s)) return false;
-  // Live/production or cleanup-signed-off clients are past onboarding.
-  if (client.daily_recon_enabled && client.cleanup_completed_at) return false;
-  if (client.cleanup_completed_at) return false;
-  // Show for new/onboarding + early-cleanup clients (pre-books).
-  return client.status === "onboarding" || !client.cleanup_completed_at;
+  if (onboardingComplete(readOnboardingState(client))) return false;
+  // Live or cleanup-signed-off clients are past onboarding, whatever their status says.
+  if (client.daily_recon_enabled || client.cleanup_completed_at) return false;
+  return client.status === "onboarding";
 }
 
 /** Intro video URL — set NEXT_PUBLIC_ONBOARDING_VIDEO_URL to a Loom/YT/Vimeo

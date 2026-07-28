@@ -111,6 +111,24 @@ ok("live production client does NOT",
 ok("already-completed onboarding does NOT",
   !shouldShowOnboarding({ status: "onboarding", cleanup_completed_at: null, daily_recon_enabled: false, portal_onboarding: { completed_at: "2026-07-01" } }));
 
+// The narrowing (2026-07-28): status must literally be "onboarding". The old
+// `|| !cleanup_completed_at` fallback caught established clients mid-cleanup and
+// would have greeted them with a first-run wizard.
+ok("active client with cleanup NOT yet signed off does NOT (the Paint Boss case)",
+  !shouldShowOnboarding({ status: "active", cleanup_completed_at: null, daily_recon_enabled: false, portal_onboarding: {} }));
+ok("a null status does NOT",
+  !shouldShowOnboarding({ status: null, cleanup_completed_at: null, daily_recon_enabled: false, portal_onboarding: {} }));
+ok("an unrecognised status does NOT",
+  !shouldShowOnboarding({ status: "paused", cleanup_completed_at: null, daily_recon_enabled: false, portal_onboarding: {} }));
+// daily_recon_enabled and cleanup_completed_at are independent signals — either
+// one alone means the client is live, so neither may fall through.
+ok("daily-recon-on without a cleanup stamp does NOT",
+  !shouldShowOnboarding({ status: "onboarding", cleanup_completed_at: null, daily_recon_enabled: true, portal_onboarding: {} }));
+ok("cleanup stamp without daily-recon does NOT",
+  !shouldShowOnboarding({ status: "onboarding", cleanup_completed_at: "2026-06-19", daily_recon_enabled: false, portal_onboarding: {} }));
+ok("a genuinely new onboarding client still DOES",
+  shouldShowOnboarding({ status: "onboarding", cleanup_completed_at: null, daily_recon_enabled: false, portal_onboarding: { video_watched_at: "2026-07-01" } }));
+
 console.log(`\nportal-onboarding: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
 
