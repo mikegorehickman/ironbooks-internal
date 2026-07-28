@@ -871,7 +871,7 @@ export async function POST(
       ``,
       ...lines,
       ``,
-      `See the full Profit & Loss and Balance Sheet in your portal.`,
+      `See your full financial statements in your portal.`,
     ].join("\n");
 
     // 1. Portal notification — amber Bell card in their Messages, red
@@ -924,7 +924,9 @@ export async function POST(
       emailDelivery = { sent: true, recipients: 1, via: "month_end_package" };
     } catch (e: any) {
       packageError = String(e?.message || e).slice(0, 500);
-      // Fallback: plain notification email so the close still reaches them
+      // Fallback: plain notification email so the close still reaches them.
+      // No financial figures in the email (security) — just a login CTA; the
+      // numbers live in the portal notification we inserted above.
       emailDelivery = await emailPortalUsersAboutMessage(service, {
         clientLinkId,
         clientName,
@@ -932,6 +934,10 @@ export async function POST(
         subject: `Your ${monthLabel} financials are ready`,
         body: summaryBody,
         portalOrigin: origin,
+        subjectOverride: "Your Ironbooks financial statements are ready",
+        hideBody: true,
+        ctaLabel: "Log in to view your financial statements",
+        portalPath: "/portal",
       });
     }
 
