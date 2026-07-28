@@ -99,18 +99,25 @@ const PAGES = [
 
 export function OnboardingForm({
   initial,
+  initialPage = 0,
   onSaveProgress,
   onSubmit,
   busy,
 }: {
   initial: OnboardingAnswers;
+  /** Page the client was last on. Saving a draft is only half of "come back
+   *  later" — dropping them back on page 1 to click through six pages of
+   *  answers they already gave is its own kind of losing your place. */
+  initialPage?: number;
   /** Persist a draft — called on every Next so progress survives a closed tab. */
   onSaveProgress: (answers: OnboardingAnswers, page: number) => Promise<boolean>;
   onSubmit: (answers: OnboardingAnswers) => Promise<void>;
   busy: boolean;
 }) {
   const [a, setA] = useState<OnboardingAnswers>(initial);
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(() =>
+    Math.min(Math.max(Math.trunc(initialPage) || 0, 0), PAGES.length - 1)
+  );
   const [error, setError] = useState("");
   const [savedAt, setSavedAt] = useState<string | null>(null);
 

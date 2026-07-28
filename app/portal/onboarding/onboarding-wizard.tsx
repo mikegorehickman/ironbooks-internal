@@ -141,6 +141,7 @@ export function OnboardingWizard({
             </p>
             <OnboardingForm
               initial={initialAnswers}
+              initialPage={state.form_draft_page || 0}
               busy={busy}
               onSaveProgress={async (answers, pageNo) =>
                 post({ action: "save_progress", answers, page: pageNo })
