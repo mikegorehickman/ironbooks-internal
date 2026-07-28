@@ -89,7 +89,13 @@ export function CleanupTab({
   // Production clients don't do cleanup — they run a monthly close. Same tab,
   // stage-appropriate flow. (Checked after hooks to respect rules-of-hooks.)
   if (stage === "production") {
-    return <MonthCloseFlow clientLinkId={clientLinkId} clientName={clientName} />;
+    return (
+      <MonthCloseFlow
+        clientLinkId={clientLinkId}
+        clientName={clientName}
+        onNavigateTab={onNavigateTab}
+      />
+    );
   }
 
   async function setStep(step: CleanupStepKey, status: CleanupStepStatus) {
