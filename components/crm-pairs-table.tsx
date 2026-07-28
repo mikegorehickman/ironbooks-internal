@@ -39,11 +39,12 @@ export function CrmPairsTable({ data }: { data: any }) {
   return (
     <div>
       <div className="text-[11px] text-ink-slate mb-2">
-        <span className="font-bold text-navy">{pairs.length} proven pairs</span> — evidence the
-        invoices duplicate the bank deposits. The <strong>invoice</strong> is the duplicate to
-        remove; the <strong>deposit</strong> is the real cash (kept).{" "}
-        {sc.paid_in_qbo ? <span>{sc.paid_in_qbo} invoice(s) paid in QBO (void invoice + its payment). </span> : null}
-        {sc.open ? <span>{sc.open} open (void the invoice). </span> : null}
+        <span className="font-bold text-navy">{pairs.length} proven pairs</span> — the bank deposit
+        and the invoice are the <strong>same money</strong>. The fix is to{" "}
+        <strong>match</strong> them, not delete anything: the deposit gets linked to the invoice&apos;s
+        payment, which clears Undeposited Funds and leaves the revenue counted once.{" "}
+        {sc.paid_in_qbo ? <span>{sc.paid_in_qbo} paid in QBO (match deposit → payment). </span> : null}
+        {sc.open ? <span>{sc.open} open — no payment to match; receive payment against the deposit. </span> : null}
       </div>
       <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white">
         <table className="w-full text-xs">
@@ -55,7 +56,7 @@ export function CrmPairsTable({ data }: { data: any }) {
               <th className="text-left font-semibold px-3 py-2">Deposit → account</th>
               <th className="text-right font-semibold px-3 py-2">Deposit</th>
               <th className="text-left font-semibold px-3 py-2">Match</th>
-              <th className="text-left font-semibold px-3 py-2">QBO fix (invoice = dupe)</th>
+              <th className="text-left font-semibold px-3 py-2">QBO fix (match, don&apos;t delete)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -79,11 +80,11 @@ export function CrmPairsTable({ data }: { data: any }) {
                 </td>
                 <td className="px-3 py-2">
                   {p.scenario === "paid_in_qbo" ? (
-                    <span className="text-red-700 font-semibold">void invoice + unlink its CRM payment</span>
+                    <span className="text-teal-dark font-semibold">match deposit → invoice payment (clears UF)</span>
                   ) : p.scenario === "open" ? (
-                    <span className="text-amber-700 font-semibold">void invoice (open, no payment)</span>
+                    <span className="text-amber-700 font-semibold">open invoice — receive payment against this deposit</span>
                   ) : (
-                    <span className="text-ink-light">void invoice</span>
+                    <span className="text-ink-light">match deposit → invoice</span>
                   )}
                 </td>
               </tr>
