@@ -44,6 +44,17 @@ interface ExecutionContext {
    *  today to preserve old behavior. */
   dateRangeStart: string;
   dateRangeEnd: string;
+  /** Allow the balance-JE sweep when a merge's residue (income / deposits /
+   *  paycheques / existing JEs) can't be line-reclassed.
+   *
+   *  DEFAULT FALSE since 2026-07-26. A merge must reclassify the REAL
+   *  transactions; the JE sweep moves the balance but collapses the
+   *  transaction detail in the target's drill-down, which is what wrecked GL
+   *  detail on nine accounts fleet-wide. With it off, such an account keeps
+   *  its activity, stays ACTIVE, and is reported for a native merge in the
+   *  QBO UI — the only path that moves income/payroll with detail intact.
+   *  Opted in per job via coa_jobs.allow_je_sweep. */
+  allowJeSweep: boolean;
 }
 
 interface ExecutionStats {
@@ -424,6 +435,8 @@ export async function executeJob(jobId: string): Promise<{
     supabase,
     dateRangeStart,
     dateRangeEnd,
+    // Opt-in only; absent column (pre-migration) reads as false.
+    allowJeSweep: (job as any)?.allow_je_sweep === true,
   };
 
   await logProgress(
@@ -1488,6 +1501,33 @@ export async function executeJob(jobId: string): Promise<{
                 if (stillHasActivity) {
                   residualReason =
                     "account still has activity this stage can't move (deposit lines / JEs / invoice items)";
+                  if (!ctx.allowJeSweep) {
+                    // NO-JE POLICY (Mike, 2026-07-26): a merge must reclassify
+                    // the real transactions. The balance-JE sweep moves the
+                    // money but collapses transaction detail in the target's
+                    // drill-down — the defect behind the nine-account GL
+                    // collapse. So we stop here: the source keeps its
+                    // remaining activity and stays ACTIVE, and the residual
+                    // path below reports it for a native merge in the QBO UI
+                    // (the only way to move income/payroll with detail intact).
+                    residualReason +=
+                      " — finish as a native merge in the QuickBooks UI (moves every transaction with detail; the API can only lump it into a JE)";
+                    // Still re-point Items so NEW sales stop landing here.
+                    try {
+                      const repoint = await repointItemsToAccount({
+                        realmId: ctx.realmId,
+                        accessToken: ctx.accessToken,
+                        fromAccountId: action.qbo_account_id,
+                        toAccountId: targetAccount.Id,
+                        toAccountName: targetAccount.Name,
+                      });
+                      if (repoint.repointed > 0) {
+                        await logProgress(ctx, "merge_items_repointed",
+                          `Re-pointed ${repoint.repointed} item(s) from "${action.current_name}" → "${action.new_name}" so new sales post to the target`,
+                          { source: action.current_name, target: action.new_name, repointed: repoint.repointed });
+                      }
+                    } catch { /* non-fatal */ }
+                  } else {
                   // JE SWEEP — move the residue the line-reclass can't see
                   // (deposit lines, JEs, invoice/item income) with per-month
                   // reclassifying journal entries, then re-point any Items so
@@ -1536,6 +1576,7 @@ export async function executeJob(jobId: string): Promise<{
                   } catch (sweepErr: any) {
                     residualReason += ` — JE sweep failed: ${String(sweepErr?.message || sweepErr).slice(0, 150)}`;
                   }
+                  } // end allowJeSweep
                 }
               } catch (verifyErr: any) {
                 // Can't prove it's empty → don't inactivate. Safe default.

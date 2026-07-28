@@ -470,8 +470,13 @@ export async function drainAndRetireAccount(params: {
   endDate: string;
   memo: string;
   allAccounts: QBOAccount[];
+  /** Allow the balance-JE sweep for residue line-reclass can't move.
+   *  DEFAULT FALSE — a merge should reclassify real transactions, not lump
+   *  them into a JE (see the sweep block below). Opt in only deliberately. */
+  allowJeSweep?: boolean;
 }): Promise<DrainRetireResult> {
   const { realmId, accessToken, source, target, startDate, endDate, memo, allAccounts } = params;
+  const allowJeSweep = params.allowJeSweep === true;
   const out: DrainRetireResult = {
     moved: 0, jesPosted: 0, linesMoved: 0, monthsWithActivity: 0, foundInReport: false,
     itemsRepointed: 0, childrenDetached: 0, inactivated: false, failures: [],
@@ -521,9 +526,21 @@ export async function drainAndRetireAccount(params: {
   // Sweep whatever line-reclass couldn't move (income/deposit/JE/invoice items,
   // or an over-cap account) with per-month reclassifying JEs. Runs against the
   // POST-line-reclass P&L, so it only moves the residual — no double count.
-  const je = await reclassAccountViaJournalEntry({ realmId, accessToken, source, target, startDate, endDate, memo });
-  out.moved = je.moved; out.jesPosted = je.jesPosted; out.monthsWithActivity = je.monthsWithActivity;
-  out.foundInReport = je.foundInReport; out.failures.push(...je.failures);
+  //
+  // OFF BY DEFAULT since 2026-07-26 (Mike): a merge must RECLASSIFY the real
+  // transactions, not lump them into a JE. The sweep is what collapsed GL
+  // detail on nine accounts fleet-wide — a JE moves the balance but destroys
+  // the transaction-level detail in the target's drill-down, and it can't be
+  // undone without reversing entries. With the sweep off, an account whose
+  // residue is income / deposits / paycheques simply doesn't finish: it stays
+  // ACTIVE and is reported for a native merge in the QBO UI (which moves
+  // everything with detail intact — the API has no equivalent). Callers that
+  // genuinely want the old behavior must opt in explicitly.
+  if (allowJeSweep) {
+    const je = await reclassAccountViaJournalEntry({ realmId, accessToken, source, target, startDate, endDate, memo });
+    out.moved = je.moved; out.jesPosted = je.jesPosted; out.monthsWithActivity = je.monthsWithActivity;
+    out.foundInReport = je.foundInReport; out.failures.push(...je.failures);
+  }
 
   const rp = await repointItemsToAccount({ realmId, accessToken, fromAccountId: source.Id, toAccountId: target.Id, toAccountName: target.Name });
   out.itemsRepointed = rp.repointed;
@@ -541,7 +558,12 @@ export async function drainAndRetireAccount(params: {
         const bal = await accountPlBalanceInRange({ realmId, accessToken, account: source, startDate, endDate });
         zeroed = Math.abs(bal) < 0.01;
         if (!zeroed) {
-          out.failures.push(`source still carries $${Math.round(Math.abs(bal)).toLocaleString()} the drain couldn't move — left ACTIVE (not retired) so nothing is stranded`);
+          out.failures.push(
+            `source still carries $${Math.round(Math.abs(bal)).toLocaleString()} that line-reclass can't move ` +
+            `(income / deposits / paycheques / existing JEs) — left ACTIVE so nothing is stranded. ` +
+            `Finish this one as a native merge in the QuickBooks UI: it moves every transaction with detail intact, ` +
+            `which the API cannot do without a lump JE.`
+          );
         }
       } catch (e: any) {
         out.failures.push(`couldn't verify source is empty — left active: ${String(e?.message || e).slice(0, 120)}`);
