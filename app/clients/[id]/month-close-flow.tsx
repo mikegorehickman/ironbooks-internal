@@ -16,9 +16,12 @@ import { AskClientComposer } from "@/components/AskClientComposer";
 export function MonthCloseFlow({
   clientLinkId,
   clientName,
+  onNavigateTab,
 }: {
   clientLinkId: string;
   clientName: string;
+  /** Jump to another tab on THIS client (statements live on the BS tab). */
+  onNavigateTab?: (tab: "overview" | "bs" | "pl") => void;
 }) {
   const [composer, setComposer] = useState<null | "ask" | "docs">(null);
 
@@ -77,19 +80,41 @@ export function MonthCloseFlow({
           </button>
         </FlowStep>
 
-        {/* 4 — Close */}
+        {/* 4 — Close. Lands on THIS client's statements (Balance Sheet tab),
+            not the fleet board — the bookkeeper reviews the numbers they're
+            about to send before sending them. The board link stays as a
+            secondary for the attest + send step itself. */}
         <FlowStep
           num={4}
           title="Verify & close the month"
-          blurb="Run the reliability checks, review the statements, and send — on the Production board."
+          blurb="Review this client's statements, then run the reliability checks and send."
           last
         >
-          <Link
-            href="/production"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-teal px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-dark"
-          >
-            <CheckCircle2 size={13} /> Close the month <ArrowRight size={12} />
-          </Link>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {onNavigateTab ? (
+              <button
+                type="button"
+                onClick={() => onNavigateTab("bs")}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-teal px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-dark"
+              >
+                <CheckCircle2 size={13} /> Review the statements <ArrowRight size={12} />
+              </button>
+            ) : (
+              <Link
+                href="/production"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-teal px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-dark"
+              >
+                <CheckCircle2 size={13} /> Close the month <ArrowRight size={12} />
+              </Link>
+            )}
+            <Link
+              href="/production"
+              title="The Production board — where the reliability checks, attestation and send happen"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-navy hover:border-teal"
+            >
+              Close &amp; send on the board <ArrowRight size={12} className="text-ink-light" />
+            </Link>
+          </div>
         </FlowStep>
       </div>
 
