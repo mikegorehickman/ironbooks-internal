@@ -11,6 +11,7 @@ import type { Database } from "@/lib/database.types";
 import { CANADIAN_PROVINCES, getProvinceTax } from "@/lib/canadian-tax";
 import { INDUSTRIES, getIndustry, suggestIndustryFromName, type IndustryKey } from "@/lib/industries";
 import { CleanupSections } from "./cleanup-sections";
+import { GstYearFix } from "./gst-year-fix";
 import type { RosterClient } from "@/lib/cleanup-roster";
 
 type ClientLink = Database["public"]["Tables"]["client_links"]["Row"];
@@ -55,6 +56,47 @@ export function NewJobForm({
   const [fiscalYearStartMonthName, setFiscalYearStartMonthName] = useState<string>("");
   const [loadingPresets, setLoadingPresets] = useState(false);
   const selectedPreset = datePresets.find((p) => p.id === datePresetId);
+
+  /**
+   * Prepend "Since last close" and select it by default.
+   *
+   * The monthly rhythm is "clean what's happened since we last sent them
+   * books" — re-scoping a whole calendar year every month re-touches closed
+   * periods for no reason and makes merges far slower. The full-year presets
+   * stay available for the case that genuinely needs them: re-matching every
+   * transaction against a new or rebuilt master COA.
+   *
+   * Non-fatal: a client with no completed close (and no cleanup range) just
+   * keeps the standard fiscal/calendar presets.
+   */
+  async function loadSinceLastClose(clientId: string, basePresets: DateRangePreset[]) {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/last-close`);
+      if (!res.ok) return;
+      const j = await res.json();
+      const end = j?.last_close_end;
+      if (!end || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return;
+      // Start the day AFTER the close so the closed month isn't re-scoped.
+      const next = new Date(`${end}T00:00:00Z`);
+      next.setUTCDate(next.getUTCDate() + 1);
+      const start = next.toISOString().slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
+      if (start > today) return; // closed through today — nothing new yet
+      const preset: DateRangePreset = {
+        id: "since_close",
+        label:
+          j.source === "cleanup_range"
+            ? "Since cleanup finished"
+            : "Since last close",
+        start,
+        end: today,
+      };
+      setDatePresets([preset, ...basePresets.filter((p) => p.id !== "since_close")]);
+      setDatePresetId("since_close");
+    } catch {
+      // Keep the standard presets.
+    }
+  }
 
   // Deep-links (?client=) must resolve against EVERY roster bucket, not just
   // "new cleanup". A client with a completed cleanup lives in
@@ -121,6 +163,9 @@ export function NewJobForm({
           "January";
         setDatePresets(presets);
         setFiscalYearStartMonthName(fyMonth);
+        // Prepend the client-specific "since last close" option and make it
+        // the default — see loadSinceLastClose below.
+        loadSinceLastClose(selected.id, presets);
       })
       .catch(() => {
         // Sensible fallback if the fetch fails — calendar-year only
@@ -495,6 +540,17 @@ export function NewJobForm({
                   Fiscal year starts in <span className="font-semibold">{fiscalYearStartMonthName}</span> (pulled from QBO)
                 </div>
               )}
+              <p className="text-xs text-ink-slate">
+                {datePresets.some((p) => p.id === "since_close") ? (
+                  <>
+                    Defaults to <strong className="text-navy">since the last close</strong> — the
+                    monthly rhythm, and it leaves already-delivered months alone. Pick a full year
+                    when you need to re-match every transaction against a new or rebuilt master COA.
+                  </>
+                ) : (
+                  <>No completed close on file yet, so pick the window to clean.</>
+                )}
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 {datePresets.map((p) => (
                   <button
@@ -517,6 +573,19 @@ export function NewJobForm({
           )}
         </div>
       </div>
+
+      {/* Canadian clients: the year-wide sales-tax retrofit. Deliberately
+          OUTSIDE the cleanup scope above — tax has to be right for the whole
+          year even when you're only cleaning one month. */}
+      {country === "CA" && selected && (
+        <div className="mb-6">
+          <GstYearFix
+            clientLinkId={selected.id}
+            clientName={selected.client_name}
+            province={province}
+          />
+        </div>
+      )}
 
       <RedoWarning clientId={selected?.id ?? null} kind="coa" onAllowChange={setRedoAllowed} preAcknowledged={searchParams.get("redo") === "1"} />
 
