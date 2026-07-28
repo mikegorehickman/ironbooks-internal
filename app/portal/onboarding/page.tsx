@@ -9,6 +9,7 @@ import {
 } from "@/lib/portal-onboarding";
 import { PortalErrorState } from "../error-state";
 import { OnboardingWizard } from "./onboarding-wizard";
+import { EMPTY_ANSWERS } from "./onboarding-form";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export default async function PortalOnboardingPage() {
   const { data: client } = await (service as any)
     .from("client_links")
     .select(
-      "id, client_name, jurisdiction, legal_business_name, trade_type, entity_type, corporate_type, fiscal_year_end, payroll_provider, prior_bookkeeper, accounting_software, employee_count_range, contact_first_name, contact_last_name, client_phone, state_province, portal_onboarding"
+      "id, client_name, client_email, jurisdiction, country, legal_business_name, trade_type, entity_type, corporate_type, fiscal_year_end, payroll_provider, prior_bookkeeper, accounting_software, employee_count_range, annual_revenue_range, taxes_up_to_date, keeps_receipts, bank_connected_to_software, uses_business_cards, contact_first_name, contact_last_name, client_phone, state_province, portal_onboarding"
     )
     .eq("id", ctx.clientLinkId)
     .single();
@@ -42,19 +43,30 @@ export default async function PortalOnboardingPage() {
         jurisdiction={client?.jurisdiction || "US"}
         videoUrl={onboardingVideoUrl()}
         calendarUrl={onboardingCallCalendarUrl()}
-        initial={{
-          legal_business_name: client?.legal_business_name || "",
-          trade_type: client?.trade_type || "",
-          entity_type: client?.entity_type || "",
-          fiscal_year_end: client?.fiscal_year_end || "",
-          payroll_provider: client?.payroll_provider || "",
-          prior_bookkeeper: client?.prior_bookkeeper || "",
-          accounting_software: client?.accounting_software || "",
-          employee_count_range: client?.employee_count_range || "",
-          contact_first_name: client?.contact_first_name || "",
-          contact_last_name: client?.contact_last_name || "",
-          client_phone: client?.client_phone || "",
-          state_province: client?.state_province || "",
+        initialAnswers={{
+          ...EMPTY_ANSWERS,
+          // Pre-fill from the client profile so they aren't retyping what we
+          // already know, then let any saved draft win over it.
+          firstName: client?.contact_first_name || "",
+          lastName: client?.contact_last_name || "",
+          email: client?.client_email || ctx.userEmail || "",
+          phone: client?.client_phone || "",
+          companyName: client?.legal_business_name || client?.client_name || "",
+          tradeType: client?.trade_type || "",
+          corporationType: client?.corporate_type || "",
+          fiscalYearEnd: client?.fiscal_year_end || "",
+          country: client?.country || (client?.jurisdiction === "CA" ? "Canada" : "Canada"),
+          provinceState: client?.state_province || "",
+          annualRevenue: client?.annual_revenue_range || "",
+          taxesUpToDate: client?.taxes_up_to_date || "",
+          lastBookkeeper: client?.prior_bookkeeper || "",
+          accountingSoftware: client?.accounting_software || "",
+          employeeCount: client?.employee_count_range || "",
+          keepsReceipts: client?.keeps_receipts || "",
+          bankConnected: client?.bank_connected_to_software || "",
+          cardsUsed: client?.uses_business_cards || "",
+          payrollProvider: client?.payroll_provider || "",
+          ...(state.form_draft || {}),
         }}
         state={state}
       />

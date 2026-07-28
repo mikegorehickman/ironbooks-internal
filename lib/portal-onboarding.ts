@@ -19,6 +19,13 @@ export interface PortalOnboardingState {
   docs_provided_at?: string | null;
   completed_at?: string | null;
   accounts_attested?: boolean;
+  accounts_attested_at?: string | null;
+  /** In-progress answers from the paged intake form, saved on every "Next". */
+  form_draft?: any | null;
+  form_draft_page?: number | null;
+  form_saved_at?: string | null;
+  /** The submitted intake, verbatim — most of the 29 fields have no column. */
+  form_answers?: any | null;
   /** Thank-you reward (see lib/onboarding-reward.ts). `claimed` is the atomic
    *  latch that makes sending exactly-once; `sent` records success. */
   reward_claimed_at?: string | null;
@@ -35,6 +42,11 @@ export function readOnboardingState(row: { portal_onboarding?: any } | null | un
     docs_provided_at: s.docs_provided_at ?? null,
     completed_at: s.completed_at ?? null,
     accounts_attested: !!s.accounts_attested,
+    accounts_attested_at: s.accounts_attested_at ?? null,
+    form_draft: s.form_draft ?? null,
+    form_draft_page: s.form_draft_page ?? null,
+    form_saved_at: s.form_saved_at ?? null,
+    form_answers: s.form_answers ?? null,
     reward_claimed_at: s.reward_claimed_at ?? null,
     reward_sent_at: s.reward_sent_at ?? null,
     reward_error: s.reward_error ?? null,
