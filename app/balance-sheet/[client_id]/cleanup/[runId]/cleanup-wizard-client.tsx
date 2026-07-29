@@ -2651,6 +2651,7 @@ function StatementAnalysisPanel({ runId, onApplied }: { runId: string; onApplied
   const [files, setFiles] = useState<File[]>([]);
   const [hover, setHover] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [progress, setProgress] = useState<string>("");
   const [results, setResults] = useState<StmtResult[] | null>(null);
   const [error, setError] = useState("");
 
@@ -2668,24 +2669,45 @@ function StatementAnalysisPanel({ runId, onApplied }: { runId: string; onApplied
     setAnalyzing(true);
     setError("");
     setResults(null);
-    try {
-      const statements = await Promise.all(
-        files.map(async (f) => ({ filename: f.name, base64: await fileToBase64(f) }))
-      );
-      const res = await fetch(`/api/cleanup/${runId}/analyze-statements`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ statements }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Analysis failed");
-      setResults(data.results || []);
-      if (data.recon_rows_written > 0) onApplied(); // refresh proposed entries
-    } catch (e: any) {
-      setError(e?.message || "Analysis failed");
-    } finally {
-      setAnalyzing(false);
+    // ONE FILE PER REQUEST, sequentially. Batching every PDF into a single
+    // request meant one HTTP call doing an AI extraction per statement —
+    // three statements blew straight past the platform timeout and the
+    // bookkeeper got nothing for any of them (Mike, 2026-07-29). Per-file
+    // requests keep each call well inside the limit, show real progress,
+    // and let one bad PDF fail alone instead of taking the batch down.
+    const all: StmtResult[] = [];
+    const failures: string[] = [];
+    let wroteRows = false;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      setProgress(`Analyzing ${i + 1} of ${files.length} — ${f.name}…`);
+      try {
+        const res = await fetch(`/api/cleanup/${runId}/analyze-statements`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            statements: [{ filename: f.name, base64: await fileToBase64(f) }],
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Analysis failed");
+        all.push(...(data.results || []));
+        if (data.recon_rows_written > 0) wroteRows = true;
+        setResults([...all]); // show each statement's outcome as it lands
+      } catch (e: any) {
+        failures.push(`${f.name}: ${e?.message || "failed"}`);
+      }
     }
+    setProgress("");
+    setResults([...all]);
+    if (failures.length > 0) {
+      setError(
+        `${failures.length} of ${files.length} statement${files.length === 1 ? "" : "s"} failed — ` +
+        `the rest went through. ${failures.join("; ")}`
+      );
+    }
+    if (wroteRows) onApplied(); // refresh proposed entries
+    setAnalyzing(false);
   }
 
   const gapsFound = (results || []).filter((r) => r.status === "gap_found").length;
@@ -2754,8 +2776,13 @@ function StatementAnalysisPanel({ runId, onApplied }: { runId: string; onApplied
         className="mt-3 text-xs font-bold px-3 py-1.5 rounded-lg bg-teal text-white disabled:opacity-50 inline-flex items-center gap-1.5"
       >
         {analyzing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-        {analyzing ? "Reading statements…" : `Analyze ${files.length || ""} statement${files.length === 1 ? "" : "s"}`}
+        {analyzing ? progress || "Reading statements…" : `Analyze ${files.length || ""} statement${files.length === 1 ? "" : "s"}`}
       </button>
+      {analyzing && files.length > 1 && (
+        <p className="mt-1.5 text-[11px] text-ink-light">
+          Each statement is read on its own — results appear below as they finish.
+        </p>
+      )}
 
       {results && (
         <div className="mt-4 space-y-2">

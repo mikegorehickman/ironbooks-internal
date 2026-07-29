@@ -513,21 +513,23 @@ export function BalanceSheetLanding({
 
   return (
     <div className="space-y-6">
-      {/* Guided BS cleanup wizard — primary path from kanban bs_cleanup stage */}
-      <div className="rounded-2xl bg-navy text-white p-5 flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-sm font-bold">Guided BS Cleanup</h2>
-          <p className="text-xs text-white/70 mt-1">
-            Health Score, module checklist, review queue, and QA gate — all in one wizard.
-          </p>
-        </div>
-        <a
-          href={`/balance-sheet/${clientLinkId}/cleanup`}
-          className="flex-shrink-0 text-xs font-semibold px-4 py-2 rounded-lg bg-teal hover:bg-teal-dark transition-colors"
-        >
-          Open wizard →
-        </a>
-      </div>
+      {/* What needs fixing — the run's checklist, ON the page where the
+          fixing happens. It used to live only on the wizard, whose Fix
+          buttons linked back HERE, so every item was a page round-trip
+          (Mike, 2026-07-29: "why do we need 2 pages?"). Items whose
+          resolver lives on this page open it in place; module-engine items
+          (loans, owner equity, payroll, A/P) continue into the run. */}
+      <WhatNeedsFixing
+        clientLinkId={clientLinkId}
+        onJump={(id) => {
+          setSectionHash(id);
+          window.location.hash = id;
+          setTimeout(
+            () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+            50
+          );
+        }}
+      />
 
       {/* Resolve issues — this page is the ONE place to fix the balance sheet.
           Each chip jumps to and opens its resolver below. */}
@@ -1602,6 +1604,124 @@ function GapInvestigation({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ─── What needs fixing — latest run's health checklist, in place ──────────
+// Fed by /api/cleanup/latest. Anchored items (#reconcile/#uf/#ar/#obe) open
+// their resolver on THIS page; everything else continues into the run's
+// module engine. No run yet → a single quiet "start" row.
+
+const TASK_LANDING_HASH: Record<string, string> = {
+  undeposited_funds: "uf",
+  accounts_receivable: "ar",
+  obe_uncategorized: "obe",
+  bank_recon: "reconcile",
+};
+
+function WhatNeedsFixing({
+  clientLinkId,
+  onJump,
+}: {
+  clientLinkId: string;
+  onJump: (id: string) => void;
+}) {
+  const [data, setData] = useState<{ run: any; health_score: any } | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/cleanup/latest?client=${clientLinkId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled) { setData(j); setLoaded(true); } })
+      .catch(() => setLoaded(true));
+    return () => { cancelled = true; };
+  }, [clientLinkId]);
+
+  const run = data?.run;
+  const hs = data?.health_score;
+  const tasks: any[] = Array.isArray(hs?.task_list) ? hs.task_list : [];
+
+  // No run (or nothing scored yet) → the single entry point, nothing more.
+  if (!loaded || !run || tasks.length === 0) {
+    return (
+      <div className="rounded-2xl bg-navy text-white p-5 flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-sm font-bold">Guided BS Cleanup</h2>
+          <p className="text-xs text-white/70 mt-1">
+            {!loaded
+              ? "Checking for an open cleanup run…"
+              : run
+              ? "Run open — diagnosis hasn't produced a checklist yet."
+              : "Diagnose the books, then work the checklist right here."}
+          </p>
+        </div>
+        <a
+          href={run ? `/balance-sheet/${clientLinkId}/cleanup/${run.id}` : `/balance-sheet/${clientLinkId}/cleanup`}
+          className="flex-shrink-0 text-xs font-semibold px-4 py-2 rounded-lg bg-teal hover:bg-teal-dark transition-colors"
+        >
+          {run ? "Open run →" : "Start cleanup →"}
+        </a>
+      </div>
+    );
+  }
+
+  const score = Number(hs.overall_score ?? 0);
+  return (
+    <div className="rounded-2xl bg-white border-2 border-teal/30 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
+        <span
+          className={`text-sm font-black tabular-nums px-2.5 py-1 rounded-lg ${
+            score >= 80 ? "bg-emerald-50 text-emerald-700" : score >= 60 ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"
+          }`}
+        >
+          {score}
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-sm font-bold text-navy">What needs fixing</h2>
+          <p className="text-[11px] text-ink-light">
+            Work top to bottom — each item opens its fix on this page or continues into the run.
+          </p>
+        </div>
+        <a
+          href={`/balance-sheet/${clientLinkId}/cleanup/${run.id}`}
+          className="ml-auto shrink-0 text-[11px] font-semibold text-teal hover:text-teal-dark"
+        >
+          Review &amp; post (run) →
+        </a>
+      </div>
+      <div className="divide-y divide-gray-50">
+        {tasks.slice(0, 8).map((t: any) => {
+          const hash = t.module ? TASK_LANDING_HASH[t.module] : undefined;
+          return (
+            <div key={t.id || t.title} className="px-5 py-2.5 flex items-center gap-2.5 text-sm">
+              <span
+                className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                  t.grade === "red" ? "bg-red-500" : "bg-amber-400"
+                }`}
+              />
+              <span className="flex-1 min-w-0 font-semibold text-navy truncate">{t.title}</span>
+              {hash ? (
+                <button
+                  onClick={() => onJump(hash)}
+                  className="shrink-0 text-[11px] font-bold text-teal border border-teal/40 rounded-lg px-2.5 py-1 hover:bg-teal/5"
+                >
+                  Fix below ↓
+                </button>
+              ) : (
+                <a
+                  href={`/balance-sheet/${clientLinkId}/cleanup/${run.id}`}
+                  className="shrink-0 text-[11px] font-bold text-ink-slate border border-gray-200 rounded-lg px-2.5 py-1 hover:border-teal/40 hover:text-teal"
+                >
+                  In the run →
+                </a>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
