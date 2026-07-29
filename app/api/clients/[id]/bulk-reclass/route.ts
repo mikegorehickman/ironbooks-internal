@@ -8,7 +8,7 @@ import {
   describeReclassError,
   type SupportedTxType,
 } from "@/lib/qbo-reclass";
-import { reclassifyDepositLines } from "@/lib/qbo-deposit-reclass";
+import { reclassifyDepositLines, reclassifyJournalEntryLines } from "@/lib/qbo-deposit-reclass";
 import { bankRuleVendorPattern } from "@/lib/vendor-knowledge";
 
 /**
@@ -62,11 +62,16 @@ const MAX_TXNS_PER_PASS = 60;
  */
 function classifyReportTxn(
   rawType: string
-): { entity: SupportedTxType; kind: "expense" } | { entity: "Deposit"; kind: "deposit" } | null {
+):
+  | { entity: SupportedTxType; kind: "expense" }
+  | { entity: "Deposit"; kind: "deposit" }
+  | { entity: "JournalEntry"; kind: "je" }
+  | null {
   const t = rawType.trim().toLowerCase();
   if (t === "bill") return { entity: "Bill", kind: "expense" };
   if (t === "vendor credit" || t === "vendorcredit") return { entity: "VendorCredit", kind: "expense" };
   if (t === "deposit") return { entity: "Deposit", kind: "deposit" };
+  if (t === "journal entry" || t === "journalentry") return { entity: "JournalEntry", kind: "je" };
   // Everything QBO persists as a Purchase entity — all post via
   // AccountBasedExpenseLineDetail, so the reclass engine handles them identically.
   if ([
@@ -174,7 +179,7 @@ export async function POST(
   // Everything else (Transfer, JournalEntry, Invoice/SalesReceipt item income…)
   // is genuinely out of scope and counted as skipped_unsupported.
   const seen = new Set<string>();
-  const unique: Array<{ id: string; type: string; kind: "expense" | "deposit" }> = [];
+  const unique: Array<{ id: string; type: string; kind: "expense" | "deposit" | "je" }> = [];
   let skippedUnsupported = 0;
   for (const t of rawTxns) {
     const id = String(t?.id || "").trim();
@@ -255,6 +260,30 @@ export async function POST(
       } catch (err: any) {
         recordFailure(t.id, "Deposit", err);
         console.error(`[bulk-reclass] Deposit/${t.id}: ${err.message}`);
+      }
+      continue;
+    }
+
+    // ── Journal Entry: repoint the line via JournalEntryLineDetail.AccountRef
+    // (keeps the entry balanced — only the account changes) ──
+    if (t.kind === "je") {
+      try {
+        const r = await reclassifyJournalEntryLines(realmId, accessToken, {
+          journalEntryId: t.id,
+          sourceAccountId,
+          newAccountId: target.Id,
+          newAccountName: target.Name,
+          auditMemo,
+          expectedCurrentAccountName: sourceQboName,
+          closingDate,
+        });
+        if (r.skipped_closed) summary.skipped_closed++;
+        else if (r.applied > 0) { summary.moved_txns++; summary.moved_lines += r.applied; }
+        else if (r.matched === 0) summary.skipped_no_source_line++;
+        else if (r.stale > 0) summary.skipped_stale++;
+      } catch (err: any) {
+        recordFailure(t.id, "JournalEntry", err);
+        console.error(`[bulk-reclass] JournalEntry/${t.id}: ${err.message}`);
       }
       continue;
     }

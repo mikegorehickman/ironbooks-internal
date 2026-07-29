@@ -1,6 +1,6 @@
 /**
- * QBO Deposit line reclassification.
- * ----------------------------------
+ * QBO Deposit + Journal Entry line reclassification.
+ * --------------------------------------------------
  * The main reclass engine (lib/qbo-reclass.ts) only moves expense-family lines
  * — Bill / Purchase / Expense / VendorCredit, all via AccountBasedExpenseLineDetail.
  * A bank *Deposit* carries a different line shape (DepositLineDetail.AccountRef),
@@ -177,6 +177,135 @@ export async function reclassifyDepositLines(
   if (result.applied < changedLineIds.size) {
     throw new Error(
       `Deposit ${params.depositId}: QBO accepted the update but applied only ` +
+      `${result.applied}/${changedLineIds.size} lines. ${result.not_applied.map((n) => n.reason).join("; ")}`
+    );
+  }
+
+  return result;
+}
+
+// ─────────────────────────── Journal Entries ───────────────────────────────
+// A Journal Entry posts through JournalEntryLineDetail.AccountRef (with a
+// PostingType Debit/Credit per line). Repointing ONLY the AccountRef on the
+// line(s) sitting in the source account — leaving PostingType, Amount and Entity
+// untouched — moves that leg to another account while the entry stays balanced
+// (the debit/credit totals don't change). Same full-entity update the finalizer
+// uses. JE lines never link a Payment/Sales Receipt, so there's no linked case.
+
+export interface JeReclassResult {
+  applied: number;
+  matched: number;
+  stale: number;
+  skipped_closed: boolean;
+  txn_date: string | null;
+  not_applied: Array<{ line_id: string; actual_account_id: string | null; reason: string }>;
+}
+
+/** Refetch a Journal Entry for a fresh SyncToken + current Line[] shape. */
+export async function refetchJournalEntry(
+  realmId: string,
+  accessToken: string,
+  journalEntryId: string
+): Promise<any | null> {
+  const data = await qboRequest<any>(realmId, accessToken, `/journalentry/${journalEntryId}?minorversion=70`);
+  return data?.JournalEntry ?? null;
+}
+
+/**
+ * Move every JE line currently posting to `sourceAccountId` onto `newAccountId`,
+ * preserving PostingType/Amount/Entity so the entry stays balanced. Skips
+ * stale / closed-period lines. Throws if QBO accepts the update but doesn't
+ * reflect every changed line.
+ */
+export async function reclassifyJournalEntryLines(
+  realmId: string,
+  accessToken: string,
+  params: {
+    journalEntryId: string;
+    sourceAccountId: string;
+    newAccountId: string;
+    newAccountName: string;
+    auditMemo: string;
+    expectedCurrentAccountName?: string | null;
+    closingDate?: string | null;
+  }
+): Promise<JeReclassResult> {
+  const je = await refetchJournalEntry(realmId, accessToken, params.journalEntryId);
+  if (!je) throw new Error(`Journal Entry ${params.journalEntryId} not found (may have been deleted).`);
+
+  const result: JeReclassResult = {
+    applied: 0, matched: 0, stale: 0,
+    skipped_closed: false, txn_date: je.TxnDate ?? null, not_applied: [],
+  };
+
+  if (params.closingDate && je.TxnDate && je.TxnDate <= params.closingDate) {
+    result.skipped_closed = true;
+    return result;
+  }
+
+  const lines: any[] = Array.isArray(je.Line) ? je.Line : [];
+  const changedLineIds = new Set<string>();
+  const srcId = String(params.sourceAccountId);
+
+  const newLines = lines.map((ln) => {
+    const detail = ln?.JournalEntryLineDetail;
+    const ref = detail?.AccountRef;
+    if (!ref || String(ref.value) !== srcId) return ln;
+    result.matched++;
+
+    if (params.expectedCurrentAccountName && ref.name && !accountsMatch(ref.name, params.expectedCurrentAccountName)) {
+      result.stale++;
+      result.not_applied.push({
+        line_id: String(ln.Id ?? ""),
+        actual_account_id: srcId,
+        reason: `stale: current account "${ref.name ?? "(none)"}" no longer matches expected "${params.expectedCurrentAccountName}"`,
+      });
+      return ln;
+    }
+
+    if (ln.Id != null) changedLineIds.add(String(ln.Id));
+    // Only AccountRef changes — PostingType/Amount/Entity stay, so the entry
+    // remains balanced.
+    return { ...ln, JournalEntryLineDetail: { ...detail, AccountRef: { value: params.newAccountId, name: params.newAccountName } } };
+  });
+
+  if (changedLineIds.size === 0) return result;
+
+  const existingMemo: string = je.PrivateNote || "";
+  const newMemo = existingMemo.includes(params.auditMemo)
+    ? existingMemo
+    : (existingMemo ? existingMemo + "\n" : "") + params.auditMemo;
+
+  // Full update — carry the whole entity (all balanced lines), drop only
+  // read-only/computed fields, override Line + memo.
+  const { MetaData: _meta, domain: _domain, TotalAmt: _total, sparse: _sparse, ...jeCore } = je as any;
+  const updated = await qboRequest<any>(realmId, accessToken, `/journalentry?minorversion=70`, {
+    method: "POST",
+    body: JSON.stringify({ ...jeCore, Line: newLines, PrivateNote: newMemo, sparse: false }),
+  });
+
+  const returned: any[] = Array.isArray(updated?.JournalEntry?.Line) ? updated.JournalEntry.Line : [];
+  const byId = new Map<string, any>();
+  for (const l of returned) if (l?.Id != null) byId.set(String(l.Id), l);
+  const wantId = String(params.newAccountId);
+  for (const id of changedLineIds) {
+    const rl = byId.get(id);
+    const actual = rl?.JournalEntryLineDetail?.AccountRef?.value != null
+      ? String(rl.JournalEntryLineDetail.AccountRef.value)
+      : null;
+    if (actual === wantId) result.applied++;
+    else result.not_applied.push({
+      line_id: id,
+      actual_account_id: actual,
+      reason: actual
+        ? `QBO returned line at account ${actual} instead of requested ${wantId}`
+        : "line missing / no AccountRef in QBO response",
+    });
+  }
+
+  if (result.applied < changedLineIds.size) {
+    throw new Error(
+      `Journal Entry ${params.journalEntryId}: QBO accepted the update but applied only ` +
       `${result.applied}/${changedLineIds.size} lines. ${result.not_applied.map((n) => n.reason).join("; ")}`
     );
   }

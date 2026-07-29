@@ -288,7 +288,8 @@ export function ReclassBar({
             )}
             {result.skipped_unsupported > 0 && (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Transfers and journal entries can&apos;t be moved from this tool — open them in QuickBooks.
+                A few types (transfers, and invoice / sales-receipt income) can&apos;t be moved from this tool — handle
+                those in QuickBooks. Expenses, deposits and journal entries all move here.
               </p>
             )}
             {groupedFailures.length > 0 && (
