@@ -177,6 +177,39 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
           setDateRangeStart(def.start);
           setDateRangeEnd(def.end);
         }
+
+        // MONTHLY CLOSE: prepend "Since last close" and select it.
+        //
+        // A close should categorize the ~60 days since we last sent books, not
+        // re-run the whole fiscal year. Every transaction in the window gets an
+        // AI classification before anything is decided, so a full-year default
+        // cost 1,260 model calls to produce a few hundred moves on Charles and
+        // Crew — and it re-touched months that had already gone out.
+        //
+        // Non-fatal: no completed close (or a failed lookup) just leaves the
+        // fiscal-year defaults above in place.
+        fetch(`/api/clients/${clientLinkId}/last-close`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((lc) => {
+            const end = lc?.last_close_end;
+            if (!end || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return;
+            const next = new Date(`${end}T00:00:00Z`);
+            next.setUTCDate(next.getUTCDate() + 1);
+            const start = next.toISOString().slice(0, 10);
+            const today = new Date().toISOString().slice(0, 10);
+            if (start > today) return; // closed through today
+            const preset: DateRangePreset = {
+              id: "since_close",
+              label: lc.source === "cleanup_range" ? "Since cleanup finished" : "Since last close",
+              start,
+              end: today,
+            };
+            setDatePresets((prev) => [preset, ...prev.filter((p) => p.id !== "since_close")]);
+            setDatePresetId(preset.id);
+            setDateRangeStart(preset.start);
+            setDateRangeEnd(preset.end);
+          })
+          .catch(() => {});
       })
       .catch((e) => setPresetsError(e.message))
       .finally(() => setLoadingPresets(false));
@@ -605,6 +638,14 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
                   <div className="text-xs text-ink-slate mb-2">
                     Fiscal year starts in <span className="font-semibold">{fiscalYearStartMonthName}</span> (pulled from QBO)
                   </div>
+                  {datePresets.some((p) => p.id === "since_close") && (
+                    <div className="text-xs text-ink-slate mb-2">
+                      Defaults to <strong className="text-navy">since the last close</strong> — every
+                      transaction in the window gets AI-classified, so a full year costs many times
+                      more and re-touches months already sent. Widen it only to rebuild rules or
+                      re-match against a new master COA.
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     {datePresets.map((p) => (
                       <button
