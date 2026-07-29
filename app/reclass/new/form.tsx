@@ -256,6 +256,17 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
   const reasonOk =
     workflow === "full_categorization" ? true : reason.trim().length >= 5;
 
+  // Suppressed when this isn't a redo: the close linked us in, or the window
+  // itself starts after the last close.
+  //
+  // Must also neutralize redoAllowed. RedoWarning reports up via
+  // onAllowChange, and it can mount BEFORE the async "since last close" preset
+  // arrives — flipping redoAllowed false, then unmounting when the preset
+  // lands. Nothing resets it, so Start Discovery stayed disabled with no
+  // visible control to re-enable it.
+  const redoWarningSuppressed =
+    searchParams.get("close") === "1" || datePresetId === "since_close";
+
   const canSubmit =
     workflow &&
     clientLinkId &&
@@ -857,7 +868,7 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
                 close" categorizes only what's happened since we last sent
                 books — the opposite of re-running a signed-off cleanup — so
                 the warning is noise with a checkbox in front of it. */}
-            {searchParams.get("close") !== "1" && datePresetId !== "since_close" && (
+            {!redoWarningSuppressed && (
               <RedoWarning
                 clientId={clientLinkId}
                 kind="reclass"
@@ -867,7 +878,7 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
             )}
             <button
               onClick={handleSubmit}
-              disabled={!canSubmit || preflightChecking || !!preflightWarning || !redoAllowed}
+              disabled={!canSubmit || preflightChecking || !!preflightWarning || (!redoAllowed && !redoWarningSuppressed)}
               className="w-full bg-teal hover:bg-teal-dark text-white font-semibold px-6 py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {(submitting || preflightChecking) && <Loader2 className="animate-spin" size={18} />}

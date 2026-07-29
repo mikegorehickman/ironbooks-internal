@@ -201,6 +201,10 @@ export function NewJobForm({
   // Arrived from a client's monthly close (stage 1 = Confirm COA). The redo
   // guard below is suppressed in that case, so the form must start unblocked.
   const fromMonthlyClose = searchParams.get("close") === "1";
+  // See the reclass form: RedoWarning can mount before the async since_close
+  // preset lands, set redoAllowed=false, then unmount — leaving the submit
+  // permanently disabled. Suppressing must also neutralize that flag.
+  const redoWarningSuppressed = fromMonthlyClose || datePresetId === "since_close";
   const [redoAllowed, setRedoAllowed] = useState(true);
   const canStart = !!selected && (!needsProvince || !!province);
 
@@ -595,7 +599,7 @@ export function NewJobForm({
           monthly close is not that: confirming the chart IS step 1 of the
           close, so the warning is noise with a checkbox in front of it. Hide
           it (and leave the form unblocked) when the close sent us here. */}
-      {!fromMonthlyClose && datePresetId !== "since_close" && (
+      {!redoWarningSuppressed && (
         <RedoWarning
           clientId={selected?.id ?? null}
           kind="coa"
@@ -615,7 +619,7 @@ export function NewJobForm({
         </button>
         <button
           onClick={startJob}
-          disabled={!canStart || creating || !selectedPreset || !redoAllowed}
+          disabled={!canStart || creating || !selectedPreset || (!redoAllowed && !redoWarningSuppressed)}
           className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-colors"
         >
           {creating ? <Loader2 className="animate-spin" size={16} /> : <ArrowRight size={16} />}
