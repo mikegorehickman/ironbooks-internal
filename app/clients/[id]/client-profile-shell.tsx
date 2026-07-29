@@ -51,6 +51,7 @@ import { ClientDetailsCard } from "./client-details-card";
 import { ResendLoginLink } from "./resend-login-link";
 import { PortalUsersCard } from "./portal-users-card";
 import { ReclassBar, txnKeyOf, type ReclassTxn } from "./txn-reclass";
+import { DeletedAccountReclass } from "./deleted-reclass";
 import { StatementsCard } from "./statements-card";
 import { MessagesPanel } from "./messages-panel";
 import { BillingTab } from "./billing-tab";
@@ -1506,27 +1507,12 @@ function PLTab({
   return (
     <div className="space-y-4">
       {deletedWithBalance.length > 0 && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
-          <div className="flex items-start gap-2">
-            <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold text-amber-900">
-                {deletedWithBalance.length} deleted account{deletedWithBalance.length === 1 ? "" : "s"} still {deletedWithBalance.length === 1 ? "has" : "have"} a balance
-              </div>
-              <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
-                These accounts were deleted in QuickBooks but transactions have posted to them since — so they show as &quot;(deleted)&quot; on the P&amp;L. Reclass their transactions into an active account (merge), then find the recurring/memorized transaction in QBO that&apos;s feeding them.
-              </p>
-              <ul className="mt-2 space-y-1">
-                {deletedWithBalance.map((r, i) => (
-                  <li key={`${r.accountId || r.name}-${i}`} className="flex items-center justify-between text-xs">
-                    <span className="text-amber-900 font-medium truncate pr-2">{r.name}</span>
-                    <span className="font-mono font-semibold text-amber-900 flex-shrink-0">{formatCurrency(r.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
+        <DeletedAccountReclass
+          clientLinkId={clientLinkId}
+          start={financials.overview.primaryMonth.start}
+          end={financials.overview.primaryMonth.end}
+          deleted={deletedWithBalance.map((r) => ({ name: r.name, amount: r.amount }))}
+        />
       )}
       <div className="space-y-2">
         <RangePicker
