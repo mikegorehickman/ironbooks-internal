@@ -45,7 +45,8 @@ export const MONTH_STAGES = [
     label: "Transaction reclass",
     blurb: "The month's transactions categorized and pushed to QBO",
     skippable: false,
-    href: (clientId: string, month: string) => `/reclass/new?client=${clientId}&month=${month}`,
+    href: (clientId: string, month: string) =>
+      `/reclass/new?client=${clientId}&month=${month}&close=1`,
   },
   {
     key: "bank_rules_completed_at",

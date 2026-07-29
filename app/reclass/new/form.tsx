@@ -853,7 +853,18 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
 
         {clientLinkId && (
           <>
-            <RedoWarning clientId={clientLinkId} kind="reclass" onAllowChange={setRedoAllowed} preAcknowledged={searchParams.get("redo") === "1"} />
+            {/* Not a redo when the monthly close sent us here. "Since last
+                close" categorizes only what's happened since we last sent
+                books — the opposite of re-running a signed-off cleanup — so
+                the warning is noise with a checkbox in front of it. */}
+            {searchParams.get("close") !== "1" && (
+              <RedoWarning
+                clientId={clientLinkId}
+                kind="reclass"
+                onAllowChange={setRedoAllowed}
+                preAcknowledged={searchParams.get("redo") === "1"}
+              />
+            )}
             <button
               onClick={handleSubmit}
               disabled={!canSubmit || preflightChecking || !!preflightWarning || !redoAllowed}
