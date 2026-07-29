@@ -604,6 +604,65 @@ export function ReclassReview({
             </ul>
           </div>
         )}
+
+        {/* COVERAGE GAP — what this job could NOT touch.
+            Reclass only covers Bills, Purchases, Expenses and Vendor Credits.
+            Uncategorized income (Deposits), journal entries and transfers are
+            structurally outside it, and item-based lines can't be re-pointed.
+            None of this used to be shown anywhere, which is how a bookkeeper
+            signs off on a period that still has hundreds of uncategorized
+            transactions in QBO. */}
+        {job.warnings && !Array.isArray(job.warnings) && typeof job.warnings === "object" && (() => {
+          const w = job.warnings as any;
+          const uncovered = Number(w.uncovered_in_holding_account || 0);
+          const unrec = Number(w.unreclassifiable_count || 0);
+          const failures = Array.isArray(w.uncovered_scan_failures) ? w.uncovered_scan_failures : [];
+          if (!uncovered && !unrec && !failures.length) return null;
+          const money = (n: number) =>
+            `$${Math.round(n).toLocaleString()}`;
+          return (
+            <div className="mt-3 p-3 rounded-lg border border-gold-border bg-gold-tint text-sm text-gold-deep">
+              <div className="font-semibold mb-1">
+                This period is not fully categorized by this job
+              </div>
+              <ul className="list-disc pl-5 space-y-1">
+                {uncovered > 0 && (
+                  <li>
+                    <strong>{uncovered}</strong> deposit / journal-entry / transfer line
+                    {uncovered === 1 ? "" : "s"} are sitting in an uncategorized account
+                    {w.uncovered_holding_account_value
+                      ? ` (${money(Number(w.uncovered_holding_account_value))})`
+                      : ""}
+                    . Reclass does not cover those transaction types — they were{" "}
+                    <strong>not touched</strong>.
+                    {w.uncovered_entity_counts && (
+                      <span className="block text-xs mt-0.5 opacity-80">
+                        In this period: {Object.entries(w.uncovered_entity_counts)
+                          .filter(([, c]) => Number(c) > 0)
+                          .map(([t, c]) => `${c} ${t}`)
+                          .join(", ") || "none found"}
+                      </span>
+                    )}
+                  </li>
+                )}
+                {unrec > 0 && (
+                  <li>
+                    <strong>{unrec}</strong> line{unrec === 1 ? "" : "s"} are booked against a
+                    Product/Service rather than an account, so SNAP cannot re-point them. Handle
+                    those directly in QBO.
+                  </li>
+                )}
+                {failures.length > 0 && (
+                  <li>
+                    Coverage for {failures.map((f: any) => f.tx_type).join(", ")} is{" "}
+                    <strong>unknown</strong> — the check failed, so treat these as unverified
+                    rather than clean.
+                  </li>
+                )}
+              </ul>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Source-account filter — work one bank/card at a time (JP workflow). */}

@@ -101,29 +101,62 @@ export interface QBOTransaction {
 
 // ============== HELPERS ==============
 
+/**
+ * Retries 429 and 5xx with backoff, mirroring lib/qbo.ts's shared client.
+ *
+ * This file used to have a no-retry version, and the transaction fetchers below
+ * paired it with `catch { break }` — so a single throttle response abandoned
+ * pagination and permanently lost every remaining page, reported as a clean
+ * successful run. That is how a job "pulls" 1,000 of 2,600 transactions and
+ * tells nobody.
+ */
 async function qboRequest<T>(
   realmId: string,
   accessToken: string,
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  await qboRateLimiter.throttle(realmId);
-  const url = `${QBO_BASE}/v3/company/${realmId}${endpoint}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-  if (!res.ok) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    await qboRateLimiter.throttle(realmId);
+    const url = `${QBO_BASE}/v3/company/${realmId}${endpoint}`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(60_000),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+      });
+    } catch (err: any) {
+      // Network error / timeout — retryable.
+      lastErr = new Error(`QBO request failed on ${endpoint}: ${err?.message || err}`);
+      if (attempt < MAX_ATTEMPTS) { await sleep(500 * 2 ** (attempt - 1)); continue; }
+      throw lastErr;
+    }
+
+    if (res.ok) return res.json();
+
     const body = await res.text();
-    throw new Error(`QBO API ${res.status} on ${endpoint}: ${body}`);
+    const retryable = res.status === 429 || res.status >= 500;
+    lastErr = new Error(`QBO API ${res.status} on ${endpoint}: ${body}`);
+    if (retryable && attempt < MAX_ATTEMPTS) {
+      const retryAfter = Number(res.headers.get("retry-after")) * 1000;
+      await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 500 * 2 ** (attempt - 1));
+      continue;
+    }
+    throw lastErr;
   }
-  return res.json();
+  throw lastErr || new Error(`QBO API request failed on ${endpoint}`);
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ============== TRANSACTION FETCHING ==============
 
@@ -131,6 +164,22 @@ async function qboRequest<T>(
  * Fetch all transactions hitting a specific account within a date range,
  * across all 4 supported types. Returns flattened line-level data.
  */
+/**
+ * A page of a QBO entity query that we never managed to read.
+ *
+ * The point of this type is that "we don't know what's in there" must be
+ * representable. Before it existed, a failed page was a `console.warn` and a
+ * `break`, and the job reported success — so there was no way, from inside the
+ * product, to distinguish a complete period from a half-read one.
+ */
+export interface FetchTruncation {
+  tx_type: string;
+  /** 0-based page index that failed; every page from here on was never read. */
+  failed_at_page: number;
+  rows_read_before_failure: number;
+  message: string;
+}
+
 export interface UnreclassifiableLine {
   /** Why this line hit the account but can't be auto-reclassified */
   reason: "item_based" | "journal_entry_unsupported" | "unknown_detail_type";
@@ -371,93 +420,142 @@ export async function fetchAllTransactionLines(
 ): Promise<{
   lines: ReclassLine[];
   transactionsPulled: number;
+  /** Lines seen but not auto-reclassifiable (item-based, unknown detail type). */
   transactionsSkippedUnsupported: number;
+  unreclassifiableLines: UnreclassifiableLine[];
+  /** Non-empty means the pull is INCOMPLETE — pages we never read. */
+  truncations: FetchTruncation[];
+  typesQueried: string[];
 }> {
   let totalPulled = 0;
-  let skippedUnsupported = 0;
+  const allLines: ReclassLine[] = [];
+  const unreclassifiable: UnreclassifiableLine[] = [];
+  const truncations: FetchTruncation[] = [];
+  const typesQueried: string[] = [];
 
-  // Pull the 4 transaction types in PARALLEL. See fetchTransactionsForAccount
-  // above for the same pattern + rate-limit rationale.
-  const perTypeResults = await Promise.all(
-    SUPPORTED_TX_TYPES.map(async (txType) => {
-      const typeLines: ReclassLine[] = [];
-      let typePulled = 0;
-      let typeUnsupported = 0;
-      let page = 0;
-      const pageSize = 1000;
-      let hasMore = true;
+  // SEQUENTIAL, not Promise.all. The rate limiter's own contract (lib/qbo.ts)
+  // states that true in-flight concurrency per realm must be 1, because
+  // RateLimiter.throttle is non-atomic — four concurrent callers read the same
+  // lastCallAt, sleep the same interval, and then fire simultaneously. This
+  // fetcher was the one place in the codebase that burst 4 concurrent 1000-row
+  // queries at a single realm, which is exactly what provoked the 429s that the
+  // old `catch { break }` then turned into silent data loss.
+  for (const txType of SUPPORTED_TX_TYPES) {
+    typesQueried.push(txType);
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
 
-      while (hasMore) {
-        const startPosition = page * pageSize + 1;
-        const query = encodeURIComponent(
-          `SELECT * FROM ${txType} WHERE TxnDate >= '${dateStart}' AND TxnDate <= '${dateEnd}' STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`
-        );
+    while (hasMore) {
+      const startPosition = page * pageSize + 1;
+      const query = encodeURIComponent(
+        `SELECT * FROM ${txType} WHERE TxnDate >= '${dateStart}' AND TxnDate <= '${dateEnd}' STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`
+      );
 
-        try {
-          const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
-          const txs: QBOTransaction[] = data.QueryResponse?.[txType] || [];
-          typePulled += txs.length;
+      let txs: QBOTransaction[];
+      try {
+        const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
+        txs = data.QueryResponse?.[txType] || [];
+      } catch (err: any) {
+        // Record the gap instead of pretending the period is complete. The
+        // caller decides whether to fail the job or warn — either way a human
+        // learns that page `page` of `txType` was never read.
+        truncations.push({
+          tx_type: txType,
+          failed_at_page: page,
+          rows_read_before_failure: totalPulled,
+          message: String(err?.message || err),
+        });
+        console.error(`[qbo-reclass] ${txType} pagination aborted at page ${page}: ${err?.message}`);
+        break;
+      }
 
-          for (const tx of txs) {
-            // Keep every line that points to an expense account
-            const matchingLines = (tx.Line || []).filter((line) => {
-              return !!line.AccountBasedExpenseLineDetail?.AccountRef?.value;
+      totalPulled += txs.length;
+
+      for (const tx of txs) {
+        const isBankFed = !!tx.OnlineBankingTxnReference;
+        const isManualEntry = !isBankFed && !tx.DocNumber;
+        const vendorName =
+          tx.VendorRef?.name || tx.EntityRef?.name || tx.PayeeRef?.name || "Unknown vendor";
+
+        for (const line of tx.Line || []) {
+          const detail = line.AccountBasedExpenseLineDetail;
+          if (detail?.AccountRef?.value) {
+            allLines.push({
+              transaction_id: tx.Id,
+              transaction_type: txType,
+              line_id: line.Id || "",
+              sync_token: tx.SyncToken,
+              transaction_date: tx.TxnDate,
+              transaction_amount: line.Amount || 0,
+              vendor_name: vendorName,
+              current_account_id: detail.AccountRef.value,
+              current_account_name: detail.AccountRef.name || "",
+              description: line.Description || "",
+              private_note: tx.PrivateNote || "",
+              is_reconciled: line.Cleared === "Reconciled",
+              is_bank_fed: isBankFed,
+              is_manual_entry: isManualEntry,
+              bank_account_name:
+                tx.AccountRef?.name ||
+                (txType === "Bill" || txType === "VendorCredit" ? "Accounts Payable" : null),
             });
-            if (matchingLines.length === 0) continue;
-
-            const isBankFed = !!tx.OnlineBankingTxnReference;
-            const isManualEntry = !isBankFed && !tx.DocNumber;
-            const vendorName =
-              tx.VendorRef?.name || tx.EntityRef?.name || tx.PayeeRef?.name || "Unknown vendor";
-
-            for (const line of matchingLines) {
-              const isReconciled = line.Cleared === "Reconciled";
-              const detail = line.AccountBasedExpenseLineDetail!;
-              typeLines.push({
-                transaction_id: tx.Id,
-                transaction_type: txType,
-                line_id: line.Id || "",
-                sync_token: tx.SyncToken,
-                transaction_date: tx.TxnDate,
-                transaction_amount: line.Amount || 0,
-                vendor_name: vendorName,
-                current_account_id: detail.AccountRef.value,
-                current_account_name: detail.AccountRef.name || "",
-                description: line.Description || "",
-                private_note: tx.PrivateNote || "",
-                is_reconciled: isReconciled,
-                is_bank_fed: isBankFed,
-                is_manual_entry: isManualEntry,
-                bank_account_name:
-                  tx.AccountRef?.name ||
-                  (txType === "Bill" || txType === "VendorCredit" ? "Accounts Payable" : null),
-              });
-            }
+            continue;
           }
 
-          hasMore = txs.length >= pageSize;
-          page++;
-        } catch (err: any) {
-          console.warn(`Failed to query ${txType}:`, err.message);
-          typeUnsupported++;
-          break;
+          // Item-based lines (a purchase booked against a Product/Service
+          // rather than an account) used to be dropped here with no counter and
+          // no log, while the parent transaction still incremented the "pulled"
+          // stat — so the job looked complete. lib/qbo-rules.ts:120 records a
+          // client whose ENTIRE purchase history is item-based; for them this
+          // filter meant SNAP saw nothing and said so to no one.
+          //
+          // We can't safely re-point an item line without resolving the item's
+          // own account mapping, so these are surfaced for manual handling
+          // rather than silently eaten.
+          const itemDetail = (line as any).ItemBasedExpenseLineDetail;
+          if (itemDetail) {
+            unreclassifiable.push({
+              reason: "item_based",
+              transaction_id: tx.Id,
+              transaction_type: txType,
+              line_id: line.Id || "",
+              transaction_date: tx.TxnDate,
+              vendor_name: vendorName,
+              amount: line.Amount || 0,
+              item_ref: itemDetail.ItemRef,
+              description: line.Description || "",
+            });
+          } else if (line.Amount != null && (line as any).DetailType) {
+            unreclassifiable.push({
+              reason: "unknown_detail_type",
+              transaction_id: tx.Id,
+              transaction_type: txType,
+              line_id: line.Id || "",
+              transaction_date: tx.TxnDate,
+              vendor_name: vendorName,
+              amount: line.Amount || 0,
+              description: `${(line as any).DetailType}: ${line.Description || ""}`,
+            });
+          }
         }
       }
-      return { typeLines, typePulled, typeUnsupported };
-    })
-  );
 
-  const allLines: ReclassLine[] = [];
-  for (const r of perTypeResults) {
-    allLines.push(...r.typeLines);
-    totalPulled += r.typePulled;
-    skippedUnsupported += r.typeUnsupported;
+      hasMore = txs.length >= pageSize;
+      page++;
+    }
   }
 
   return {
     lines: allLines,
     transactionsPulled: totalPulled,
-    transactionsSkippedUnsupported: skippedUnsupported,
+    // Kept for callers that still read it, but it is NO LONGER a count of
+    // entity types that threw — see `truncations` for that, which is the honest
+    // signal. This now counts lines we saw but cannot auto-reclassify.
+    transactionsSkippedUnsupported: unreclassifiable.length,
+    unreclassifiableLines: unreclassifiable,
+    truncations,
+    typesQueried,
   };
 }
 
@@ -961,6 +1059,170 @@ export function groupLinesByVendor(lines: ReclassLine[]): VendorGroup[] {
   }
 
   return Array.from(groups.values()).sort((a, b) => b.lines.length - a.lines.length);
+}
+
+// ============== UNCOVERED ENTITY COVERAGE SCAN ==============
+
+/**
+ * QBO entity types the reclass/recon pipelines DO NOT fetch or reclassify.
+ *
+ * SUPPORTED_TX_TYPES is Bill / Purchase / Expense / VendorCredit — the
+ * expense family. Everything below moves real money and can sit in a holding
+ * account indefinitely, and until now SNAP produced no row, no skip, and no
+ * warning for any of it. That is why a client can "finish" a reclass and still
+ * have hundreds of uncategorized transactions in QBO:
+ *
+ *   - Deposit          → uncategorized INCOME, and the credit leg of transfers
+ *   - JournalEntry     → manual entries, including ones SNAP's own tools posted
+ *   - Transfer         → both legs of an inter-account move
+ *   - CreditCardPayment→ card payments, which are balance-sheet, not expense
+ *
+ * This scan is deliberately READ-ONLY. It exists so an incomplete period is
+ * VISIBLE rather than silent; re-pointing these safely needs a different write
+ * path per type (a Deposit line is not a Purchase line), which is separate work.
+ */
+export const UNCOVERED_TX_TYPES = [
+  "Deposit",
+  "JournalEntry",
+  "Transfer",
+  "CreditCardPayment",
+] as const;
+export type UncoveredTxType = (typeof UNCOVERED_TX_TYPES)[number];
+
+export interface UncoveredEntitySample {
+  transaction_id: string;
+  transaction_type: string;
+  transaction_date: string;
+  amount: number;
+  /** Best-effort account name this transaction touches. */
+  account_name: string;
+  description: string;
+  /** True when the touched account looks like a holding pen. */
+  in_holding_account: boolean;
+}
+
+export interface UncoveredEntityCoverage {
+  /** Per-type transaction counts found in the period. */
+  counts: Record<string, number>;
+  /** Subset sitting in an Uncategorized / Ask-My-Accountant style account. */
+  inHoldingAccount: number;
+  /** Absolute dollar value of the holding-account subset. */
+  holdingAccountValue: number;
+  samples: UncoveredEntitySample[];
+  /** Types whose query failed — coverage for these is UNKNOWN, not zero. */
+  failedTypes: Array<{ tx_type: string; message: string }>;
+}
+
+/**
+ * Extract the account-bearing legs of a transaction whose shape we don't
+ * otherwise model. Each uncovered type stores its account reference in a
+ * different place, so this is intentionally shape-tolerant rather than typed.
+ */
+function accountLegsOf(tx: any, txType: string): Array<{ name: string; amount: number; description: string }> {
+  const legs: Array<{ name: string; amount: number; description: string }> = [];
+
+  // Transfer is header-level: no Line array, two account refs.
+  if (txType === "Transfer") {
+    if (tx.FromAccountRef?.name) legs.push({ name: tx.FromAccountRef.name, amount: tx.Amount || 0, description: tx.PrivateNote || "" });
+    if (tx.ToAccountRef?.name) legs.push({ name: tx.ToAccountRef.name, amount: tx.Amount || 0, description: tx.PrivateNote || "" });
+    return legs;
+  }
+  // CreditCardPayment likewise carries header refs.
+  if (txType === "CreditCardPayment") {
+    if (tx.BankAccountRef?.name) legs.push({ name: tx.BankAccountRef.name, amount: tx.Amount || 0, description: tx.PrivateNote || "" });
+    if (tx.CreditCardAccountRef?.name) legs.push({ name: tx.CreditCardAccountRef.name, amount: tx.Amount || 0, description: tx.PrivateNote || "" });
+    return legs;
+  }
+
+  for (const line of tx.Line || []) {
+    const ref =
+      line.DepositLineDetail?.AccountRef ||
+      line.JournalEntryLineDetail?.AccountRef ||
+      line.AccountBasedExpenseLineDetail?.AccountRef;
+    if (ref?.name || ref?.value) {
+      legs.push({
+        name: ref.name || `(account ${ref.value})`,
+        amount: line.Amount || 0,
+        description: line.Description || tx.PrivateNote || "",
+      });
+    }
+  }
+  // A Deposit whose lines carry no account still lands somewhere.
+  if (legs.length === 0 && tx.DepositToAccountRef?.name) {
+    legs.push({ name: tx.DepositToAccountRef.name, amount: tx.TotalAmt || 0, description: tx.PrivateNote || "" });
+  }
+  return legs;
+}
+
+/**
+ * Count (and sample) transactions in the period that SNAP's reclass pipeline
+ * structurally cannot touch. Never throws: a failed type is reported in
+ * `failedTypes` so "we don't know" stays distinguishable from "there are none".
+ */
+export async function scanUncoveredEntities(
+  realmId: string,
+  accessToken: string,
+  dateStart: string,
+  dateEnd: string,
+  isHoldingAccount: (accountName: string | null | undefined) => boolean
+): Promise<UncoveredEntityCoverage> {
+  const counts: Record<string, number> = {};
+  const samples: UncoveredEntitySample[] = [];
+  const failedTypes: Array<{ tx_type: string; message: string }> = [];
+  let inHoldingAccount = 0;
+  let holdingAccountValue = 0;
+
+  for (const txType of UNCOVERED_TX_TYPES) {
+    counts[txType] = 0;
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const query = encodeURIComponent(
+        `SELECT * FROM ${txType} WHERE TxnDate >= '${dateStart}' AND TxnDate <= '${dateEnd}' ` +
+          `STARTPOSITION ${page * pageSize + 1} MAXRESULTS ${pageSize}`
+      );
+      let txs: any[];
+      try {
+        const data: any = await qboRequest(realmId, accessToken, `/query?query=${query}`);
+        txs = data.QueryResponse?.[txType] || [];
+      } catch (err: any) {
+        // Not every QBO company file exposes every entity (CreditCardPayment in
+        // particular is region/version dependent). Record and move on — this is
+        // a diagnostic, and it must never fail the job it is reporting on.
+        failedTypes.push({ tx_type: txType, message: String(err?.message || err).slice(0, 200) });
+        break;
+      }
+
+      counts[txType] += txs.length;
+      for (const tx of txs) {
+        for (const leg of accountLegsOf(tx, txType)) {
+          const holding = isHoldingAccount(leg.name);
+          if (holding) {
+            inHoldingAccount++;
+            holdingAccountValue += Math.abs(Number(leg.amount) || 0);
+          }
+          if (samples.length < 40 && holding) {
+            samples.push({
+              transaction_id: tx.Id,
+              transaction_type: txType,
+              transaction_date: tx.TxnDate,
+              amount: Number(leg.amount) || 0,
+              account_name: leg.name,
+              description: leg.description,
+              in_holding_account: true,
+            });
+          }
+        }
+      }
+
+      hasMore = txs.length >= pageSize;
+      page++;
+    }
+  }
+
+  return { counts, inHoldingAccount, holdingAccountValue, samples, failedTypes };
 }
 
 // ============== EXPORTS ==============
