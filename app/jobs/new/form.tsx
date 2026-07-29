@@ -81,15 +81,21 @@ export function NewJobForm({
       next.setUTCDate(next.getUTCDate() + 1);
       const start = next.toISOString().slice(0, 10);
       const today = new Date().toISOString().slice(0, 10);
-      if (start > today) return; // closed through today — nothing new yet
+      // End at the last COMPLETE month — see the reclass form. Closing a
+      // part-month means re-touching it next close.
+      const now = new Date();
+      const lastFullMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0))
+        .toISOString().slice(0, 10);
+      const partial = lastFullMonthEnd < start;
+      const windowEnd = partial ? today : lastFullMonthEnd;
+      if (start > windowEnd) return; // nothing new yet
       const preset: DateRangePreset = {
         id: "since_close",
         label:
-          j.source === "cleanup_range"
-            ? "Since cleanup finished"
-            : "Since last close",
+          (j.source === "cleanup_range" ? "Since cleanup finished" : "Since last close") +
+          (partial ? " (month in progress)" : ""),
         start,
-        end: today,
+        end: windowEnd,
       };
       setDatePresets([preset, ...basePresets.filter((p) => p.id !== "since_close")]);
       setDatePresetId("since_close");

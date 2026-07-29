@@ -197,12 +197,25 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
             next.setUTCDate(next.getUTCDate() + 1);
             const start = next.toISOString().slice(0, 10);
             const today = new Date().toISOString().slice(0, 10);
-            if (start > today) return; // closed through today
+            // End at the last COMPLETE month, not today. You close finished
+            // months: on 29 Jul with a 31 May close, the period is June —
+            // not "June 1 to today", which drags in a part-month that next
+            // month's close has to categorize all over again.
+            const now = new Date();
+            const lastFullMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0))
+              .toISOString().slice(0, 10);
+            // No complete month since the close yet — fall back to today so
+            // the bookkeeper can still categorize the month in progress.
+            const partial = lastFullMonthEnd < start;
+            const windowEnd = partial ? today : lastFullMonthEnd;
+            if (start > windowEnd) return; // nothing to do
             const preset: DateRangePreset = {
               id: "since_close",
-              label: lc.source === "cleanup_range" ? "Since cleanup finished" : "Since last close",
+              label:
+                (lc.source === "cleanup_range" ? "Since cleanup finished" : "Since last close") +
+                (partial ? " (month in progress)" : ""),
               start,
-              end: today,
+              end: windowEnd,
             };
             setDatePresets((prev) => [preset, ...prev.filter((p) => p.id !== "since_close")]);
             setDatePresetId(preset.id);
