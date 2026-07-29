@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { RedoWarning } from "@/components/RedoWarning";
+import { sinceLastCloseWindow } from "@/lib/since-last-close";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Loader2, AlertCircle, Sparkles, GitMerge, ChevronRight, Layers,
@@ -191,31 +192,13 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
         fetch(`/api/clients/${clientLinkId}/last-close`)
           .then((r) => (r.ok ? r.json() : null))
           .then((lc) => {
-            const end = lc?.last_close_end;
-            if (!end || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return;
-            const next = new Date(`${end}T00:00:00Z`);
-            next.setUTCDate(next.getUTCDate() + 1);
-            const start = next.toISOString().slice(0, 10);
-            const today = new Date().toISOString().slice(0, 10);
-            // End at the last COMPLETE month, not today. You close finished
-            // months: on 29 Jul with a 31 May close, the period is June —
-            // not "June 1 to today", which drags in a part-month that next
-            // month's close has to categorize all over again.
-            const now = new Date();
-            const lastFullMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0))
-              .toISOString().slice(0, 10);
-            // No complete month since the close yet — fall back to today so
-            // the bookkeeper can still categorize the month in progress.
-            const partial = lastFullMonthEnd < start;
-            const windowEnd = partial ? today : lastFullMonthEnd;
-            if (start > windowEnd) return; // nothing to do
+            const w = sinceLastCloseWindow(lc?.last_close_end, lc?.source);
+            if (!w) return;
             const preset: DateRangePreset = {
               id: "since_close",
-              label:
-                (lc.source === "cleanup_range" ? "Since cleanup finished" : "Since last close") +
-                (partial ? " (month in progress)" : ""),
-              start,
-              end: windowEnd,
+              label: w.label,
+              start: w.start,
+              end: w.end,
             };
             setDatePresets((prev) => [preset, ...prev.filter((p) => p.id !== "since_close")]);
             setDatePresetId(preset.id);

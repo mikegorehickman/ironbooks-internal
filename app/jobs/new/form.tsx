@@ -12,6 +12,7 @@ import { CANADIAN_PROVINCES, getProvinceTax } from "@/lib/canadian-tax";
 import { INDUSTRIES, getIndustry, suggestIndustryFromName, type IndustryKey } from "@/lib/industries";
 import { CleanupSections } from "./cleanup-sections";
 import { GstYearFix } from "./gst-year-fix";
+import { sinceLastCloseWindow } from "@/lib/since-last-close";
 import type { RosterClient } from "@/lib/cleanup-roster";
 
 type ClientLink = Database["public"]["Tables"]["client_links"]["Row"];
@@ -74,28 +75,13 @@ export function NewJobForm({
       const res = await fetch(`/api/clients/${clientId}/last-close`);
       if (!res.ok) return;
       const j = await res.json();
-      const end = j?.last_close_end;
-      if (!end || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return;
-      // Start the day AFTER the close so the closed month isn't re-scoped.
-      const next = new Date(`${end}T00:00:00Z`);
-      next.setUTCDate(next.getUTCDate() + 1);
-      const start = next.toISOString().slice(0, 10);
-      const today = new Date().toISOString().slice(0, 10);
-      // End at the last COMPLETE month — see the reclass form. Closing a
-      // part-month means re-touching it next close.
-      const now = new Date();
-      const lastFullMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0))
-        .toISOString().slice(0, 10);
-      const partial = lastFullMonthEnd < start;
-      const windowEnd = partial ? today : lastFullMonthEnd;
-      if (start > windowEnd) return; // nothing new yet
+      const w = sinceLastCloseWindow(j?.last_close_end, j?.source);
+      if (!w) return;
       const preset: DateRangePreset = {
         id: "since_close",
-        label:
-          (j.source === "cleanup_range" ? "Since cleanup finished" : "Since last close") +
-          (partial ? " (month in progress)" : ""),
-        start,
-        end: windowEnd,
+        label: w.label,
+        start: w.start,
+        end: w.end,
       };
       setDatePresets([preset, ...basePresets.filter((p) => p.id !== "since_close")]);
       setDatePresetId("since_close");
