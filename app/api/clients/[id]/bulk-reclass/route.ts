@@ -8,6 +8,7 @@ import {
   type SupportedTxType,
   SUPPORTED_TX_TYPES,
 } from "@/lib/qbo-reclass";
+import { reclassifyDepositLines } from "@/lib/qbo-deposit-reclass";
 import { bankRuleVendorPattern } from "@/lib/vendor-knowledge";
 
 /**
@@ -134,10 +135,15 @@ export async function POST(
     /* closing-date read is best-effort; a null means "no closed period" */
   }
 
-  // Dedupe by transaction (a split line shows as multiple drill rows) and split
-  // supported vs unsupported types up front.
+  // Dedupe by transaction (a split line shows as multiple drill rows) and tag
+  // each with the write path it needs. Two families move here:
+  //   - expense: Bill/Purchase/Expense/VendorCredit via AccountBasedExpenseLineDetail
+  //   - deposit: bank Deposits via DepositLineDetail.AccountRef (income booked
+  //     straight to a revenue account — see lib/qbo-deposit-reclass.ts)
+  // Everything else (Transfer, JournalEntry, Invoice/SalesReceipt item income…)
+  // is genuinely out of scope and counted as skipped_unsupported.
   const seen = new Set<string>();
-  const unique: Array<{ id: string; type: SupportedTxType }> = [];
+  const unique: Array<{ id: string; type: string; kind: "expense" | "deposit" }> = [];
   let skippedUnsupported = 0;
   for (const t of rawTxns) {
     const id = String(t?.id || "").trim();
@@ -146,11 +152,13 @@ export async function POST(
     const key = `${type}::${id}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (!SUPPORTED_TX_TYPES.includes(type as SupportedTxType)) {
+    if (SUPPORTED_TX_TYPES.includes(type as SupportedTxType)) {
+      unique.push({ id, type, kind: "expense" });
+    } else if (type === "Deposit") {
+      unique.push({ id, type, kind: "deposit" });
+    } else {
       skippedUnsupported++;
-      continue;
     }
-    unique.push({ id, type: type as SupportedTxType });
   }
 
   const summary = {
@@ -162,6 +170,9 @@ export async function POST(
     skipped_closed: 0,
     skipped_stale: 0,
     skipped_no_source_line: 0,
+    // Deposit lines linked to a Payment/Sales Receipt — the account follows the
+    // linked txn, so they can't be moved by editing the deposit.
+    skipped_linked: 0,
     failed: 0,
     remaining: [] as Array<{ id: string; type: string }>,
     rules_created: 0,
@@ -178,13 +189,38 @@ export async function POST(
   for (let i = 0; i < unique.length; i++) {
     const t = unique[i];
     if (Date.now() - startTime > BUDGET_MS || i >= MAX_TXNS_PER_PASS) {
-      for (const rem of unique.slice(i)) summary.remaining.push(rem);
+      for (const rem of unique.slice(i)) summary.remaining.push({ id: rem.id, type: rem.type });
       break;
+    }
+
+    // ── Deposit: move the income line via DepositLineDetail.AccountRef ──
+    if (t.kind === "deposit") {
+      try {
+        const r = await reclassifyDepositLines(realmId, accessToken, {
+          depositId: t.id,
+          sourceAccountId,
+          newAccountId: target.Id,
+          newAccountName: target.Name,
+          auditMemo,
+          expectedCurrentAccountName: sourceQboName,
+          closingDate,
+        });
+        summary.skipped_linked += r.linked;
+        if (r.skipped_closed) summary.skipped_closed++;
+        else if (r.applied > 0) { summary.moved_txns++; summary.moved_lines += r.applied; }
+        else if (r.matched === 0) summary.skipped_no_source_line++;
+        else if (r.stale > 0) summary.skipped_stale++;
+        // matched but all linked → already tallied in skipped_linked (not a move, not a failure)
+      } catch (err: any) {
+        summary.failed++;
+        console.error(`[bulk-reclass] Deposit/${t.id}: ${err.message}`);
+      }
+      continue;
     }
 
     let tx;
     try {
-      tx = await refetchTransaction(realmId, accessToken, t.type, t.id);
+      tx = await refetchTransaction(realmId, accessToken, t.type as SupportedTxType, t.id);
     } catch (err: any) {
       summary.failed++;
       console.error(`[bulk-reclass] refetch ${t.type}/${t.id}: ${err.message}`);
@@ -225,7 +261,7 @@ export async function POST(
 
     try {
       const result = await reclassifyTransactionLines(realmId, accessToken, {
-        txType: t.type,
+        txType: t.type as SupportedTxType,
         txId: t.id,
         lineUpdates,
         auditMemo,

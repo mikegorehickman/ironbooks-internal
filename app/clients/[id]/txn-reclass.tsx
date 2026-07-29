@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, CheckCircle2, Loader2, Search, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2, Search, Sparkles, X } from "lucide-react";
 
 /**
  * Transaction reclass from the statement drill-down (bookkeeper view).
@@ -176,7 +176,8 @@ export function ReclassBar({
     setResult(null);
     const totals: Record<string, number> = {
       moved_txns: 0, moved_lines: 0, skipped_unsupported: 0, skipped_closed: 0,
-      skipped_stale: 0, skipped_no_source_line: 0, failed: 0, rules_created: 0, rules_updated: 0,
+      skipped_stale: 0, skipped_no_source_line: 0, skipped_linked: 0, failed: 0,
+      rules_created: 0, rules_updated: 0,
     };
     let queue: Array<{ id: string; type: string }> = selectedTxns.map((t) => ({ id: t.id, type: t.type }));
     const initial = queue.length;
@@ -211,28 +212,52 @@ export function ReclassBar({
   }
 
   if (result) {
+    const moved = result.moved_txns > 0;
     const parts: string[] = [`${result.moved_txns} moved`];
     if (result.rules_created) parts.push(`${result.rules_created} rule${result.rules_created === 1 ? "" : "s"} created`);
     if (result.rules_updated) parts.push(`${result.rules_updated} rule${result.rules_updated === 1 ? "" : "s"} updated`);
     if (result.skipped_closed) parts.push(`${result.skipped_closed} in a closed period`);
     if (result.skipped_stale) parts.push(`${result.skipped_stale} changed since (kept)`);
+    if (result.skipped_linked) parts.push(`${result.skipped_linked} linked deposit${result.skipped_linked === 1 ? "" : "s"}`);
     if (result.skipped_unsupported) parts.push(`${result.skipped_unsupported} not movable here`);
     if (result.skipped_no_source_line) parts.push(`${result.skipped_no_source_line} already moved`);
     if (result.failed) parts.push(`${result.failed} failed`);
+    // Celebrate a real move; stay neutral (amber) when nothing actually moved so
+    // "0 moved" can never read as success.
+    const tone = moved
+      ? { box: "bg-emerald-50", icon: "text-emerald-600", head: "text-emerald-900", body: "text-emerald-800" }
+      : { box: "bg-amber-50", icon: "text-amber-600", head: "text-amber-900", body: "text-amber-800" };
+    const Icon = moved ? CheckCircle2 : AlertCircle;
     return (
-      <div className="border-t border-gray-200 px-5 py-3 bg-emerald-50">
+      <div className={`border-t border-gray-200 px-5 py-3 ${tone.box}`}>
         <div className="flex items-start gap-2 text-xs">
-          <CheckCircle2 size={15} className="text-emerald-600 shrink-0 mt-0.5" />
-          <div className="text-emerald-900">
-            <span className="font-bold">Done — {parts.join(" · ")}.</span>
+          <Icon size={15} className={`${tone.icon} shrink-0 mt-0.5`} />
+          <div className={tone.head}>
+            <span className="font-bold">
+              {moved
+                ? `Reclass complete — ${parts.join(" · ")}.`
+                : `Nothing moved — ${parts.join(" · ")}.`}
+            </span>
+            {moved && (
+              <div className={`mt-1 ${tone.body}`}>
+                Moved into <span className="font-semibold">{target?.name || "the target account"}</span>. The P&amp;L reflects it immediately.
+              </div>
+            )}
             {result.skipped_closed > 0 && (
-              <div className="mt-1 text-emerald-800">
+              <div className={`mt-1 ${tone.body}`}>
                 Transactions in a closed period were left alone — reopen the month in QuickBooks to move those.
               </div>
             )}
+            {result.skipped_linked > 0 && (
+              <div className={`mt-1 ${tone.body}`}>
+                Some deposits are linked to a customer payment or sales receipt — those move when you recategorize the
+                linked transaction (or apply/void the payment), not the deposit itself.
+              </div>
+            )}
             {result.skipped_unsupported > 0 && (
-              <div className="mt-1 text-emerald-800">
-                Deposits, transfers and journal entries can&apos;t be moved from this tool — open them in QuickBooks.
+              <div className={`mt-1 ${tone.body}`}>
+                Transfers and journal entries can&apos;t be moved from this tool — open them in QuickBooks. (Deposits now
+                move here.)
               </div>
             )}
             <button onClick={() => setResult(null)} className="mt-1.5 text-teal font-semibold hover:underline">
