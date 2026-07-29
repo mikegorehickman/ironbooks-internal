@@ -360,10 +360,19 @@ export async function executeJob(jobId: string): Promise<{
   // doesn't have a bookkeeper-chosen scope. No silent fallback to all-time
   // — that's exactly the bug that caused Renaissance to rewrite years of
   // closed-period transactions. Allowed presets are the four from the
-  // new-job form: cy, fy, cy_plus_1, fy_plus_1. Legacy backfilled jobs
-  // (preset='legacy_all_time') must be re-scoped before they can run.
+  // new-job form: cy, fy, cy_plus_1, fy_plus_1 — plus since_close.
+  //
+  // since_close ("everything since the last delivered close") is the DEFAULT
+  // for a monthly close and is the narrowest scope we offer: it starts the day
+  // AFTER the last completed monthly_rec_run, so by construction it cannot
+  // reach a closed period — the exact thing this guard protects. It was added
+  // to the picker without being whitelisted here, so every monthly-close
+  // cleanup failed validation before it started.
+  //
+  // Legacy backfilled jobs (preset='legacy_all_time') must still be re-scoped
+  // before they can run.
   const todayIso = new Date().toISOString().slice(0, 10);
-  const ALLOWED_PRESETS = new Set(["cy", "fy", "cy_plus_1", "fy_plus_1"]);
+  const ALLOWED_PRESETS = new Set(["cy", "fy", "cy_plus_1", "fy_plus_1", "since_close"]);
   const rawStart: string | null = (job as any).date_range_start || null;
   const rawEnd: string | null = (job as any).date_range_end || null;
   const rawPreset: string | null = (job as any).date_range_preset || null;
