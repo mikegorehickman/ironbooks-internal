@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
@@ -1246,6 +1247,40 @@ function MasterAccountSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
+  // The menu renders in a PORTAL, positioned fixed against the button's rect.
+  //
+  // It used to be position:absolute inside the row, which the review table's
+  // horizontally-scrolling wrapper clipped — on the Ask Client tab you could
+  // see the search box but not the results, so the control was unusable. A
+  // portal escapes every overflow ancestor; the trade-off is we position it
+  // ourselves.
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const MENU_W = 288; // w-72
+  const MENU_MAX_H = 360;
+
+  useLayoutEffect(() => {
+    if (!open) { setMenuPos(null); return; }
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      // Flip above when there isn't room below; clamp inside the viewport so
+      // a row near the right edge doesn't push the menu off-screen.
+      const below = window.innerHeight - r.bottom;
+      const top = below < MENU_MAX_H && r.top > below ? Math.max(8, r.top - MENU_MAX_H - 4) : r.bottom + 4;
+      const left = Math.min(Math.max(8, r.left), window.innerWidth - MENU_W - 8);
+      setMenuPos({ top, left });
+    };
+    place();
+    // Reposition rather than drift if the page or the table scrolls.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
+
   // Tokenized, punctuation-insensitive match — a plain phrase-substring match
   // (the old behavior) required the WHOLE typed string to appear verbatim, so
   // typing "owner draw" found nothing against an account literally named
@@ -1264,6 +1299,7 @@ function MasterAccountSelect({
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen(!open)}
         className="w-full max-w-[230px] flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border bg-white hover:bg-gray-50 text-left"
@@ -1273,10 +1309,13 @@ function MasterAccountSelect({
         <ChevronDown size={12} className="flex-shrink-0 text-ink-light" />
       </button>
 
-      {open && (
+      {open && menuPos && createPortal(
         <>
-          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSearch(""); }} />
-          <div className="absolute left-0 top-full mt-1 z-20 w-72 rounded-lg shadow-xl bg-white border border-gray-200 overflow-hidden">
+          <div className="fixed inset-0 z-[998]" onClick={() => { setOpen(false); setSearch(""); }} />
+          <div
+            className="fixed z-[999] w-72 rounded-lg shadow-xl bg-white border border-gray-200 overflow-hidden"
+            style={{ top: menuPos.top, left: menuPos.left }}
+          >
             <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
               <Search size={13} className="text-ink-light flex-shrink-0" />
               <input
@@ -1320,7 +1359,8 @@ function MasterAccountSelect({
               )}
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );
