@@ -218,66 +218,99 @@ export function ReclassBar({
 
   if (result) {
     const moved = result.moved_txns > 0;
-    const parts: string[] = [`${result.moved_txns} moved`];
-    if (result.rules_created) parts.push(`${result.rules_created} rule${result.rules_created === 1 ? "" : "s"} created`);
-    if (result.rules_updated) parts.push(`${result.rules_updated} rule${result.rules_updated === 1 ? "" : "s"} updated`);
-    if (result.skipped_closed) parts.push(`${result.skipped_closed} in a closed period`);
-    if (result.skipped_stale) parts.push(`${result.skipped_stale} changed since (kept)`);
-    if (result.skipped_linked) parts.push(`${result.skipped_linked} linked deposit${result.skipped_linked === 1 ? "" : "s"}`);
-    if (result.skipped_unsupported) parts.push(`${result.skipped_unsupported} not movable here`);
-    if (result.skipped_no_source_line) parts.push(`${result.skipped_no_source_line} already moved`);
-    if (result.failed) parts.push(`${result.failed} failed`);
-    // Celebrate a real move; stay neutral (amber) when nothing actually moved so
-    // "0 moved" can never read as success.
-    const tone = moved
-      ? { box: "bg-emerald-50", icon: "text-emerald-600", head: "text-emerald-900", body: "text-emerald-800" }
-      : { box: "bg-amber-50", icon: "text-amber-600", head: "text-amber-900", body: "text-amber-800" };
-    const Icon = moved ? CheckCircle2 : AlertCircle;
+    const dismiss = () => { setResult(null); setFailures([]); };
+    // Secondary outcome chips (the headline count lives in the banner).
+    const chips: string[] = [];
+    if (result.rules_created) chips.push(`${result.rules_created} rule${result.rules_created === 1 ? "" : "s"} created`);
+    if (result.rules_updated) chips.push(`${result.rules_updated} rule${result.rules_updated === 1 ? "" : "s"} updated`);
+    if (result.skipped_closed) chips.push(`${result.skipped_closed} in a closed period`);
+    if (result.skipped_stale) chips.push(`${result.skipped_stale} changed since (kept)`);
+    if (result.skipped_linked) chips.push(`${result.skipped_linked} linked deposit${result.skipped_linked === 1 ? "" : "s"}`);
+    if (result.skipped_unsupported) chips.push(`${result.skipped_unsupported} not movable here`);
+    if (result.skipped_no_source_line) chips.push(`${result.skipped_no_source_line} already moved`);
+    if (result.failed) chips.push(`${result.failed} failed`);
+    const groupedFailures = Object.entries(
+      failures.reduce<Record<string, number>>((m, f) => { m[f.message] = (m[f.message] || 0) + 1; return m; }, {})
+    );
+
+    // Centered pop-up so the outcome is unmissable — green on a real move,
+    // amber when nothing actually moved so "0 moved" can never read as success.
     return (
-      <div className={`border-t border-gray-200 px-5 py-3 ${tone.box}`}>
-        <div className="flex items-start gap-2 text-xs">
-          <Icon size={15} className={`${tone.icon} shrink-0 mt-0.5`} />
-          <div className={tone.head}>
-            <span className="font-bold">
-              {moved
-                ? `Reclass complete — ${parts.join(" · ")}.`
-                : `Nothing moved — ${parts.join(" · ")}.`}
-            </span>
-            {moved && (
-              <div className={`mt-1 ${tone.body}`}>
-                Moved into <span className="font-semibold">{target?.name || "the target account"}</span>. The P&amp;L reflects it immediately.
-              </div>
+      <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={dismiss}>
+        <div
+          className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className={`relative px-6 pt-6 pb-4 text-center ${moved ? "bg-emerald-50" : "bg-amber-50"}`}>
+            <button onClick={dismiss} className="absolute right-3 top-3 text-ink-light hover:text-navy" aria-label="Close">
+              <X size={16} />
+            </button>
+            <div className={`mx-auto w-14 h-14 rounded-full flex items-center justify-center ${moved ? "bg-emerald-100" : "bg-amber-100"}`}>
+              {moved ? <CheckCircle2 size={30} className="text-emerald-600" /> : <AlertCircle size={30} className="text-amber-600" />}
+            </div>
+            <h3 className="mt-3 text-lg font-bold text-navy">{moved ? "Reclass complete" : "Nothing moved"}</h3>
+            {moved ? (
+              <p className="mt-1 text-sm text-ink-slate">
+                <span className="font-bold text-navy">{result.moved_txns}</span> transaction{result.moved_txns === 1 ? "" : "s"} moved into{" "}
+                <span className="font-semibold text-navy">{target?.name || "the target account"}</span>.
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-ink-slate">No transactions were moved — see the details below.</p>
             )}
-            {result.skipped_closed > 0 && (
-              <div className={`mt-1 ${tone.body}`}>
-                Transactions in a closed period were left alone — reopen the month in QuickBooks to move those.
-              </div>
-            )}
-            {result.skipped_linked > 0 && (
-              <div className={`mt-1 ${tone.body}`}>
-                Some deposits are linked to a customer payment or sales receipt — those move when you recategorize the
-                linked transaction (or apply/void the payment), not the deposit itself.
-              </div>
-            )}
-            {result.skipped_unsupported > 0 && (
-              <div className={`mt-1 ${tone.body}`}>
-                Transfers and journal entries can&apos;t be moved from this tool — open them in QuickBooks. (Deposits now
-                move here.)
-              </div>
-            )}
-            {failures.length > 0 && (
-              <div className="mt-2 space-y-1.5">
-                {Object.entries(
-                  failures.reduce<Record<string, number>>((m, f) => { m[f.message] = (m[f.message] || 0) + 1; return m; }, {})
-                ).map(([msg, count]) => (
-                  <div key={msg} className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded px-2 py-1.5">
-                    <span className="font-bold">{count} couldn&apos;t move:</span> {msg}
-                  </div>
+          </div>
+
+          <div className="px-6 py-4 space-y-2.5 max-h-[55vh] overflow-auto">
+            {chips.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {chips.map((c) => (
+                  <span key={c} className="text-[11px] font-semibold text-ink-slate bg-gray-100 rounded-full px-2.5 py-1">{c}</span>
                 ))}
               </div>
             )}
-            <button onClick={() => { setResult(null); setFailures([]); }} className="mt-1.5 text-teal font-semibold hover:underline">
+            {moved && (
+              <p className="text-xs text-ink-slate">
+                The P&amp;L reflects it immediately — the source line drops and{" "}
+                <span className="font-semibold">{target?.name || "the target account"}</span> grows by the same amount.
+              </p>
+            )}
+            {result.skipped_closed > 0 && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Transactions in a closed period were left alone — reopen the month in QuickBooks to move those.
+              </p>
+            )}
+            {result.skipped_linked > 0 && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Some deposits are linked to a customer payment or sales receipt — those move when you recategorize the
+                linked transaction (or apply/void the payment), not the deposit itself.
+              </p>
+            )}
+            {result.skipped_unsupported > 0 && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Transfers and journal entries can&apos;t be moved from this tool — open them in QuickBooks.
+              </p>
+            )}
+            {groupedFailures.length > 0 && (
+              <div className="space-y-1.5">
+                {groupedFailures.map(([msg, count]) => (
+                  <p key={msg} className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 break-words">
+                    <span className="font-bold">{count} couldn&apos;t move:</span> {msg}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+            <button onClick={dismiss} className="text-xs font-semibold text-teal hover:underline">
               Reclass more
+            </button>
+            <button
+              onClick={dismiss}
+              className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-xs font-bold px-4 py-2 rounded-lg"
+            >
+              <CheckCircle2 size={14} /> Done
             </button>
           </div>
         </div>
