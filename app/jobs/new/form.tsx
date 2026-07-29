@@ -595,7 +595,7 @@ export function NewJobForm({
           monthly close is not that: confirming the chart IS step 1 of the
           close, so the warning is noise with a checkbox in front of it. Hide
           it (and leave the form unblocked) when the close sent us here. */}
-      {!fromMonthlyClose && (
+      {!fromMonthlyClose && datePresetId !== "since_close" && (
         <RedoWarning
           clientId={selected?.id ?? null}
           kind="coa"

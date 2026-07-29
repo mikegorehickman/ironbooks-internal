@@ -857,7 +857,7 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
                 close" categorizes only what's happened since we last sent
                 books — the opposite of re-running a signed-off cleanup — so
                 the warning is noise with a checkbox in front of it. */}
-            {searchParams.get("close") !== "1" && (
+            {searchParams.get("close") !== "1" && datePresetId !== "since_close" && (
               <RedoWarning
                 clientId={clientLinkId}
                 kind="reclass"
