@@ -675,19 +675,25 @@ async function runFullCategorization(
     // half-read month is worse off than one who is told to retry.
     if (result.truncations.length > 0) {
       const detail = result.truncations
-        .map((t) => `${t.tx_type} stopped at page ${t.failed_at_page + 1} (${t.message.slice(0, 120)})`)
+        .map((t) => `${t.tx_type} stopped at page ${t.failed_at_page + 1} (${t.message.slice(0, 160)})`)
         .join("; ");
+      // A transient failure (429/5xx) is worth retrying; a 4xx is a broken query
+      // and never will be. Telling a bookkeeper to "retry in a few minutes" on a
+      // permanent error sends them into a loop — which is exactly what happened
+      // when this guard first met the phantom "Expense" entity.
+      const anyRetryable = result.truncations.some((t) => t.retryable);
+      const message = anyRetryable
+        ? `Incomplete pull from QuickBooks — this period was only partly read, so it was NOT categorized. ` +
+          `QuickBooks was busy or unavailable; retry in a few minutes. Detail: ${detail}`
+        : `QuickBooks rejected one of our queries, so this period was only partly read and was NOT ` +
+          `categorized. This will not fix itself on a retry — it needs an engineering fix. ` +
+          `Detail: ${detail}`;
       await service
         .from("reclass_jobs")
-        .update({
-          status: "failed",
-          error_message:
-            `Incomplete pull from QuickBooks — this period was only partly read, so it was NOT categorized. ` +
-            `Retry in a few minutes. Detail: ${detail}`,
-        } as any)
+        .update({ status: "failed", error_message: message } as any)
         .eq("id", jobId);
       return NextResponse.json(
-        { error: "Incomplete pull from QuickBooks — job failed rather than categorize a partial period.", truncations: result.truncations },
+        { error: message, retryable: anyRetryable, truncations: result.truncations },
         { status: 502 }
       );
     }
