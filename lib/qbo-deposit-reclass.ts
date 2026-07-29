@@ -142,12 +142,16 @@ export async function reclassifyDepositLines(
     ? existingMemo
     : (existingMemo ? existingMemo + "\n" : "") + params.auditMemo;
 
-  // Sparse update carries the full (rewritten) Line[] — the exact shape the
-  // hardcore-cleanup finalizer uses. QBO replaces the array wholesale, so we
-  // send every line, changed and unchanged.
+  // Full update: a Deposit update REQUIRES the top-level DepositToAccountRef
+  // (the bank account the money lands in) plus TxnDate etc. A minimal sparse
+  // {Id,SyncToken,Line} body is rejected with QBO 2020 "Required parameter
+  // DepositToAccountRef is missing". So carry the whole fetched entity, drop
+  // only the read-only/computed fields, and override Line + memo — the same
+  // approach as the expense-path writer (reclassifyTransactionLines).
+  const { MetaData: _meta, domain: _domain, TotalAmt: _total, sparse: _sparse, ...depCore } = dep as any;
   const updated = await qboRequest<any>(realmId, accessToken, `/deposit?minorversion=70`, {
     method: "POST",
-    body: JSON.stringify({ Id: dep.Id, SyncToken: dep.SyncToken, sparse: true, Line: newLines, PrivateNote: newMemo }),
+    body: JSON.stringify({ ...depCore, Line: newLines, PrivateNote: newMemo, sparse: false }),
   });
 
   // Verify each line we changed actually came back at the target account.
