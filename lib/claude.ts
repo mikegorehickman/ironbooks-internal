@@ -551,6 +551,26 @@ function validateAnalysis(
       s.action = 'flag';
       s.flag_reason = 'Rename/merge suggested but no target master account specified';
     }
+
+    // SAFETY: an account that holds TWO kinds of money can't be fixed by a
+    // rename. "Owner Draw / Salary" is the canonical case — draw is equity
+    // (balance sheet), salary is payroll expense (P&L), and the master COA
+    // already carries both as separate accounts. Renaming sweeps the whole
+    // history into whichever one we picked, silently moving real payroll
+    // expense onto the balance sheet (or vice versa).
+    //
+    // The AI was already noticing this and writing it into flag_reason, but
+    // an action of 'rename' with an advisory reason still EXECUTES. Only
+    // action='flag' is held back. So when the reason says it needs splitting,
+    // downgrade the action: a human decides which transactions are draw and
+    // which are payroll, then reclassifies them.
+    if (
+      (s.action === 'rename' || s.action === 'merge') &&
+      typeof s.flag_reason === 'string' &&
+      /\b(split|separate|combined|two accounts)\b/i.test(s.flag_reason)
+    ) {
+      s.action = 'flag';
+    }
   }
 
   return { ...analysis, warnings };
