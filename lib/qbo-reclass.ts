@@ -22,8 +22,18 @@ const QBO_BASE =
     ? "https://quickbooks.api.intuit.com"
     : "https://sandbox-quickbooks.api.intuit.com";
 
-// Transaction types we support for reclassification
-export const SUPPORTED_TX_TYPES = ["Bill", "Purchase", "Expense", "VendorCredit"] as const;
+// Transaction types we support for reclassification.
+//
+// "Expense" IS NOT A QBO ENTITY and was removed 2026-07-28. The QBO API has
+// `Purchase`; "Expense" is only what the QBO *interface* calls a Purchase whose
+// PaymentType is Cash/Check/CreditCard. Querying it returns HTTP 400 every time,
+// and had done on every reclass job since this feature was built — the old
+// `catch { break }` swallowed it and bumped a counter nobody read, which is why
+// `transactionsSkippedUnsupported` never left the 0-4 range.
+//
+// Proof it was always dead: across 128,389 reclassification rows in production,
+// qbo_transaction_type=Expense appears 0 times. Purchase appears 124,193.
+export const SUPPORTED_TX_TYPES = ["Bill", "Purchase", "VendorCredit"] as const;
 export type SupportedTxType = (typeof SUPPORTED_TX_TYPES)[number];
 
 // ============== TYPES ==============
@@ -178,6 +188,18 @@ export interface FetchTruncation {
   failed_at_page: number;
   rows_read_before_failure: number;
   message: string;
+  /**
+   * Is this worth retrying?
+   *
+   * A 429 or 5xx is transient — the data is there and we just couldn't read it,
+   * so the period is genuinely of unknown completeness and the job must not
+   * claim success. A 4xx is permanent: the query itself is wrong (a bad entity
+   * name, a malformed filter), and no amount of retrying fixes it. Telling a
+   * bookkeeper to "retry in a few minutes" on a permanent error sends them into
+   * a loop — which is exactly what happened when this guard first met the
+   * phantom "Expense" entity.
+   */
+  retryable: boolean;
 }
 
 export interface UnreclassifiableLine {
@@ -460,11 +482,16 @@ export async function fetchAllTransactionLines(
         // Record the gap instead of pretending the period is complete. The
         // caller decides whether to fail the job or warn — either way a human
         // learns that page `page` of `txType` was never read.
+        const msg = String(err?.message || err);
+        // qboRequest formats failures as "QBO API <status> on <endpoint>: <body>".
+        const status = Number(msg.match(/QBO API (\d{3})/)?.[1] || 0);
+        const retryable = !status || status === 429 || status >= 500;
         truncations.push({
           tx_type: txType,
           failed_at_page: page,
           rows_read_before_failure: totalPulled,
-          message: String(err?.message || err),
+          message: msg,
+          retryable,
         });
         console.error(`[qbo-reclass] ${txType} pagination aborted at page ${page}: ${err?.message}`);
         break;
