@@ -10,8 +10,6 @@ import {
   RotateCcw,
   ArrowRight,
   Receipt,
-  CreditCard,
-  Rewind,
 } from "lucide-react";
 
 interface JobView {
@@ -135,26 +133,6 @@ export function ExecuteLive({
     }
   }
 
-  // Compute prior-year window. Always shows the CTA for full_categorization
-  // jobs (multi-year sources still cascade to the year before their earliest
-  // date). Chain-length cap on the API side prevents runaway recursion.
-  const { priorYear, priorStartLabel, priorEndLabel, cascadeApplicable } = (() => {
-    const start = new Date(job.date_range_start);
-    if (isNaN(start.getTime())) {
-      return { priorYear: null, priorStartLabel: "", priorEndLabel: "", cascadeApplicable: false };
-    }
-    const priorStart = new Date(start);
-    priorStart.setUTCFullYear(priorStart.getUTCFullYear() - 1);
-    const priorEnd = new Date(start);
-    priorEnd.setUTCDate(priorEnd.getUTCDate() - 1);
-    return {
-      priorYear: priorStart.getUTCFullYear(),
-      priorStartLabel: priorStart.toISOString().slice(0, 10),
-      priorEndLabel: priorEnd.toISOString().slice(0, 10),
-      cascadeApplicable: true,
-    };
-  })();
-
   async function handleRollback() {
     if (rollbackConfirm !== "ROLLBACK") {
       setRollbackError('You must type "ROLLBACK" exactly (uppercase)');
@@ -257,149 +235,46 @@ export function ExecuteLive({
         )}
       </div>
 
-      {/* Next-step handoff — matches the stepper order: Revenue Check is the
-          Step 3 card (catch CRM invoice/deposit double-counts before rules
-          lock mappings in), Bank Rules is Step 4, Stripe Recon (when deposits
-          are detected) follows as Step 5. */}
+      {/* ONE next step. This screen used to offer four at once — Revenue
+          Check, Bank Rules, Stripe Recon and a prior-year cascade — which let
+          a junior bookkeeper start Step 4 before Step 3 and quietly lock bank
+          rules in against revenue that was still double-counted. The sequence
+          exists to be followed in order, so the completion screen now shows
+          only the step that is actually next. Everything else stays reachable
+          from the stepper above and the client workspace. */}
       {job.status === "complete" &&
         job.workflow === "full_categorization" &&
         !job.is_rollback &&
         job.client_link_id && (
-          <>
-            <h2 className="text-sm font-semibold text-ink-slate">Next steps based on your workflow</h2>
-            <div className="rounded-2xl p-5 bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <div className="rounded-full flex items-center justify-center w-10 h-10 bg-white flex-shrink-0">
-                    <Receipt className="text-amber-600" size={20} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Step 3 · Always next</span>
-                    <h3 className="font-bold text-base text-navy mt-0.5 mb-1">
-                      Revenue Check
-                    </h3>
-                    <p className="text-sm text-ink-slate">
-                      Verify revenue isn&apos;t double-counted: CRM-pushed invoices + the bank deposits
-                      paying them both landing in income. Pick a wider date range for historical cleanups.
-                    </p>
-                  </div>
-                </div>
-                <Link
-                  href={`/revenue-check/${job.client_link_id}?job=${job.id}`}
-                  className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg flex-shrink-0 shadow-md"
-                >
-                  Run Revenue Check <ArrowRight size={16} />
-                </Link>
-              </div>
-            </div>
-            <div className="rounded-2xl p-5 bg-gradient-to-br from-teal-lighter to-blue-50 border-2 border-teal/30">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <div className="rounded-full flex items-center justify-center w-10 h-10 bg-white flex-shrink-0">
-                    <Receipt className="text-teal" size={20} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-teal">Step 4</span>
-                    <h3 className="font-bold text-base text-navy mt-0.5 mb-1">
-                      Generate Bank Rules
-                    </h3>
-                    <p className="text-sm text-ink-slate">
-                      {job.transactions_moved > 0
-                        ? `Turn the ${job.transactions_moved} approved categorizations into bank rules so future transactions auto-categorize.`
-                        : "All transactions were already correctly categorized — nothing to move. Create bank rules to lock in vendor→account mappings going forward."}
-                    </p>
-                  </div>
-                </div>
-                <Link
-                  href={`/reclass/${job.id}/bank-rules`}
-                  className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg flex-shrink-0 shadow-md"
-                >
-                  Generate Bank Rules <ArrowRight size={16} />
-                </Link>
-              </div>
-            </div>
-            {hasStripeDeposits && (
-              <div className="rounded-2xl p-5 bg-teal-light border-2 border-teal-border">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <div className="rounded-full flex items-center justify-center w-10 h-10 bg-white flex-shrink-0">
-                      <CreditCard className="text-teal-dark" size={20} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-teal-dark">Step 5 · Optional</span>
-                      <h3 className="font-bold text-base text-navy mt-0.5 mb-1">
-                        Stripe AR Reconciliation
-                      </h3>
-                      <p className="text-sm text-ink-slate">
-                        Stripe deposits detected. Match them to customer invoices, split out processing fees,
-                        and apply sales tax (Canada). Skip if this client doesn&apos;t use Stripe.
-                      </p>
-                    </div>
-                  </div>
-                  <Link
-                    href={`/stripe-recon/new?client=${job.client_link_id}&reclass_job_id=${job.id}`}
-                    className="inline-flex items-center gap-2 bg-navy hover:bg-navy-deep text-white text-sm font-semibold px-5 py-2.5 rounded-lg flex-shrink-0 shadow-md"
-                  >
-                    Start Stripe Recon <ArrowRight size={16} />
-                  </Link>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-      {/* Year cascade — "Continue with Previous Year"
-          Computes a FULL 12-month prior window based on source start date, so
-          calendar-year jobs cascade to full calendar years and fiscal-year jobs
-          cascade to full fiscal years automatically. Skipped for multi-year
-          source jobs (already covered older periods in one shot). */}
-      {job.status === "complete" &&
-        job.workflow === "full_categorization" &&
-        !job.is_rollback &&
-        !job.rolled_back &&
-        job.transactions_moved > 0 &&
-        job.client_link_id &&
-        cascadeApplicable &&
-        priorYear && (
           <div className="rounded-2xl p-5 bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="flex items-start gap-3 flex-1 min-w-0">
                 <div className="rounded-full flex items-center justify-center w-10 h-10 bg-white flex-shrink-0">
-                  <Rewind className="text-amber-700" size={20} />
+                  <Receipt className="text-amber-600" size={20} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Optional · Year-by-Year Cleanup</span>
-                  <h3 className="font-bold text-base text-navy mt-0.5 mb-1">
-                    Continue with Previous Year ({priorYear})
-                  </h3>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                    Next · Step 3 of 6
+                  </span>
+                  <h3 className="font-bold text-base text-navy mt-0.5 mb-1">Revenue Check</h3>
                   <p className="text-sm text-ink-slate">
-                    Full prior {priorStartLabel.startsWith(`${priorYear}-01-01`) ? "calendar year" : "fiscal year"}: <span className="font-mono font-semibold">{priorStartLabel} → {priorEndLabel}</span>. Every account the bookkeeper picked just got saved as a bank rule — most of those vendors will auto-categorize from the cache, so this should run faster than year 1.
+                    Make sure revenue isn&apos;t counted twice — CRM invoices and the bank deposits
+                    paying them both landing in income. Do this before bank rules, or the rules
+                    lock in the wrong mapping.
                   </p>
-                  {cascadeError && (
-                    <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
-                      {cascadeError}
-                    </div>
-                  )}
                 </div>
               </div>
-              <button
-                onClick={handleCascadePriorYear}
-                disabled={cascading}
-                className="inline-flex items-center gap-2 bg-amber-700 hover:bg-amber-800 disabled:opacity-60 text-white text-sm font-semibold px-5 py-2.5 rounded-lg flex-shrink-0 shadow-md"
-              >
-                {cascading ? <Loader2 className="animate-spin" size={16} /> : <Rewind size={16} />}
-                {cascading ? "Starting..." : `Categorize ${priorYear} →`}
-              </button>
-            </div>
-            <div className="mt-3 pt-3 border-t border-amber-200 flex items-center justify-between text-xs">
-              <span className="text-ink-slate">
-                Or stop here if this client doesn't need older books cleaned up
-              </span>
               <Link
-                href="/today"
-                className="font-semibold text-amber-700 hover:text-amber-900"
+                href={`/revenue-check/${job.client_link_id}?job=${job.id}`}
+                className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg flex-shrink-0 shadow-md"
               >
-                I'm done with this client
+                Run Revenue Check <ArrowRight size={16} />
+              </Link>
+            </div>
+            <div className="mt-3 pt-3 border-t border-amber-200/70 text-xs text-ink-slate">
+              Done with this client for now?{" "}
+              <Link href="/today" className="font-semibold text-amber-700 hover:text-amber-900">
+                Back to Today
               </Link>
             </div>
           </div>
