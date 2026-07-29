@@ -7,7 +7,6 @@ import {
   getCompanyClosingDate,
   describeReclassError,
   type SupportedTxType,
-  SUPPORTED_TX_TYPES,
 } from "@/lib/qbo-reclass";
 import { reclassifyDepositLines } from "@/lib/qbo-deposit-reclass";
 import { bankRuleVendorPattern } from "@/lib/vendor-knowledge";
@@ -46,6 +45,37 @@ const BUDGET_MS = 240_000;
 // Keep each pass short enough that the drawer's progress bar moves; the client
 // re-invokes with the returned remaining[] until nothing is left.
 const MAX_TXNS_PER_PASS = 60;
+
+/**
+ * QBO's ProfitAndLossDetail report tags each row with a human txn_type label
+ * ("Expense", "Check", "Credit Card Expense", "Deposit", "Bill"…) — NOT the API
+ * entity name. The drill passes those labels through verbatim, so we translate
+ * to the entity whose endpoint we can actually fetch/update, plus which write
+ * path handles it.
+ *
+ * Critically, QBO has NO "Expense" entity: Expense / Check / Credit-Card / Cash
+ * purchases are ALL `Purchase` records. Passing "Expense" straight to
+ * /expense/{id} 404s — the pre-existing bug that made those rows fail silently
+ * (they were in SUPPORTED_TX_TYPES, so they cleared the gate, then died at
+ * refetch). Returns null for rows genuinely out of scope (Invoice / Sales
+ * Receipt item income, Journal Entry, Transfer, Bill Payment, Payment…).
+ */
+function classifyReportTxn(
+  rawType: string
+): { entity: SupportedTxType; kind: "expense" } | { entity: "Deposit"; kind: "deposit" } | null {
+  const t = rawType.trim().toLowerCase();
+  if (t === "bill") return { entity: "Bill", kind: "expense" };
+  if (t === "vendor credit" || t === "vendorcredit") return { entity: "VendorCredit", kind: "expense" };
+  if (t === "deposit") return { entity: "Deposit", kind: "deposit" };
+  // Everything QBO persists as a Purchase entity — all post via
+  // AccountBasedExpenseLineDetail, so the reclass engine handles them identically.
+  if ([
+    "purchase", "expense", "check", "cheque", "cash expense", "cash purchase",
+    "credit card expense", "credit card credit", "credit card charge", "cc expense",
+    "debit", "charge", "expenditure",
+  ].includes(t)) return { entity: "Purchase", kind: "expense" };
+  return null;
+}
 
 export async function POST(
   request: Request,
@@ -148,18 +178,16 @@ export async function POST(
   let skippedUnsupported = 0;
   for (const t of rawTxns) {
     const id = String(t?.id || "").trim();
-    const type = String(t?.type || "").trim();
-    if (!id || !type) continue;
-    const key = `${type}::${id}`;
+    const rawType = String(t?.type || "").trim();
+    if (!id || !rawType) continue;
+    const key = `${rawType}::${id}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (SUPPORTED_TX_TYPES.includes(type as SupportedTxType)) {
-      unique.push({ id, type, kind: "expense" });
-    } else if (type === "Deposit") {
-      unique.push({ id, type, kind: "deposit" });
-    } else {
-      skippedUnsupported++;
-    }
+    const cls = classifyReportTxn(rawType);
+    if (!cls) { skippedUnsupported++; continue; }
+    // Store the API ENTITY name (not the report label) so refetch/update hit the
+    // right endpoint — "Expense"/"Check"/"Credit Card Expense" all → Purchase.
+    unique.push({ id, type: cls.entity, kind: cls.kind });
   }
 
   const summary = {
@@ -235,12 +263,12 @@ export async function POST(
     try {
       tx = await refetchTransaction(realmId, accessToken, t.type as SupportedTxType, t.id);
     } catch (err: any) {
-      summary.failed++;
+      recordFailure(t.id, t.type, err);
       console.error(`[bulk-reclass] refetch ${t.type}/${t.id}: ${err.message}`);
       continue;
     }
     if (!tx) {
-      summary.failed++;
+      recordFailure(t.id, t.type, new Error(`${t.type} ${t.id} not found in QBO (may have been deleted)`));
       continue;
     }
 
