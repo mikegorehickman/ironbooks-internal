@@ -5,6 +5,7 @@ import {
   reclassifyTransactionLines,
   refetchTransaction,
   getCompanyClosingDate,
+  describeReclassError,
   type SupportedTxType,
   SUPPORTED_TX_TYPES,
 } from "@/lib/qbo-reclass";
@@ -174,10 +175,22 @@ export async function POST(
     // linked txn, so they can't be moved by editing the deposit.
     skipped_linked: 0,
     failed: 0,
+    // Per-transaction failure reasons (capped) — classified so the drawer can
+    // show a next step (e.g. "unmatch the bank-feed download") instead of a
+    // bare "N failed". The server log still has the full raw QBO error.
+    failures: [] as Array<{ id: string; type: string; blocked: string | null; message: string }>,
     remaining: [] as Array<{ id: string; type: string }>,
     rules_created: 0,
     rules_updated: 0,
     target: { id: target.Id, name: target.Name },
+  };
+
+  const recordFailure = (id: string, type: string, err: any) => {
+    summary.failed++;
+    const info = describeReclassError(err);
+    if (summary.failures.length < 25) {
+      summary.failures.push({ id, type, blocked: info.blocked, message: info.message });
+    }
   };
 
   const bookkeeperName = (actor as any)?.full_name || "bookkeeper";
@@ -212,7 +225,7 @@ export async function POST(
         else if (r.stale > 0) summary.skipped_stale++;
         // matched but all linked → already tallied in skipped_linked (not a move, not a failure)
       } catch (err: any) {
-        summary.failed++;
+        recordFailure(t.id, "Deposit", err);
         console.error(`[bulk-reclass] Deposit/${t.id}: ${err.message}`);
       }
       continue;
@@ -275,7 +288,7 @@ export async function POST(
       const vendor = (tx.VendorRef?.name || tx.EntityRef?.name || "").trim();
       if (vendor) movedVendors.add(vendor);
     } catch (err: any) {
-      summary.failed++;
+      recordFailure(t.id, t.type, err);
       console.error(`[bulk-reclass] ${t.type}/${t.id}: ${err.message}`);
     }
   }

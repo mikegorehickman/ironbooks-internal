@@ -107,6 +107,7 @@ export function ReclassBar({
   const [applying, setApplying] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [result, setResult] = useState<Record<string, number> | null>(null);
+  const [failures, setFailures] = useState<Array<{ id: string; type: string; blocked: string | null; message: string }>>([]);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [similarOpen, setSimilarOpen] = useState(false);
 
@@ -174,11 +175,13 @@ export function ReclassBar({
     setApplying(true);
     setApplyError(null);
     setResult(null);
+    setFailures([]);
     const totals: Record<string, number> = {
       moved_txns: 0, moved_lines: 0, skipped_unsupported: 0, skipped_closed: 0,
       skipped_stale: 0, skipped_no_source_line: 0, skipped_linked: 0, failed: 0,
       rules_created: 0, rules_updated: 0,
     };
+    const collectedFailures: Array<{ id: string; type: string; blocked: string | null; message: string }> = [];
     let queue: Array<{ id: string; type: string }> = selectedTxns.map((t) => ({ id: t.id, type: t.type }));
     const initial = queue.length;
     try {
@@ -197,11 +200,13 @@ export function ReclassBar({
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
         for (const k of Object.keys(totals)) totals[k] += d[k] || 0;
+        if (Array.isArray(d.failures)) collectedFailures.push(...d.failures);
         if (!d.remaining?.length) break;
         queue = d.remaining;
         setProgress(`${initial - queue.length} of ${initial} processed…`);
       }
       setResult(totals);
+      setFailures(collectedFailures);
       setProgress(null);
       onApplied();
     } catch (e: any) {
@@ -260,7 +265,18 @@ export function ReclassBar({
                 move here.)
               </div>
             )}
-            <button onClick={() => setResult(null)} className="mt-1.5 text-teal font-semibold hover:underline">
+            {failures.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {Object.entries(
+                  failures.reduce<Record<string, number>>((m, f) => { m[f.message] = (m[f.message] || 0) + 1; return m; }, {})
+                ).map(([msg, count]) => (
+                  <div key={msg} className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                    <span className="font-bold">{count} couldn&apos;t move:</span> {msg}
+                  </div>
+                ))}
+              </div>
+            )}
+            <button onClick={() => { setResult(null); setFailures([]); }} className="mt-1.5 text-teal font-semibold hover:underline">
               Reclass more
             </button>
           </div>
