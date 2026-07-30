@@ -7,7 +7,7 @@ import {
   Shield, CreditCard, ChevronDown, ChevronRight, Sun, TrendingUp,
   HeartPulse, Gauge, BadgeCheck,
   ClipboardCheck, ListChecks, UserPlus, GraduationCap, Settings as SettingsIcon, Inbox, ListTodo, LifeBuoy, ExternalLink, Landmark, Mail,
-  Home as HomeIcon, Eye, FileText, CalendarClock,
+  Home as HomeIcon, Eye, FileText, CalendarClock, Hourglass,
   PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
@@ -267,6 +267,17 @@ export function Sidebar() {
                 {toolsNav.map((item) => (
                   <NavItem key={item.href} item={item} pathname={pathname} dim collapsed={collapsed} />
                 ))}
+                {/* Time report is a management view (who spent how long on which
+                    client vs its budget) — seniors only, so it sits outside
+                    toolsNav rather than being filtered inside it. */}
+                {isSenior && (
+                  <NavItem
+                    item={{ href: "/time-report", label: "Time Report", icon: Hourglass }}
+                    pathname={pathname}
+                    dim
+                    collapsed={collapsed}
+                  />
+                )}
                 <button
                   onClick={() => setStripeModalOpen(true)}
                   title="Stripe connect link"

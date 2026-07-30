@@ -7,7 +7,7 @@ import { AdminSearch } from "./admin-search";
 import {
   Users, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Repeat,
   Landmark, ReceiptText, CheckCheck, ListChecks, Copy, TrendingUp, Unplug, Flag,
-  XCircle, Timer, CalendarCheck,
+  XCircle, Timer, CalendarCheck, Hourglass,
 } from "lucide-react";
 
 /**
@@ -286,6 +286,7 @@ export default async function AdminOverviewPage() {
         <div className="space-y-2">
           {[
             { href: "/admin/close-coverage", icon: CalendarCheck, title: "Close coverage", desc: "Every client × month — the date they received their completed books · gaps flagged" },
+            { href: "/time-report", icon: Hourglass, title: "Time report", desc: "Tracked bookkeeper time per client vs its monthly budget · who spent it · why anything ran over" },
             { href: "/admin/backfill-portal-package", icon: Mail, title: "Backfill portal packages", desc: "Publish P&L (+BS) to the portal + email clients whose close only went out as a plain summary email" },
             { href: "/admin/billing", icon: CreditCard, title: "Billing", desc: "Subscription revenue — Stripe-synced + manual entries · MRR, dunning, reconciliation banner" },
             { href: "/admin/daily-recon", icon: Repeat, title: "Daily recon engine", desc: "Enroll / dry-run / pause clients · nightly run history · run all now" },

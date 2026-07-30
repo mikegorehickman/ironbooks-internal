@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { TimeTrackerProvider } from "@/components/time-tracker/TimeTrackerProvider";
 
 export const metadata: Metadata = {
   title: "Ironbooks SNAP",
@@ -23,6 +24,13 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased bg-[var(--app-canvas)] text-navy">
         {children}
+        {/* Bookkeeper time tracker. Mounted here because this is the only node
+            that survives every navigation — AppShell renders per page, so a
+            timer inside it would remount (and reset) on each route change. It
+            self-gates: portal/public paths and non-bookkeeping roles render
+            nothing. Keep the layout static — the provider is a client
+            component and fetches its own role. */}
+        <TimeTrackerProvider />
       </body>
     </html>
   );
