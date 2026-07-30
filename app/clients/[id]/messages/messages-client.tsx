@@ -44,6 +44,20 @@ export function BookkeeperMessagesClient({
   const [deliveryWarning, setDeliveryWarning] = useState<string | null>(null);
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * Auto-grow the composer to fit the draft, up to 45vh, then scroll inside.
+   * Reset to "auto" first so deleting text shrinks it back down. Runs on every
+   * draft change and on mode switch (the placeholder height differs).
+   */
+  useEffect(() => {
+    const el = draftRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const cap = Math.round(window.innerHeight * 0.45);
+    el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
+  }, [draft, kind]);
 
   /**
    * Dismiss = "handled, no reply needed"; undo puts it back in the queue.
@@ -165,7 +179,9 @@ export function BookkeeperMessagesClient({
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       {/* Thread */}
-      <div className="px-5 py-5 space-y-4 max-h-[55vh] overflow-y-auto">
+      {/* overflow-x-hidden kills the stray horizontal scrollbar a long
+          unbroken word (filename, URL) used to introduce. */}
+      <div className="px-5 py-5 space-y-4 max-h-[60vh] overflow-y-auto overflow-x-hidden">
         {messages.length === 0 && (
           <div className="text-center py-10 text-sm text-ink-slate">
             No messages with this client yet.
@@ -216,29 +232,35 @@ export function BookkeeperMessagesClient({
             />
           )}
 
-          <div className="flex items-end gap-2">
+          {/* Composer: full-width textarea that grows with the draft, Send
+              underneath. A fixed rows={2} box clipped anything longer than a
+              one-liner — you couldn't see the message you were writing. */}
+          <div className="space-y-2">
             <textarea
+              ref={draftRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSend();
               }}
-              rows={2}
+              rows={3}
               placeholder={
                 kind === "notification"
                   ? "Notification text… (⌘+Enter to send)"
                   : "Reply to the client… (⌘+Enter to send)"
               }
-              className="flex-1 resize-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-navy placeholder:text-ink-light focus:outline-none focus:ring-2 focus:ring-teal/40"
+              className="w-full block resize-y overflow-y-auto rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-navy leading-relaxed placeholder:text-ink-light focus:outline-none focus:ring-2 focus:ring-teal/40"
             />
-            <button
-              onClick={handleSend}
-              disabled={sending || !draft.trim()}
-              className="flex-shrink-0 inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-4 py-2.5 rounded-lg disabled:opacity-50"
-            >
-              {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              {kind === "notification" ? "Send notification" : "Send message"}
-            </button>
+            <div className="flex items-center justify-end">
+              <button
+                onClick={handleSend}
+                disabled={sending || !draft.trim()}
+                className="inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-sm font-semibold px-4 py-2.5 rounded-lg disabled:opacity-50"
+              >
+                {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {kind === "notification" ? "Send notification" : "Send message"}
+              </button>
+            </div>
           </div>
 
           {error && <div className="text-xs text-red-600">{error}</div>}
@@ -284,7 +306,7 @@ function Row({
           </span>
         </div>
         {m.body && (
-          <div className="text-sm text-amber-900 mt-1 whitespace-pre-wrap">{m.body}</div>
+          <div className="text-sm text-amber-900 mt-1 whitespace-pre-wrap break-words">{m.body}</div>
         )}
         <div className="text-[10px] text-amber-700/70 mt-1.5">
           {m.sender_name ? `${m.sender_name} · ` : ""}
@@ -297,7 +319,7 @@ function Row({
   return (
     <div className={`flex ${fromClient ? "justify-start" : "justify-end"}`}>
       <div
-        className={`max-w-[78%] rounded-2xl px-4 py-3 ${
+        className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 ${
           fromClient
             ? "bg-teal-lighter/60 text-navy rounded-bl-sm border border-teal/15"
             : "bg-navy text-white rounded-br-sm"
@@ -310,7 +332,9 @@ function Row({
         >
           {fromClient ? `${m.sender_name || "Client"} (client)` : m.sender_name || "You"}
         </div>
-        {m.body && <div className="text-sm whitespace-pre-wrap leading-relaxed">{m.body}</div>}
+        {m.body && (
+          <div className="text-sm whitespace-pre-wrap break-words leading-relaxed">{m.body}</div>
+        )}
         {m.attachments?.length > 0 && (
           <div className="mt-2 space-y-1">
             {m.attachments.map((a: CommAttachment) => (

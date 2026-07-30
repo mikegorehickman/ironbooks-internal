@@ -110,7 +110,9 @@ export default async function ClientMessagesPage({
             : "No portal users provisioned yet — messages will be visible once the client is invited"
         }
       />
-      <div className="px-8 py-6 max-w-4xl">
+      {/* max-w-6xl, not 4xl — statement-upload threads carry long filenames
+          and the composer needs room to breathe on a wide monitor. */}
+      <div className="px-8 py-6 max-w-6xl">
         <BookkeeperMessagesClient
           clientLinkId={id}
           initialMessages={messages}
