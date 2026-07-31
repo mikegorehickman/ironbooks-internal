@@ -28,9 +28,17 @@
 -- all of those. Narrowed at the bottom of this file to expense/COGS leaves,
 -- which are the only sections with parents to belong to.)
 --
--- Two are real: Job Supplies & Materials and Small Tools are job costs sitting
--- outside the Job Costs grouping, so COGS subtotals on every statement exclude
--- them. Taxes / Licenses / Penalties & Fines are left for Mike — where those
+-- ⚠ SECTION 2 BELOW WAS WRONG — SEE MIGRATION 153, WHICH REVERTS IT.
+-- Job Supplies & Materials and Small Tools are top-level Cost of Goods Sold BY
+-- DECISION: migration 129 (2026-07-15) lifted them out of the Job Costs headers
+-- at Mike's explicit request and deleted the Materials & Supplies parent. They
+-- were never orphans. The Job Supplies & Materials update below no-opped only
+-- because its guard found the parent already deleted; the Small Tools one
+-- applied and had to be undone.
+--
+-- Original (mistaken) reasoning kept for the record: Job Supplies & Materials
+-- and Small Tools are job costs sitting outside the Job Costs grouping, so COGS
+-- subtotals on every statement exclude them. Taxes / Licenses / Penalties & Fines are left for Mike — where those
 -- belong is his call, not a guess I should bake into 78 client charts.
 --
 -- Idempotent — safe to run more than once.
