@@ -93,28 +93,33 @@ WHERE account_name = 'Small Tools'
 COMMIT;
 
 -- ── VERIFY ──────────────────────────────────────────────────────────────────
--- 1) Stage 1 across the board. Expect: skipped = the closed months, pending =
---    only months still genuinely open.
-SELECT 'migration_152 applied' AS status,
-       count(*) FILTER (WHERE revenue_allocated_at IS NOT NULL) AS allocated,
-       count(*) FILTER (WHERE 'revenue_allocated_at' = ANY(coalesce(skipped_stages, '{}'))) AS skipped_closed,
-       count(*) FILTER (WHERE revenue_allocated_at IS NULL
-                          AND NOT ('revenue_allocated_at' = ANY(coalesce(skipped_stages, '{}')))) AS still_pending,
-       count(*) AS total_client_months
-FROM client_months;
-
--- 2) The two re-parented job-cost accounts.
-SELECT jurisdiction, account_name, parent_account_name, section
-FROM master_coa
-WHERE account_name IN ('Job Supplies & Materials', 'Small Tools')
-ORDER BY jurisdiction, account_name;
-
--- 3) Orphan check, NARROWED to the sections that actually have parents. Expect
---    only Taxes / Licenses / Penalties & Fines / Depreciation — the ones left
---    for Mike to place.
-SELECT jurisdiction, account_name, section
-FROM master_coa
-WHERE parent_account_name IS NULL
-  AND is_parent = false
-  AND section IN ('cogs', 'operating_expense')
-ORDER BY section, jurisdiction, account_name;
+-- One result set on purpose: the Supabase editor only shows the LAST query's
+-- output, so three separate SELECTs would hide the two that matter most.
+SELECT * FROM (
+  SELECT 1 AS ord,
+         'stage 1 — allocated (real work logged)' AS check,
+         count(*)::text AS value
+    FROM client_months WHERE revenue_allocated_at IS NOT NULL
+  UNION ALL
+  SELECT 2, 'stage 1 — skipped (closed before the stage existed)', count(*)::text
+    FROM client_months WHERE 'revenue_allocated_at' = ANY(coalesce(skipped_stages, '{}'))
+  UNION ALL
+  SELECT 3, 'stage 1 — still pending (genuinely open months)', count(*)::text
+    FROM client_months
+   WHERE revenue_allocated_at IS NULL
+     AND NOT ('revenue_allocated_at' = ANY(coalesce(skipped_stages, '{}')))
+  UNION ALL
+  SELECT 4, 'job-cost accounts now parented (expect 4 = 2 accounts x CA/US)', count(*)::text
+    FROM master_coa
+   WHERE account_name IN ('Job Supplies & Materials', 'Small Tools')
+     AND parent_account_name IS NOT NULL
+  UNION ALL
+  -- Narrowed to the sections that HAVE parents. 150's version only excluded
+  -- 'equity', so it also flagged revenue, balance-sheet and QBO system accounts
+  -- that are correctly top-level.
+  SELECT 5, 'orphan expense/COGS leaves left for you to place',
+         coalesce(string_agg(DISTINCT account_name, ', '), 'none')
+    FROM master_coa
+   WHERE parent_account_name IS NULL AND is_parent = false
+     AND section IN ('cogs', 'operating_expense')
+) v ORDER BY ord;
