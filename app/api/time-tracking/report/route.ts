@@ -9,6 +9,8 @@ import {
   overheadLabel,
   attributionDay,
   daysInMonth,
+  effectiveDailyTargetMinutes,
+  isBelowDailyTarget,
 } from "@/lib/time-tracking";
 import { requireTimerActor, sweepStaleEntries, tableMissing, ENTRY_COLS } from "@/lib/time-tracking-server";
 
@@ -281,11 +283,26 @@ export async function GET(request: Request) {
     // adoption signal a rollup built only from existing rows can never show.
     // Managers (lead) do production too, so they're in scope; billing_admin,
     // viewer and client are not.
-    const { data: productionStaff } = await service
-      .from("users")
-      .select("id, full_name, role, is_active")
-      .in("role", ["admin", "lead", "bookkeeper"])
-      .eq("is_active", true);
+    // Daily targets come from the same read (migration 148); if the column
+    // isn't there yet, fall back so the report still renders.
+    let productionStaff: any[] | null = null;
+    {
+      const withTarget = await service
+        .from("users")
+        .select("id, full_name, role, is_active, daily_target_minutes")
+        .in("role", ["admin", "lead", "bookkeeper"])
+        .eq("is_active", true);
+      if (withTarget.error && /daily_target_minutes/.test(withTarget.error.message || "")) {
+        const plain = await service
+          .from("users")
+          .select("id, full_name, role, is_active")
+          .in("role", ["admin", "lead", "bookkeeper"])
+          .eq("is_active", true);
+        productionStaff = plain.data as any[] | null;
+      } else {
+        productionStaff = withTarget.data as any[] | null;
+      }
+    }
     for (const u of (productionStaff || []) as any[]) {
       if (!userById.has(u.id)) userById.set(u.id, u);
       staffFor(u.id); // creates a zero row if they logged nothing
@@ -341,10 +358,15 @@ export async function GET(request: Request) {
             (best, d) => (!best || d.seconds > best.seconds ? { date: d.date, seconds: d.seconds } : best),
             null
           );
+          const targetMinutes = effectiveDailyTargetMinutes(userById.get(s.userId)?.daily_target_minutes);
+          const daysBelowTarget = byDay.filter((d) => isBelowDailyTarget(d.seconds, targetMinutes)).length;
           return {
             userId: s.userId,
             userName: s.userName,
             role: s.role,
+            targetMinutes,
+            targetIsDefault: userById.get(s.userId)?.daily_target_minutes == null,
+            daysBelowTarget,
             seconds: s.seconds,               // client work
             overheadSeconds: s.overheadSeconds,
             totalSeconds: total,
@@ -357,6 +379,7 @@ export async function GET(request: Request) {
             busiestDay: busiest,
             byDay: byDay.map((d) => ({
               date: d.date,
+              belowTarget: isBelowDailyTarget(d.seconds, targetMinutes),
               seconds: d.seconds,
               clientSeconds: d.clientSeconds,
               overheadSeconds: d.overheadSeconds,

@@ -17,6 +17,9 @@ import {
   currentMonth,
   isOverBudget,
   effectiveBudgetMinutes,
+  DEFAULT_DAILY_TARGET_MINUTES,
+  effectiveDailyTargetMinutes,
+  isBelowDailyTarget,
   resolvePathContext,
   isClientShapedPath,
   formatClock,
@@ -226,6 +229,20 @@ eq("label of null is null", overheadLabel(null), null);
 // one of the two drifted.
 deepEq("keys match the migration CHECK", OVERHEAD_CATEGORIES.map((c) => c.key),
   ["client_comms", "internal", "fleet", "admin"]);
+
+// ── daily logging target (migration 148) ────────────────────────────────────
+console.log("isBelowDailyTarget");
+eq("default target is 6h", DEFAULT_DAILY_TARGET_MINUTES, 360);
+eq("NULL target inherits the default", effectiveDailyTargetMinutes(null), 360);
+eq("0 target is preserved, not defaulted", effectiveDailyTargetMinutes(0), 0);
+eq("5h against a 6h target is short", isBelowDailyTarget(5 * 3600, 360), true);
+eq("exactly 6h meets the target", isBelowDailyTarget(6 * 3600, 360), false);
+eq("7h clears it", isBelowDailyTarget(7 * 3600, 360), false);
+// A day with nothing logged is a day off / holiday / sick — not a shortfall.
+eq("zero logged is NOT flagged (day off, not a shortfall)", isBelowDailyTarget(0, 360), false);
+eq("no target set (0) is never short", isBelowDailyTarget(60, 0), false);
+eq("custom 4h target: 3h is short", isBelowDailyTarget(3 * 3600, 240), true);
+eq("custom 4h target: 5h is fine", isBelowDailyTarget(5 * 3600, 240), false);
 
 // ── formatting ──────────────────────────────────────────────────────────────
 console.log("formatClock / formatDuration");

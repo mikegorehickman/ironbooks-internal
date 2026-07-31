@@ -25,6 +25,9 @@
 
 /** Monthly budget applied when client_links.time_budget_minutes is NULL. */
 export const DEFAULT_TIME_BUDGET_MINUTES = 120;
+/** Expected logged minutes on a working day, when users.daily_target_minutes is
+ *  NULL (migration 148). 6h — production time, not hours at the desk. */
+export const DEFAULT_DAILY_TARGET_MINUTES = 360;
 /** A running entry whose heartbeat is older than this is treated as abandoned. */
 export const STALE_MS = 30 * 60_000;
 /** Widget heartbeat cadence while running. */
@@ -233,6 +236,30 @@ export function isOverBudget(
   budgetMinutes: number | null | undefined
 ): boolean {
   return mtdSeconds + entrySeconds > effectiveBudgetMinutes(budgetMinutes) * 60;
+}
+
+// ── Daily logging target (migration 148) ────────────────────────────────────
+
+/** NULL target → default. `??` again: 0 is "no target", not "use the default". */
+export function effectiveDailyTargetMinutes(targetMinutes: number | null | undefined): number {
+  return targetMinutes ?? DEFAULT_DAILY_TARGET_MINUTES;
+}
+
+/**
+ * Is a worked day short of the person's target?
+ *
+ * Only judges days with SOME logged time — a day with nothing is a day off, a
+ * holiday or sick leave, and we can't tell which, so flagging it would make the
+ * report noise. A 0 target means "not expected to log" and is never short.
+ */
+export function isBelowDailyTarget(
+  daySeconds: number,
+  targetMinutes: number | null | undefined
+): boolean {
+  const target = effectiveDailyTargetMinutes(targetMinutes);
+  if (target <= 0) return false;
+  if (daySeconds <= 0) return false;
+  return daySeconds < target * 60;
 }
 
 // ── Route → client context resolution ───────────────────────────────────────
