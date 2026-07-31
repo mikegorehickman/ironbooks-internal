@@ -599,24 +599,28 @@ export function BankRulesFromReclassClient({
             the SNAP backstop. */}
         {!skipped && created > 0 && (
           <div className="max-w-md mx-auto pt-2 text-left">
-            {/* Step 1 — clear the client's OLD QBO rules. QBO's import appends,
-                so without this the old rules keep re-categorizing to old
-                accounts. The API can't delete rules, so it's a quick manual
-                bulk-delete in QBO, gated so it happens before the import. */}
+            {/* Step 1 — DON'T bulk-delete the client's rules. We used to tell
+                bookkeepers to select-all → Delete, because QBO's import appends
+                and stale rules undo a cleanup. But that also destroys rules the
+                client built for their own workflow (and rules we never knew
+                about), which we can't put back — the QBO API can neither read
+                nor recreate them. So: keep them, and fix only what conflicts. */}
             <div className={`rounded-xl border p-3.5 mb-3 ${oldRulesCleared ? "border-emerald-200 bg-emerald-50/60" : "border-amber-300 bg-amber-50"}`}>
               <div className="text-xs font-bold text-navy flex items-center gap-1.5 mb-1">
                 <span className="flex items-center justify-center w-4 h-4 rounded-full bg-navy text-white text-[10px]">1</span>
-                First: delete the client&apos;s existing QBO rules
+                First: check for conflicting rules — do <strong>not</strong> delete them all
               </div>
               <p className="text-[11px] text-ink-slate leading-snug mb-2">
-                QBO&apos;s import <strong>adds to</strong> existing rules — it doesn&apos;t replace them. Their old rules
-                will keep re-categorizing transactions to the old accounts and undo this cleanup. So clear them first
-                (their old accounts stay — we only remove the rules):
+                QBO&apos;s import <strong>adds to</strong> existing rules rather than replacing them, so a stale rule
+                pointing at an old account can undo this cleanup. Fix those individually.{" "}
+                <strong>Never bulk-delete the client&apos;s rules</strong> — some are theirs, built for how they work,
+                and QuickBooks gives us no way to read or restore them once they&apos;re gone.
               </p>
               <ol className="text-[11px] text-navy leading-snug list-decimal ml-4 space-y-0.5 mb-2">
                 <li>Open <strong>Banking → Rules</strong> in QuickBooks (button below).</li>
-                <li>Tick the <strong>select-all</strong> checkbox at the top of the rules list.</li>
-                <li>Click <strong>Delete</strong> → confirm. Now zero rules remain.</li>
+                <li>Scan for rules pointing at accounts this cleanup retired or renamed.</li>
+                <li><strong>Edit</strong> those to the new account (or switch them off) — one at a time.</li>
+                <li>Leave everything else alone. Duplicates are harmless: ours simply win on specificity.</li>
               </ol>
               <a
                 href="https://app.qbo.intuit.com/app/banking?tab=rules"
@@ -633,7 +637,7 @@ export function BankRulesFromReclassClient({
                   onChange={(e) => setOldRulesCleared(e.target.checked)}
                   className="h-3.5 w-3.5 accent-teal"
                 />
-                I deleted the client&apos;s existing QBO rules
+                I reviewed their rules for conflicts (and deleted nothing wholesale)
               </label>
             </div>
 
@@ -645,7 +649,7 @@ export function BankRulesFromReclassClient({
               type="button"
               onClick={handleDownloadQboXls}
               disabled={downloading || !oldRulesCleared}
-              title={!oldRulesCleared ? "Confirm you deleted the old rules first" : undefined}
+              title={!oldRulesCleared ? "Confirm you checked their existing rules for conflicts first" : undefined}
               className="inline-flex items-center gap-2 text-sm font-semibold text-teal hover:text-teal-dark border border-teal/30 hover:border-teal bg-teal-lighter/50 hover:bg-teal-lighter px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}

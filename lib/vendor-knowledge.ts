@@ -282,6 +282,12 @@ const PATTERNS: VendorPattern[] = [
   { pattern: /\bwsib\b/i, account: "Workers Compensation – Admin", confidence: 0.93, reasoning: "WSIB → Workers Compensation – Admin", vendor: "WSIB" },
   { pattern: /\bwcb\b/i, account: "Workers Compensation – Admin", confidence: 0.93, reasoning: "WCB → Workers Compensation – Admin", vendor: "WCB" },
   { pattern: /blue\s+cross/i, account: "Health Insurance – Owner", confidence: 0.90, reasoning: "Blue Cross → Health Insurance – Owner", vendor: "Blue Cross" },
+  // Agency retainers are NOT ad spend — mixing them in makes return-on-ad-spend
+  // look worse than it is, because the retainer isn't buying impressions.
+  // Client-specific agency names still need adding as they come up; these are
+  // the generic signals (migration 150 added the account).
+  { pattern: /\b(marketing|advertis\w*|digital|creative|media)\s+agency\b/i, account: "Agency Fees", confidence: 0.88, reasoning: "Marketing agency → Agency Fees (retainer, not ad spend)", vendor: "Marketing agency" },
+  { pattern: /agency\s+(fee|retainer|invoice)|monthly\s+retainer/i, account: "Agency Fees", confidence: 0.85, reasoning: "Agency retainer → Agency Fees", vendor: "Marketing agency" },
   { pattern: /google\s*\*?\s*ads\w*|googleads|google\s+adwords/i, account: "Online Advertising - Ad Spend", confidence: 0.97, reasoning: "Google Ads → Online Advertising", vendor: "Google Ads" },
   { pattern: /google\s*\*?\s*(workspace|suite|gsuite)/i, account: "Software Subscriptions", confidence: 0.97, reasoning: "Google Workspace → Software", vendor: "Google Workspace" },
   { pattern: /\bfacebk\b|\bfb\s*\*|\bmeta\s+(ads|platforms?)\b|facebook\s*ads|instagr?am\s*ads/i, account: "Online Advertising - Ad Spend", confidence: 0.97, reasoning: "Meta/Facebook ads → Online Advertising", vendor: "Meta" },
