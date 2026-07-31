@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { categorizeAuditEvent, humanizeEventType } from "@/lib/audit";
+import { categorizeAuditEvent, humanizeEventType, summarizeAuditPayload } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -252,7 +252,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
       summary:
         r.error_message
           ? `Failed: ${String(r.error_message).slice(0, 180)}`
-          : summarizePayload(p),
+          : summarizeAuditPayload(p),
       detail: p,
     });
   }
@@ -461,13 +461,3 @@ function describeAccountWrite(a: Record<string, any>): string {
   }
 }
 
-/** Best-effort one-liner from a free-form payload, without inventing detail. */
-function summarizePayload(p: Record<string, any>): string {
-  if (p.old_name && p.new_name) return `"${p.old_name}" → "${p.new_name}"`;
-  if (p.from_account_name && p.to_account_name) return `${p.from_account_name} → ${p.to_account_name}`;
-  if (p.message) return String(p.message).slice(0, 180);
-  if (p.reason) return String(p.reason).slice(0, 180);
-  if (p.changed) return `changed: ${(p.changed as string[]).join(", ")}`;
-  const keys = Object.keys(p).filter((k) => !k.endsWith("_id"));
-  return keys.length ? keys.slice(0, 5).map((k) => `${k}=${JSON.stringify(p[k])}`).join(" · ").slice(0, 200) : "—";
-}

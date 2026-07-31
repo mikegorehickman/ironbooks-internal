@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { PLByMonthView } from "./pl-by-month-view";
+import { AuditTimeline } from "./audit-timeline";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -359,7 +360,7 @@ export function ClientProfileShell({ clientLink, actorRole, overview, financials
 
       {activeTab === "notes" && <NotesPanel clientLinkId={clientLink.id} />}
       {activeTab === "activity" && (
-        <ActivityTab activity={overview.activity} />
+        <ActivityTab clientLinkId={clientLink.id} activity={overview.activity} />
       )}
 
       {drill && (
@@ -1085,44 +1086,20 @@ function OverviewTab({
 
 // ─── ACTIVITY TAB ──────────────────────────────────────────────────────
 
-function ActivityTab({ activity }: { activity: ActivityEvent[] }) {
-  if (activity.length === 0) {
-    return (
-      <div className="bg-white border border-gray-200 rounded-xl p-10 text-center text-sm text-ink-slate">
-        No recent SNAP activity logged for this client.
-      </div>
-    );
-  }
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-      {activity.map((e) => (
-        <div
-          key={e.id}
-          className="flex items-start justify-between px-5 py-3 hover:bg-teal-lighter/30"
-        >
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-navy">{e.label}</div>
-            <div className="text-[11px] text-ink-slate mt-0.5 font-mono">
-              {e.eventType}
-            </div>
-          </div>
-          <div className="flex items-center gap-3 shrink-0 ml-4">
-            <span className="text-xs text-ink-slate">
-              {new Date(e.occurredAt).toLocaleString()}
-            </span>
-            {e.href && (
-              <Link
-                href={e.href}
-                className="text-xs font-semibold text-teal hover:text-teal-dark inline-flex items-center gap-1"
-              >
-                View <ExternalLink size={11} />
-              </Link>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+function ActivityTab({
+  clientLinkId,
+  activity,
+}: {
+  clientLinkId: string;
+  activity: ActivityEvent[];
+}) {
+  // `activity` is the server-rendered strip the Overview tab uses. It is
+  // deliberately NOT rendered here: it comes from a payload-only audit_log
+  // filter that finds roughly half the events and none of the QuickBooks
+  // writes. AuditTimeline loads the merged trail instead. The prop stays so
+  // Overview and this tab keep one source of truth for the shape.
+  void activity;
+  return <AuditTimeline clientId={clientLinkId} />;
 }
 
 // ─── QBO CONNECTION BANNER ─────────────────────────────────────────────

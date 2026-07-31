@@ -10,6 +10,7 @@ import {
   auditFleet,
   categorizeAuditEvent,
   humanizeEventType,
+  summarizeAuditPayload,
   AUDIT_CATEGORIES,
 } from "../lib/audit";
 
@@ -127,6 +128,58 @@ async function main() {
   eq("humanize underscores", humanizeEventType("qbo_rename"), "Qbo rename");
   eq("humanize single word", humanizeEventType("login"), "Login");
   eq("humanize empty is safe", humanizeEventType(""), "");
+
+  // ── Payload summary — the "What changed" column ───────────────────────────
+  //     This is what /admin/audit and the client timeline render in the table.
+  //     Before it existed you had to download the CSV to read the payload.
+  eq(
+    "rename shape",
+    summarizeAuditPayload({ old_name: "Gas", new_name: "Vehicle Fuel" }),
+    '"Gas" → "Vehicle Fuel"'
+  );
+  eq(
+    "merge shape",
+    summarizeAuditPayload({ source: "Aaron's Distributions", target: "Owner's Draw" }),
+    `"Aaron's Distributions" → "Owner's Draw"`
+  );
+  eq(
+    "reclass shape",
+    summarizeAuditPayload({ from_account_name: "Travel", to_account_name: "Meals" }),
+    "Travel → Meals"
+  );
+  eq("message shape", summarizeAuditPayload({ message: "Stage 2 complete" }), "Stage 2 complete");
+
+  // An unrecognised payload must still show its content. Falling back to "—"
+  // here is exactly the failure this replaces: detail that exists but is never
+  // rendered is indistinguishable from an event that carries none.
+  {
+    const out = summarizeAuditPayload({ moved_lines: 28, remaining: 54, failed: 0 });
+    ok(`unknown shape shows its values (got "${out}")`, out.includes("moved_lines: 28") && out.includes("remaining: 54"));
+    ok("unknown shape is not a dash", out !== "—");
+  }
+
+  // Ids identify the row, they don't describe it — they must not crowd out content.
+  {
+    const out = summarizeAuditPayload({
+      client_link_id: "d7c7701c-fb0b-4c57-91d1-cbb7c42f107d",
+      reclass_job_id: "6a0423f9-0000-0000-0000-000000000000",
+      unmapped: 24,
+    });
+    ok(`ids are filtered out (got "${out}")`, !out.includes("d7c7701c") && out.includes("unmapped: 24"));
+  }
+
+  // Nested values are named, not flattened into an unreadable blob.
+  {
+    const out = summarizeAuditPayload({ failures: ["a", "b", "c"], inactivated: false });
+    ok(`array is counted not dumped (got "${out}")`, out.includes("3 item(s)") && !out.includes('"a"'));
+  }
+
+  eq("null payload", summarizeAuditPayload(null), "—");
+  eq("undefined payload", summarizeAuditPayload(undefined), "—");
+  eq("empty object", summarizeAuditPayload({}), "—");
+  eq("non-object payload", summarizeAuditPayload("just a string"), "—");
+  // All-noise payload has nothing to say, and says so rather than leaking an id.
+  eq("payload of only ids", summarizeAuditPayload({ job_id: "x", user_id: "y" }), "—");
 
   console.log(`\naudit: ${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);
