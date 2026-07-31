@@ -28,8 +28,8 @@ export default async function TimeReportPage() {
   return (
     <AppShell>
       <TopBar
-        title="Time report"
-        subtitle="Tracked time per client vs the monthly budget — and why anything ran over"
+        title="Time tracking"
+        subtitle="Tracked time per client vs the monthly budget, overhead, and why anything ran over"
       />
       <div className="px-8 py-6">
         <TimeReportClient initialMonth={currentMonth(Date.now())} />

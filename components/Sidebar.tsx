@@ -267,17 +267,6 @@ export function Sidebar() {
                 {toolsNav.map((item) => (
                   <NavItem key={item.href} item={item} pathname={pathname} dim collapsed={collapsed} />
                 ))}
-                {/* Time report is a management view (who spent how long on which
-                    client vs its budget) — seniors only, so it sits outside
-                    toolsNav rather than being filtered inside it. */}
-                {isSenior && (
-                  <NavItem
-                    item={{ href: "/time-report", label: "Time Report", icon: Hourglass }}
-                    pathname={pathname}
-                    dim
-                    collapsed={collapsed}
-                  />
-                )}
                 <button
                   onClick={() => setStripeModalOpen(true)}
                   title="Stripe connect link"
@@ -291,12 +280,24 @@ export function Sidebar() {
           </>
         )}
 
-        {isAdmin && (
+        {/* Admin section. The hub + its tools are admin-only, but Time Tracking
+            is a management view that leads (managers / senior bookkeepers) run
+            too — so the section shows for either, and only the admin-only rows
+            are filtered out for a lead. */}
+        {(isAdmin || isSenior) && (
           <>
             <NavSection label="Admin" className="mt-4" collapsed={collapsed} />
-            {adminItems.map((item) => (
-              <NavItem key={item.href} item={item} pathname={pathname} collapsed={collapsed} />
-            ))}
+            {isAdmin &&
+              adminItems.map((item) => (
+                <NavItem key={item.href} item={item} pathname={pathname} collapsed={collapsed} />
+              ))}
+            {isSenior && (
+              <NavItem
+                item={{ href: "/time-report", label: "Time Tracking", icon: Hourglass }}
+                pathname={pathname}
+                collapsed={collapsed}
+              />
+            )}
           </>
         )}
 

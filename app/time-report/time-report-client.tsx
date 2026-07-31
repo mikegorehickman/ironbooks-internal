@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, ChevronDown, ChevronRight, Clock, Download, Layers, Loader2, MessageSquare, Pencil, Users,
+  AlertTriangle, ChevronDown, ChevronRight, Clock, Download, Layers, Loader2, MessageSquare,
+  Pencil, Search, SlidersHorizontal, Trash2, Users,
 } from "lucide-react";
 import { formatDuration } from "@/lib/time-tracking";
 
@@ -42,6 +43,10 @@ interface EntryRow {
   startedAt: string; endedAt: string | null; seconds: number; sourcePath: string | null; note: string | null;
 }
 interface OverheadRow { category: string; label: string; seconds: number; sessions: number }
+interface FleetBudget {
+  clientLinkId: string; clientName: string; assignedBookkeeperName?: string | null;
+  budgetMinutes: number; budgetIsDefault: boolean;
+}
 interface Report {
   month: string;
   setup_pending?: boolean;
@@ -362,15 +367,7 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                           <div className="space-y-0.5">
                             {data.entries
                               .filter((e) => e.clientLinkId === c.clientLinkId)
-                              .map((e) => (
-                                <div key={e.id} className="flex items-center gap-2 text-[11px] text-ink-slate">
-                                  <span className="w-[86px] shrink-0">
-                                    {e.endedAt ? new Date(e.endedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}
-                                  </span>
-                                  <span className="flex-1 truncate">{e.userName}</span>
-                                  <span className="font-mono shrink-0">{formatDuration(e.seconds)}</span>
-                                </div>
-                              ))}
+                              .map((e) => <EntryLine key={e.id} entry={e} onChanged={() => void load(month)} />)}
                           </div>
                         </div>
                       )}
@@ -380,6 +377,9 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
               </div>
             )}
           </div>
+
+          {/* Fleet budget setup — every active client, not just this month's */}
+          <BudgetSetup defaultMinutes={data.defaultBudgetMinutes} />
 
           {/* Overhead — real work that belongs to no single client */}
           {data.overhead.length > 0 && (
@@ -448,6 +448,240 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
               )
             )}
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Fleet budget setup. The "By client" table can only list clients with tracked
+ * time, so without this there'd be no way to set a budget until someone had
+ * already blown through the default — which is backwards at rollout. Lists every
+ * ACTIVE client, unset ones showing the inherited default.
+ */
+function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<FleetBudget[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [onlySet, setOnlySet] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch("/api/time-tracking/budgets", { cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `Failed (${r.status})`);
+      setRows(d.clients || []);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load clients");
+    }
+  }, []);
+
+  const save = async (clientLinkId: string) => {
+    const raw = val.trim();
+    if (raw !== "" && (!Number.isInteger(Number(raw)) || Number(raw) < 0)) {
+      setErr("Budget must be a whole number of minutes (or blank to inherit the default).");
+      return;
+    }
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch(`/api/time-tracking/budgets/${clientLinkId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timeBudgetMinutes: raw === "" ? null : Number(raw) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.message || d?.error || "Failed to save");
+      setEditing(null);
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const filtered = (rows || [])
+    .filter((c) => (onlySet ? !c.budgetIsDefault : true))
+    .filter((c) => (q ? c.clientName.toLowerCase().includes(q.toLowerCase()) : true));
+  const customCount = (rows || []).filter((c) => !c.budgetIsDefault).length;
+
+  return (
+    <div className="rounded-xl border border-cardline bg-white overflow-hidden">
+      <button
+        onClick={() => { setOpen((o) => !o); if (!rows) void load(); }}
+        className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50/60"
+      >
+        {open ? <ChevronDown size={14} className="text-ink-light" /> : <ChevronRight size={14} className="text-ink-light" />}
+        <SlidersHorizontal size={14} className="text-teal" />
+        <span className="text-sm font-bold text-navy">Monthly budgets</span>
+        <span className="text-[11px] text-ink-light">
+          · every active client · {rows ? `${customCount} set, rest inherit ${formatDuration(defaultMinutes * 60)}` : "set the time each client should take"}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-100">
+          {err && <div className="mx-4 mt-3 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">{err}</div>}
+          <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-light pointer-events-none" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder={rows === null ? "Loading clients…" : `Search ${rows.length} clients…`}
+                className="w-full text-xs border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal/40"
+              />
+            </div>
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-ink-slate cursor-pointer">
+              <input type="checkbox" checked={onlySet} onChange={(e) => setOnlySet(e.target.checked)} className="accent-teal" />
+              Only clients with a custom budget
+            </label>
+          </div>
+          <div className="max-h-[420px] overflow-auto divide-y divide-gray-50">
+            {rows === null ? (
+              <div className="px-4 py-6 text-center text-xs text-ink-slate">
+                <Loader2 size={13} className="animate-spin inline mr-1.5" /> Loading…
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="px-4 py-6 text-center text-xs text-ink-slate">No matching clients.</div>
+            ) : (
+              filtered.map((c) => (
+                <div key={c.clientLinkId} className="px-4 py-2 flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-navy truncate">{c.clientName}</div>
+                    {c.assignedBookkeeperName && (
+                      <div className="text-[10px] text-ink-light">{c.assignedBookkeeperName}</div>
+                    )}
+                  </div>
+                  {editing === c.clientLinkId ? (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        autoFocus
+                        value={val}
+                        onChange={(e) => setVal(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") void save(c.clientLinkId); if (e.key === "Escape") setEditing(null); }}
+                        placeholder="min"
+                        className="w-16 text-[11px] border border-gray-300 rounded px-1.5 py-1 text-right"
+                      />
+                      <button onClick={() => void save(c.clientLinkId)} disabled={busy} className="text-[11px] font-bold text-teal hover:underline disabled:opacity-50">
+                        {busy ? "…" : "Save"}
+                      </button>
+                      <button onClick={() => setEditing(null)} className="text-[11px] text-ink-light hover:text-navy">Cancel</button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setEditing(c.clientLinkId); setVal(c.budgetIsDefault ? "" : String(c.budgetMinutes)); }}
+                      className="group shrink-0 inline-flex items-center gap-1 text-[11px] text-ink-slate hover:text-navy"
+                      title="Set this client's monthly time budget (blank inherits the default)"
+                    >
+                      <span className={c.budgetIsDefault ? "text-ink-light" : "font-semibold text-navy"}>
+                        {formatDuration(c.budgetMinutes * 60)}
+                        {c.budgetIsDefault && " (default)"}
+                      </span>
+                      <Pencil size={10} className="opacity-0 group-hover:opacity-100" />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+          <div className="px-4 py-2 border-t border-gray-100 text-[10px] text-ink-light">
+            Blank inherits the {formatDuration(defaultMinutes * 60)} default. <span className="font-semibold">0</span> means every
+            session on that client needs an explanation.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One session, correctable in place. A forgotten pause banks lunch as billable
+ * work; a mis-picked client bills the wrong month. Numbers people can't fix are
+ * numbers they stop trusting — so admins edit the minutes or remove the session
+ * right here. Removal marks it discarded (out of every report and budget check)
+ * and keeps the row for the audit trail.
+ */
+function EntryLine({ entry, onChanged }: { entry: EntryRow; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [mins, setMins] = useState(String(Math.round(entry.seconds / 60)));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch(`/api/time-tracking/entries/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ minutes: Number(mins) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setEditing(false);
+      onChanged();
+    } catch (e: any) {
+      setErr(e?.message || "Failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm(
+      `Remove this ${formatDuration(entry.seconds)} session (${entry.userName})?\n\n` +
+      `It comes out of the report and the client's budget. The record is kept in the audit log.`
+    )) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch(`/api/time-tracking/entries/${entry.id}`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      onChanged();
+    } catch (e: any) {
+      setErr(e?.message || "Failed");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="group flex items-center gap-2 text-[11px] text-ink-slate">
+      <span className="w-[86px] shrink-0">
+        {entry.endedAt ? new Date(entry.endedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}
+      </span>
+      <span className="flex-1 truncate">{entry.userName}</span>
+      {err && <span className="text-red-600 shrink-0 max-w-[160px] truncate" title={err}>{err}</span>}
+      {editing ? (
+        <span className="flex items-center gap-1 shrink-0">
+          <input
+            autoFocus
+            value={mins}
+            onChange={(e) => setMins(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void save(); if (e.key === "Escape") setEditing(false); }}
+            className="w-14 text-[11px] border border-gray-300 rounded px-1.5 py-0.5 text-right"
+          />
+          <span className="text-ink-light">min</span>
+          <button onClick={() => void save()} disabled={busy} className="font-bold text-teal hover:underline disabled:opacity-50">
+            {busy ? "…" : "Save"}
+          </button>
+          <button onClick={() => setEditing(false)} className="text-ink-light hover:text-navy">Cancel</button>
+        </span>
+      ) : (
+        <>
+          <span className="font-mono shrink-0">{formatDuration(entry.seconds)}</span>
+          <span className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => setEditing(true)} title="Correct the minutes" className="text-ink-light hover:text-teal">
+              <Pencil size={10} />
+            </button>
+            <button onClick={() => void remove()} disabled={busy} title="Remove this session from the numbers" className="text-ink-light hover:text-rust disabled:opacity-50">
+              <Trash2 size={10} />
+            </button>
+          </span>
         </>
       )}
     </div>
