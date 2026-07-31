@@ -28,6 +28,19 @@
  */
 export const MONTH_STAGES = [
   {
+    // FIRST on purpose (Mike, 2026-07-31). Revenue has to be right before any
+    // expense work: if deposits are still sitting in income that belong against
+    // invoices, every downstream number — COGS %, net margin, the red-flag gate,
+    // a client's time budget — is judged against a revenue figure that's about
+    // to move. Allocating first means the rest of the close is done once.
+    key: "revenue_allocated_at",
+    label: "Revenue allocation",
+    blurb: "Deposits matched to invoices — revenue settled before expense work starts",
+    /** Deposits-only clients with no invoicing have nothing to allocate. */
+    skippable: true,
+    href: (clientId: string) => `/revenue-check/${clientId}?close=1`,
+  },
+  {
     key: "coa_confirmed_at",
     label: "Confirm COA",
     blurb: "Chart matches the current master COA",
@@ -112,6 +125,8 @@ export interface ClientMonth {
   coa_job_id: string | null;
   blocked_reason: string | null;
   notes: string | null;
+  /** Stage 1 (migration 151) — revenue settled before any expense work. */
+  revenue_allocated_at: string | null;
   coa_confirmed_at: string | null;
   reclass_completed_at: string | null;
   bank_rules_completed_at: string | null;

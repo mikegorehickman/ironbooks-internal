@@ -43,24 +43,24 @@ eq("current month of a July date", periodMonthOf(new Date("2026-07-28T07:00:00Z"
 {
   const p = monthProgress(null);
   ok("no row = zero progress", p.done === 0 && p.pct === 0 && !p.allResolved);
-  eq("next stage on an empty month is COA", p.nextStage?.key, "coa_confirmed_at");
+  eq("next stage on an empty month is revenue allocation", p.nextStage?.key, "revenue_allocated_at");
 }
 {
   const p = monthProgress({});
-  eq("stage count is the agreed 7", p.total, 7);
+  eq("stage count is the agreed 8", p.total, 8);
   eq("empty row is 0%", p.pct, 0);
 }
 {
-  const p = monthProgress({ coa_confirmed_at: "2026-07-01", reclass_completed_at: "2026-07-02" });
-  eq("two stages done", p.done, 2);
+  const p = monthProgress({ revenue_allocated_at: "2026-06-30", coa_confirmed_at: "2026-07-01", reclass_completed_at: "2026-07-02" });
+  eq("three stages done", p.done, 3);
   eq("next stage is bank rules", p.nextStage?.key, "bank_rules_completed_at");
   ok("not all resolved", !p.allResolved);
 }
 {
   // Out-of-order completion is normal — statements requested before bank rules
   // are finished. Progress must count completions, not position.
-  const p = monthProgress({ coa_confirmed_at: "x", statements_requested_at: "x", duplicates_checked_at: "x" });
-  eq("out-of-order completions still count", p.done, 3);
+  const p = monthProgress({ revenue_allocated_at: "x", coa_confirmed_at: "x", statements_requested_at: "x", duplicates_checked_at: "x" });
+  eq("out-of-order completions still count", p.done, 4);
   eq("next stage is the first genuine gap", p.nextStage?.key, "reclass_completed_at");
 }
 {
@@ -86,7 +86,7 @@ eq("current month of a July date", periodMonthOf(new Date("2026-07-28T07:00:00Z"
   const p = monthProgress(mixed);
   ok("done + skipped can complete a month", p.allResolved && p.pct === 100);
   eq("skipped count is honest", p.skipped, 4);
-  eq("done count is honest", p.done, 3);
+  eq("done count is honest", p.done, 4);
 }
 
 // ── stageState: three states, never conflated ────────────────────────────
@@ -144,7 +144,10 @@ eq("ready_for_review is kept while incomplete",
 ok("stage keys are unique", new Set(MONTH_STAGES.map((s) => s.key)).size === MONTH_STAGES.length);
 ok("every stage has a label and a blurb", MONTH_STAGES.every((s) => !!s.label && !!s.blurb));
 ok("every stage key ends in _at (it is a timestamp)", MONTH_STAGES.every((s) => s.key.endsWith("_at")));
-ok("stage list matches the agreed 7", MONTH_STAGES.length === 7);
+ok("stage list matches the agreed 8", MONTH_STAGES.length === 8);
+// Revenue must be settled before any expense work — see the comment on the
+// stage itself. If someone reorders these, this is the assertion that catches it.
+ok("revenue allocation is the FIRST stage", MONTH_STAGES[0].key === "revenue_allocated_at");
 
 console.log(`\nclient-months: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
