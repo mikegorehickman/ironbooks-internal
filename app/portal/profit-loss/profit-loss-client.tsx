@@ -710,7 +710,7 @@ function CustomRangePicker({
         <button
           onClick={onApply}
           disabled={loading || !start || !end}
-          className="px-4 py-2 bg-teal-lighter-dark text-white rounded-lg text-sm font-semibold hover:from-teal-dark hover:to-teal-dark disabled:opacity-50 inline-flex items-center gap-1.5 flex-shrink-0 transition-all"
+          className="px-4 py-2 bg-teal-dark text-white rounded-lg text-sm font-semibold hover:bg-teal disabled:opacity-50 inline-flex items-center gap-1.5 flex-shrink-0 transition-all"
         >
           {loading ? <Loader2 size={13} className="animate-spin" /> : <CalendarRange size={13} />}
           {loading ? "Loading…" : "Run"}
@@ -1618,4 +1618,3 @@ function ReclassRequestModal({
     </div>
   );
 }
-
