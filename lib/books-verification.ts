@@ -30,6 +30,8 @@ import { analyzeDepositsToIncome } from "./revenue-integrity";
 import { computeRevenueAdjustment, normalizeRevenueMode } from "./revenue-recognition";
 import { analyzeCrmInvoiceRevenue } from "./crm-invoice-revenue";
 import { detectLaborDuplication, PAYROLL_ACCOUNT_NAME_REGEX } from "./payroll-double-entry";
+import { assertUndepositedFundsClear, classifyOpenInvoices } from "./close-assertions";
+import { detectWorkerOverlap } from "./worker-classification";
 import { normalizeAccountName } from "./account-name";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -116,6 +118,11 @@ export const HARD_FAIL_KEYS = [
   "uncategorized",
   "daily_queue_clear",
   "negative_banks",
+  // Undeposited Funds is a clearing account with no correct non-zero balance at
+  // a close: the money is counted in neither revenue nor the bank. Added when
+  // revenue recognition moved onto invoices, because that is when unapplied
+  // payments start accumulating here instead of being wrongly booked as income.
+  "undeposited_funds",
 ];
 
 const PILLAR_LABELS: Record<PillarKey, string> = {
@@ -517,6 +524,7 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
     const ufBalance = ufAccounts.reduce((s: number, a: any) => s + balOf(a.Id), 0);
     const ufFindings: VerificationFinding[] = [];
     let oldOrphans = 0;
+    let ufStuck: any[] = [];
     if (Math.abs(ufBalance) >= 1 && ufAccounts[0]) {
       try {
         const scan = await track(
@@ -526,18 +534,27 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
         oldOrphans = (scan.payments || []).filter(
           (p: any) => p.classification === "orphan" && p.payment_date <= cutoff
         ).length;
+        ufStuck = scan.payments || [];
       } catch {
         /* balance-only degradation */
       }
+      // Undeposited Funds is a CLEARING account: any balance at period end is
+      // unfinished work. The rule this replaces only failed at $5,000 or on an
+      // old orphan, so a client could close every month with $4,900 of
+      // unapplied customer money and never show a red flag. A known standing
+      // float is now handled by DISMISSING this finding — which records who
+      // decided that and why — rather than by a threshold nobody can see.
+      const ufAssertion = assertUndepositedFundsClear(ufBalance, ufStuck, periodEnd);
       ufFindings.push({
         fingerprint: fingerprintFor("uf", String(ufAccounts[0].Id)),
-        severity: Math.abs(ufBalance) >= 5000 || oldOrphans > 0 ? "fail" : "warn",
+        severity: "fail",
         message:
-          `${fmt(ufBalance)} sitting in Undeposited Funds` +
-          (oldOrphans > 0 ? ` — ${oldOrphans} payment${oldOrphans === 1 ? "" : "s"} older than 60 days` : ""),
+          `${ufAssertion.summary}. Every payment here needs applying to an invoice and depositing, ` +
+          `or the money is counted in neither revenue nor the bank.`,
         amount: ufBalance,
         account_id: ufAccounts[0] ? String(ufAccounts[0].Id) : undefined,
-        dismissable: true, // a small standing float can be a known pattern
+        dismissable: true,
+        senior_only: true, // calling a non-zero clearing account acceptable is a judgement call
       });
     }
     checks.push({
@@ -548,7 +565,7 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
       detail: Math.abs(ufBalance) < 1 ? "UF is clear" : `${fmt(ufBalance)} in Undeposited Funds`,
       findings: ufFindings,
       fix: "uf_audit",
-      meta: { balance: ufBalance, oldOrphans },
+      meta: { balance: ufBalance, oldOrphans, stuckCount: ufStuck.length },
     });
   }
 
@@ -1264,33 +1281,107 @@ export async function runBooksVerification(params: RunParams): Promise<Verificat
       });
     }
 
-    // Overdue A/R — collections signal, warn-only.
-    const refEnd = new Date(periodEnd).getTime();
-    const overdue = (openInvoices as any[]).filter((inv) => {
-      const due = new Date(inv.due_date || inv.txn_date).getTime();
-      return (refEnd - due) / 86_400_000 > 60;
+    // ── Open A/R, CLASSIFIED ────────────────────────────────────────────
+    // This used to be a list: "17 invoices over 60 days old". That tells a
+    // bookkeeper nothing about which of them are real, so nothing got actioned
+    // and the balance grew. It now explains every open invoice — necessary
+    // because moving revenue recognition onto invoices makes A/R the place
+    // errors accumulate instead of the P&L.
+    //
+    // Only `unexplained` is a problem. `unmatched_deposit` is the valuable
+    // bucket: those invoices close themselves once the deposit is applied, and
+    // their total is how much A/R resolves without chasing a single customer.
+    const ar = classifyOpenInvoices(
+      (openInvoices as any[]) || [],
+      ((plDetail as any[]) || []).map((r: any) => ({
+        txn_type: String(r.txn_type || ""),
+        date: String(r.date || ""),
+        amount: Number(r.amount) || 0,
+        name: r.name ?? null,
+        memo: r.memo ?? null,
+      })),
+      periodEnd
+    );
+    const arFinding = (kind: string, c: (typeof ar.classified)[number]) => ({
+      fingerprint: fingerprintFor(kind, String(c.invoice.qbo_invoice_id)),
+      severity: "warn" as const,
+      message:
+        `Invoice ${c.invoice.doc_number ? `#${c.invoice.doc_number} ` : ""}${c.invoice.customer_name || ""}: ` +
+        `${fmt(c.invoice.balance)} — ${c.note}`,
+      amount: c.invoice.balance,
+      dismissable: true,
     });
-    const overdueTotal = overdue.reduce((s, i) => s + Number(i.balance || 0), 0);
     checks.push({
       key: "overdue_ar",
-      label: "Overdue A/R (60+ days)",
+      label: "Open A/R explained",
       pillar: "anomalies",
       status: "pass",
-      detail:
-        overdue.length === 0
-          ? "No invoices older than 60 days"
-          : `${overdue.length} invoice${overdue.length === 1 ? "" : "s"} (${fmt(overdueTotal)}) over 60 days old`,
-      findings: cap(
-        overdue.slice(0, 10).map((inv: any) => ({
-          fingerprint: fingerprintFor("ar", String(inv.qbo_invoice_id || inv.id || inv.doc_number || inv.txn_date)),
-          severity: "warn" as const,
-          message: `Invoice ${inv.doc_number ? `#${inv.doc_number}` : ""} ${inv.customer_name || ""}: ${fmt(Number(inv.balance || 0))} outstanding since ${inv.due_date || inv.txn_date}`,
-          amount: Number(inv.balance || 0),
-          dismissable: true,
-        }))
-      ),
+      detail: ar.summary,
+      findings: cap([
+        // Unapplied deposits first: actionable, and they reduce A/R for free.
+        ...ar.classified.filter((c) => c.reason === "unmatched_deposit").slice(0, 10).map((c) => arFinding("ar_unapplied", c)),
+        ...ar.classified.filter((c) => c.reason === "probable_duplicate").slice(0, 10).map((c) => arFinding("ar_dup", c)),
+        ...ar.unexplained.slice(0, 10).map((c) => arFinding("ar", c)),
+      ]),
       fix: "ar",
+      meta: {
+        counts: ar.counts,
+        totals: ar.totals,
+        recoverable: ar.recoverable,
+        unexplainedCount: ar.unexplained.length,
+      },
     });
+
+    // ── Payroll vs subcontractor overlap ────────────────────────────────
+    // One person paid on both paths is a worker-classification question (a T4
+    // AND a T5018 for the same individual) and possibly unrecorded wages. Never
+    // auto-fixed: only the client knows whether a bare e-transfer was fuel money
+    // or pay, so every finding is a question — warn-level and dismissible.
+    if (plDetail !== null) {
+      const overlap = detectWorkerOverlap(
+        ((plDetail as any[]) || []).map((r: any) => ({
+          account: String(r.account || ""),
+          txn_type: String(r.txn_type || ""),
+          name: r.name ?? null,
+          memo: r.memo ?? null,
+          amount: Number(r.amount) || 0,
+          date: String(r.date || ""),
+        }))
+      );
+      checks.push({
+        key: "worker_classification",
+        label: "Payroll vs subcontractor overlap",
+        pillar: "anomalies",
+        status: overlap.employeeCount === 0 ? "skipped" : "pass",
+        skipReason:
+          overlap.employeeCount === 0
+            ? "No QBO Payroll paycheques this period — no roster to compare subcontractor payees against."
+            : undefined,
+        detail: overlap.summary,
+        findings: cap(
+          overlap.findings.map((f) => ({
+            fingerprint: fingerprintFor("worker", `${period}:${f.person}`),
+            severity: "warn" as const,
+            message: `${f.question} (matched on ${f.matchedOn})`,
+            amount: f.amount,
+            dismissable: true,
+          }))
+        ),
+        fix: "profile",
+        meta: {
+          employeeCount: overlap.employeeCount,
+          exposure: overlap.exposure,
+          people: overlap.findings.map((f) => ({
+            person: f.person,
+            tier: f.tier,
+            amount: f.amount,
+            accounts: f.accounts,
+            matchedOn: f.matchedOn,
+            postings: f.postings,
+          })),
+        },
+      });
+    }
   }
 
   // ── Documentation: statement coverage ───────────────────────────────
