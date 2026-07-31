@@ -7,6 +7,7 @@ import {
   effectiveBudgetMinutes,
   elapsedSeconds,
 } from "@/lib/time-tracking";
+import { overheadLabel } from "@/lib/time-tracking";
 import { requireTimerActor, sweepStaleEntries, tableMissing, ENTRY_COLS } from "@/lib/time-tracking-server";
 
 /**
@@ -81,12 +82,18 @@ export async function GET(request: Request) {
 
     const [{ data: completedRows, error: cErr }, { data: openRows }] = await Promise.all([completedQ, openQ]);
     if (cErr) throw cErr;
-    const completed: any[] = completedRows || [];
-    const open: any[] = openRows || [];
+    const allCompleted: any[] = completedRows || [];
+    const allOpen: any[] = openRows || [];
+    // Client work drives the budget comparison; overhead (migration 147) is
+    // reported on its own and must never touch a client's numbers.
+    const completed = allCompleted.filter((r) => r.client_link_id);
+    const open = allOpen.filter((r) => r.client_link_id);
+    const overheadCompleted = allCompleted.filter((r) => !r.client_link_id && r.category);
+    const overheadOpen = allOpen.filter((r) => !r.client_link_id && r.category);
 
     // Name the clients and the people, in two queries.
     const clientIds = [...new Set([...completed, ...open].map((r) => r.client_link_id))];
-    const userIds = [...new Set([...completed, ...open].map((r) => r.user_id))];
+    const userIds = [...new Set([...allCompleted, ...allOpen].map((r) => r.user_id))];
     const [{ data: clients }, { data: users }] = await Promise.all([
       clientIds.length
         ? service.from("client_links").select("id, client_name, time_budget_minutes, is_active").in("id", clientIds)
@@ -185,29 +192,62 @@ export async function GET(request: Request) {
       r.overBySeconds = Math.max(0, r.actualSeconds - budgetSeconds);
     }
 
-    // ── Per-bookkeeper rollup (the whole month, across clients) ──
-    const staff = new Map<string, { userId: string; userName: string; role: string | null; seconds: number; sessions: number; clients: Set<string> }>();
-    for (const e of completed) {
-      const s = staff.get(e.user_id) || {
-        userId: e.user_id,
-        userName: userName(e.user_id),
-        role: userById.get(e.user_id)?.role ?? null,
+    // ── Overhead rollup — work belonging to no single client ──
+    const overheadByCategory = new Map<string, { category: string; label: string; seconds: number; sessions: number }>();
+    for (const e of overheadCompleted) {
+      const cur = overheadByCategory.get(e.category) || {
+        category: e.category,
+        label: overheadLabel(e.category) || e.category,
         seconds: 0,
         sessions: 0,
-        clients: new Set<string>(),
       };
+      cur.seconds += Math.max(0, e.accumulated_seconds | 0);
+      cur.sessions += 1;
+      overheadByCategory.set(e.category, cur);
+    }
+    const overheadSeconds = [...overheadByCategory.values()].reduce((s, c) => s + c.seconds, 0);
+
+    // ── Per-bookkeeper rollup (client time, overhead, and the split) ──
+    const staff = new Map<string, {
+      userId: string; userName: string; role: string | null;
+      seconds: number; overheadSeconds: number; sessions: number; clients: Set<string>;
+    }>();
+    const staffFor = (userId: string) => {
+      let s = staff.get(userId);
+      if (!s) {
+        s = {
+          userId,
+          userName: userName(userId),
+          role: userById.get(userId)?.role ?? null,
+          seconds: 0,
+          overheadSeconds: 0,
+          sessions: 0,
+          clients: new Set<string>(),
+        };
+        staff.set(userId, s);
+      }
+      return s;
+    };
+    for (const e of completed) {
+      const s = staffFor(e.user_id);
       s.seconds += Math.max(0, e.accumulated_seconds | 0);
       s.sessions += 1;
       s.clients.add(e.client_link_id);
-      staff.set(e.user_id, s);
+    }
+    for (const e of overheadCompleted) {
+      const s = staffFor(e.user_id);
+      s.overheadSeconds += Math.max(0, e.accumulated_seconds | 0);
+      s.sessions += 1;
     }
 
     // ── Forgotten timers (paused for a week+, or auto-paused) ──
-    const zombies = open
+    const zombies = [...open, ...overheadOpen]
       .filter((e) => e.auto_paused || (e.status === "paused" && nowMs - Date.parse(e.updated_at) > ZOMBIE_PAUSE_MS))
       .map((e) => ({
         entryId: e.id,
-        clientName: clientById.get(e.client_link_id)?.client_name || "Unknown client",
+        clientName: e.client_link_id
+          ? clientById.get(e.client_link_id)?.client_name || "Unknown client"
+          : overheadLabel(e.category) || "Overhead",
         userName: userName(e.user_id),
         status: e.status,
         autoPaused: !!e.auto_paused,
@@ -217,27 +257,39 @@ export async function GET(request: Request) {
       }));
 
     const clientRows = [...rows.values()].sort((a, b) => b.actualSeconds - a.actualSeconds);
+    const clientSeconds = clientRows.reduce((s, r) => s + r.actualSeconds, 0);
     return NextResponse.json({
       month,
       range,
       serverNow: new Date(nowMs).toISOString(),
       defaultBudgetMinutes: DEFAULT_TIME_BUDGET_MINUTES,
       totals: {
-        trackedSeconds: clientRows.reduce((s, r) => s + r.actualSeconds, 0),
+        trackedSeconds: clientSeconds,
+        overheadSeconds,
+        // Client work as a share of all tracked time — the utilization figure.
+        clientSharePct: clientSeconds + overheadSeconds > 0
+          ? Math.round((clientSeconds / (clientSeconds + overheadSeconds)) * 100)
+          : null,
         openSeconds: clientRows.reduce((s, r) => s + r.openSeconds, 0),
         sessions: completed.length,
+        overheadSessions: overheadCompleted.length,
         clients: clientRows.length,
         overBudgetClients: clientRows.filter((r) => r.overBudget).length,
       },
       clients: clientRows,
+      /** Work belonging to no single client — never counted against a budget. */
+      overhead: [...overheadByCategory.values()].sort((a, b) => b.seconds - a.seconds),
       staff: [...staff.values()]
         .map((s) => ({ ...s, clients: s.clients.size }))
-        .sort((a, b) => b.seconds - a.seconds),
+        .sort((a, b) => b.seconds + b.overheadSeconds - (a.seconds + a.overheadSeconds)),
       zombies,
-      entries: completed.map((e) => ({
+      entries: allCompleted.map((e) => ({
         id: e.id,
         clientLinkId: e.client_link_id,
-        clientName: clientById.get(e.client_link_id)?.client_name || "Unknown client",
+        clientName: e.client_link_id
+          ? clientById.get(e.client_link_id)?.client_name || "Unknown client"
+          : overheadLabel(e.category) || "Overhead",
+        category: e.category,
         userId: e.user_id,
         userName: userName(e.user_id),
         startedAt: e.started_at,
@@ -254,8 +306,11 @@ export async function GET(request: Request) {
         setup_pending: true,
         serverNow: new Date(nowMs).toISOString(),
         defaultBudgetMinutes: DEFAULT_TIME_BUDGET_MINUTES,
-        totals: { trackedSeconds: 0, openSeconds: 0, sessions: 0, clients: 0, overBudgetClients: 0 },
-        clients: [], staff: [], zombies: [], entries: [],
+        totals: {
+          trackedSeconds: 0, overheadSeconds: 0, clientSharePct: null, openSeconds: 0,
+          sessions: 0, overheadSessions: 0, clients: 0, overBudgetClients: 0,
+        },
+        clients: [], overhead: [], staff: [], zombies: [], entries: [],
       });
     }
     console.error("[time-tracking/report]", err?.message);

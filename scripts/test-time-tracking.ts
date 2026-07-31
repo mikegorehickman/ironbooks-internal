@@ -4,6 +4,9 @@
 import {
   DEFAULT_TIME_BUDGET_MINUTES,
   STALE_MS,
+  OVERHEAD_CATEGORIES,
+  isOverheadCategory,
+  overheadLabel,
   elapsedSeconds,
   finalizeSegment,
   applyResume,
@@ -185,6 +188,22 @@ deepEq("trailing slash tolerated", resolvePathContext(`/clients/${CID}/`), { kin
 deepEq("unrelated query string tolerated", resolvePathContext(`/clients/${CID}?tab=pl`), { kind: "client", clientLinkId: CID });
 eq("prefilter agrees (positive)", isClientShapedPath(`/clients/${CID}`), true);
 eq("prefilter agrees (negative)", isClientShapedPath("/inbox"), false);
+
+// ── overhead categories (migration 147) ─────────────────────────────────────
+console.log("overhead categories");
+eq("four buckets defined", OVERHEAD_CATEGORIES.length, 4);
+eq("client_comms is valid", isOverheadCategory("client_comms"), true);
+eq("fleet is valid", isOverheadCategory("fleet"), true);
+eq("unknown key rejected (never trust a body value)", isOverheadCategory("payroll"), false);
+eq("empty rejected", isOverheadCategory(""), false);
+eq("non-string rejected", isOverheadCategory(42), false);
+eq("label lookup", overheadLabel("internal"), "Meetings & training");
+eq("label of unknown is null", overheadLabel("nope"), null);
+eq("label of null is null", overheadLabel(null), null);
+// The DB CHECK in migration 147 must match this list exactly — if this fails,
+// one of the two drifted.
+deepEq("keys match the migration CHECK", OVERHEAD_CATEGORIES.map((c) => c.key),
+  ["client_comms", "internal", "fleet", "admin"]);
 
 // ── formatting ──────────────────────────────────────────────────────────────
 console.log("formatClock / formatDuration");

@@ -49,11 +49,10 @@ export async function POST(request: Request, context: { params: Promise<{ entryI
 
     const outcome = await completeEntry(service, row, nowMs, overBudgetNote);
     if (!outcome.ok && outcome.noteRequired) {
-      const { data: client } = await service
-        .from("client_links")
-        .select("client_name")
-        .eq("id", row.client_link_id)
-        .single();
+      // Only client entries can be over budget — overhead has none.
+      const { data: client } = row.client_link_id
+        ? await service.from("client_links").select("client_name").eq("id", row.client_link_id).single()
+        : { data: null as any };
       return NextResponse.json(
         {
           error: "over_budget_note_required",

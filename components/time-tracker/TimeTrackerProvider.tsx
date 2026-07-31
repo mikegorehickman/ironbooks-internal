@@ -46,8 +46,12 @@ const CHANNEL = "snap.timer";
 
 export interface EntryView {
   id: string;
-  clientLinkId: string;
+  /** NULL on overhead entries — `label` is what the UI should render. */
+  clientLinkId: string | null;
   clientName: string | null;
+  category: string | null;
+  /** The client's name, or the overhead bucket's label. */
+  label: string;
   status: string;
   elapsedSeconds: number;
   accumulatedSeconds: number;
@@ -70,6 +74,7 @@ export interface NoteRequest {
   budgetMinutes: number;
   /** Set when the prompt came from "Complete A & start B" — B still needs starting. */
   thenStartClientLinkId?: string;
+  thenStartCategory?: string;
 }
 
 interface TimerCtx {
@@ -86,7 +91,17 @@ interface TimerCtx {
   setMinimized: (v: boolean) => void;
   dismissedForClient: (clientLinkId: string) => boolean;
   dismissPrompt: (clientLinkId: string) => void;
-  start: (clientLinkId: string, opts?: { completeActive?: boolean; overBudgetNote?: string }) => Promise<void>;
+  /** Start client work (clientLinkId) or overhead (category) — exactly one. */
+  start: (
+    target: { clientLinkId: string; category?: never } | { category: string; clientLinkId?: never },
+    opts?: { completeActive?: boolean; overBudgetNote?: string }
+  ) => Promise<void>;
+  categories: { key: string; label: string; hint: string }[];
+  /** Lazy-loaded client list for the "any client from anywhere" picker. */
+  clients: { id: string; client_name: string }[] | null;
+  loadClients: () => void;
+  pickerOpen: boolean;
+  setPickerOpen: (v: boolean) => void;
   pause: (entryId: string) => Promise<void>;
   resume: (entryId: string) => Promise<void>;
   complete: (entryId: string, overBudgetNote?: string) => Promise<void>;
@@ -112,6 +127,9 @@ export function TimeTrackerProvider() {
   const [noteRequest, setNoteRequest] = useState<NoteRequest | null>(null);
   const [minimized, setMinimizedState] = useState(false);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [categories, setCategories] = useState<{ key: string; label: string; hint: string }[]>([]);
+  const [clients, setClients] = useState<{ id: string; client_name: string }[] | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
 
@@ -146,7 +164,17 @@ export function TimeTrackerProvider() {
     if ("context" in d) setContext(d.context ?? null);
     if ("running" in d) setRunning(d.running ?? null);
     if ("paused" in d) setPaused(d.paused ?? []);
+    if (Array.isArray(d?.categories)) setCategories(d.categories);
   }, []);
+
+  /** Client list for the picker — fetched once, on first open. */
+  const loadClients = useCallback(() => {
+    if (clients !== null) return;
+    fetch("/api/clients/switcher", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { clients: [] }))
+      .then((d) => setClients(d.clients || []))
+      .catch(() => setClients([]));
+  }, [clients]);
 
   /** One round-trip: page context + my entries + budget + server clock. */
   const loadState = useCallback(async () => {
@@ -262,9 +290,10 @@ export function TimeTrackerProvider() {
   );
 
   const start: TimerCtx["start"] = useCallback(
-    async (clientLinkId, opts = {}) => {
+    async (target, opts = {}) => {
       const d = await act("/api/time-tracking/start", {
-        clientLinkId,
+        clientLinkId: (target as any).clientLinkId,
+        category: (target as any).category,
         sourcePath: pathname,
         completeActive: opts.completeActive === true,
         overBudgetNote: opts.overBudgetNote,
@@ -279,11 +308,13 @@ export function TimeTrackerProvider() {
           mtdSeconds: p.mtdSeconds ?? 0,
           entrySeconds: p.entrySeconds ?? 0,
           budgetMinutes: p.budgetMinutes ?? 0,
-          thenStartClientLinkId: clientLinkId,
+          thenStartClientLinkId: (target as any).clientLinkId,
+          thenStartCategory: (target as any).category,
         });
         return;
       }
       setNoteRequest(null);
+      setPickerOpen(false);
       await loadState();
       broadcast();
     },
@@ -335,11 +366,13 @@ export function TimeTrackerProvider() {
       me, context, running, paused, offsetMs, busy, error, noteRequest, minimized,
       setMinimized, dismissedForClient, dismissPrompt,
       start, pause, resume, complete, discard,
+      categories, clients, loadClients, pickerOpen, setPickerOpen,
       cancelNote: () => setNoteRequest(null),
       refresh: () => { void loadState(); },
     }),
     [me, context, running, paused, offsetMs, busy, error, noteRequest, minimized,
-     setMinimized, dismissedForClient, dismissPrompt, start, pause, resume, complete, discard, loadState]
+     setMinimized, dismissedForClient, dismissPrompt, start, pause, resume, complete, discard,
+     categories, clients, loadClients, pickerOpen, loadState]
   );
 
   // Nothing to show for portal/public pages, or before we know the role (no

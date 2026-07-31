@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle, ChevronDown, CheckCircle2, Clock, Loader2, Pause, Play, Trash2, X,
+  AlertCircle, ChevronDown, CheckCircle2, Clock, Loader2, Pause, Play, Search, Trash2, X,
 } from "lucide-react";
 import {
   elapsedSeconds, formatClock, formatDuration, effectiveBudgetMinutes, isOverBudget,
@@ -10,11 +10,17 @@ import {
 import { useTimeTracker, type EntryView } from "./TimeTrackerProvider";
 
 /**
- * The floating timer. Four faces, in priority order:
- *   1. note modal      — completing an over-budget client demands a reason
- *   2. switch prompt    — a timer is running on ANOTHER client than this page
- *   3. running/paused   — expanded card, or a minimized ticking pill
- *   4. start prompt     — client page, nothing running yet
+ * The floating timer. Faces, in priority order:
+ *   1. note modal    — completing an over-budget client demands a reason
+ *   2. work picker   — "what are you working on?": any client, or an overhead
+ *                      bucket (so inbox/meeting time is recordable too)
+ *   3. switch prompt — a timer runs on something other than this page's client
+ *   4. running/paused— expanded card, or a minimized ticking pill
+ *   5. start prompt  — client page, nothing running yet (client pre-filled)
+ *   6. idle FAB      — anywhere else: a quiet way into the picker
+ *
+ * Client entries show a budget bar; overhead entries have no budget by design
+ * and never count against one.
  *
  * Positioning/z-index follow the portal SupportWidget (fixed bottom-5 right-5,
  * z-40 pill / z-50 panel), which already clears the sticky sidebar.
@@ -47,7 +53,7 @@ function useLiveSeconds(entry: EntryView | null, offsetMs: number): number {
 export function TimeTrackerWidget() {
   const t = useTimeTracker();
   if (!t) return null;
-  const { context, running, paused, offsetMs, busy, error, noteRequest, minimized, setMinimized } = t;
+  const { context, running, paused, offsetMs, error, noteRequest, minimized, setMinimized, pickerOpen } = t;
 
   const live = useLiveSeconds(running, offsetMs);
   const activeOnThisPage = !!running && !!context && running.clientLinkId === context.clientLinkId;
@@ -59,7 +65,10 @@ export function TimeTrackerWidget() {
   // 1. Over-budget note — blocking, because the rule is "explain or don't close".
   if (noteRequest) return <NoteModal />;
 
-  // 2. Running on a different client than the page we're on.
+  // 2. The "what are you working on?" picker (any client, or overhead).
+  if (pickerOpen) return <WorkPicker />;
+
+  // 3. Running on a different client than the page we're on.
   if (running && context && running.clientLinkId !== context.clientLinkId && !t.dismissedForClient(context.clientLinkId)) {
     return <SwitchPrompt live={live} />;
   }
@@ -83,7 +92,7 @@ export function TimeTrackerWidget() {
     );
   }
 
-  // 4. On a client page with nothing tracking → offer to start.
+  // 4. On a client page with nothing tracking → offer to start, pre-filled.
   if (context && !activeOnThisPage && !t.dismissedForClient(context.clientLinkId)) {
     return <StartPrompt />;
   }
@@ -96,7 +105,116 @@ export function TimeTrackerWidget() {
       </div>
     );
   }
-  return null;
+
+  // 5. Idle anywhere else (inbox, /today, admin…). A quiet way in, so time on a
+  // non-client page can still be attributed — to a client, or to an overhead
+  // bucket. Without this, that work is simply unrecordable.
+  return <IdleFab />;
+}
+
+function IdleFab() {
+  const t = useTimeTracker()!;
+  return (
+    <button
+      onClick={() => { t.loadClients(); t.setPickerOpen(true); }}
+      title="Track time — pick a client or a category"
+      aria-label="Track time"
+      className="fixed bottom-5 right-5 z-40 flex items-center gap-2 pl-3 pr-4 py-2.5 rounded-full text-white/90 shadow-lg hover:shadow-2xl transition-all hover:scale-105 opacity-70 hover:opacity-100"
+      style={{ background: NAVY_GRADIENT }}
+    >
+      <Clock size={15} />
+      <span className="text-xs font-semibold">Track time</span>
+    </button>
+  );
+}
+
+// ── "What are you working on?" — any client, or an overhead bucket ───────────
+
+function WorkPicker() {
+  const t = useTimeTracker()!;
+  const { clients, categories, busy, start, setPickerOpen, running } = t;
+  const [q, setQ] = useState("");
+  const filtered = (clients || [])
+    .filter((c) => (q ? c.client_name.toLowerCase().includes(q.toLowerCase()) : true))
+    .slice(0, 40);
+  const switching = !!running;
+
+  return (
+    <div className="fixed bottom-5 right-5 z-50 w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+      <div className="px-4 py-3 flex items-start justify-between gap-2" style={{ background: NAVY_GRADIENT }}>
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-white/60">Track time</div>
+          <div className="text-sm font-bold text-white">What are you working on?</div>
+        </div>
+        <button onClick={() => setPickerOpen(false)} className="text-white/60 hover:text-white shrink-0" aria-label="Close">
+          <X size={15} />
+        </button>
+      </div>
+
+      <div className="px-4 py-3 space-y-3 max-h-[62vh] overflow-auto">
+        {switching && (
+          <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+            Starting something new pauses <span className="font-semibold">{running!.label}</span>.
+          </div>
+        )}
+
+        {/* A client — this is how inbox/request time still lands on their budget. */}
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-light mb-1.5">For a client</div>
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-light pointer-events-none" />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={clients === null ? "Loading clients…" : "Search clients…"}
+              className="w-full text-xs border border-gray-300 rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal/40"
+            />
+          </div>
+          {q && (
+            <div className="mt-1 max-h-40 overflow-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+              {filtered.length === 0 ? (
+                <div className="px-2.5 py-2 text-[11px] text-ink-slate">No match</div>
+              ) : (
+                filtered.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => start({ clientLinkId: c.id })}
+                    disabled={busy}
+                    className="w-full text-left px-2.5 py-1.5 text-xs text-navy hover:bg-teal-lighter/40 truncate disabled:opacity-60"
+                  >
+                    {c.client_name}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Overhead — real work that belongs to no one client. */}
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-light mb-1.5">Not for one client</div>
+          <div className="space-y-1">
+            {categories.map((c) => (
+              <button
+                key={c.key}
+                onClick={() => start({ category: c.key })}
+                disabled={busy}
+                title={c.hint}
+                className="w-full text-left px-2.5 py-2 rounded-lg border border-gray-200 hover:border-teal hover:bg-teal-lighter/20 disabled:opacity-60"
+              >
+                <div className="text-xs font-semibold text-navy">{c.label}</div>
+                <div className="text-[10px] text-ink-slate leading-snug">{c.hint}</div>
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-ink-light mt-1.5">
+            These don&apos;t count against any client&apos;s budget — they show separately on the time report.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Start prompt ────────────────────────────────────────────────────────────
@@ -126,7 +244,7 @@ function StartPrompt() {
           {formatDuration(context.mtdSeconds)} logged of {formatDuration(budget * 60)} this month
         </div>
         <button
-          onClick={() => start(context.clientLinkId)}
+          onClick={() => start({ clientLinkId: context.clientLinkId })}
           disabled={busy}
           className="w-full inline-flex items-center justify-center gap-2 bg-teal hover:bg-teal-dark text-white text-xs font-bold px-3 py-2.5 rounded-lg disabled:opacity-60"
         >
@@ -148,7 +266,7 @@ function SwitchPrompt({ live }: { live: number }) {
       <div className="px-4 py-3 flex items-start justify-between gap-2" style={{ background: NAVY_GRADIENT }}>
         <div className="min-w-0">
           <div className="text-[10px] font-bold uppercase tracking-wide text-white/60">Still timing</div>
-          <div className="text-sm font-bold text-white truncate">{running.clientName || "another client"}</div>
+          <div className="text-sm font-bold text-white truncate">{running.label}</div>
           <div className="font-mono text-xs text-teal-light mt-0.5">{formatClock(live)}</div>
         </div>
         <button
@@ -164,7 +282,7 @@ function SwitchPrompt({ live }: { live: number }) {
           You&apos;re now on <span className="font-semibold text-navy">{context.clientName || "another client"}</span>.
         </div>
         <button
-          onClick={() => start(context.clientLinkId, { completeActive: true })}
+          onClick={() => start({ clientLinkId: context.clientLinkId }, { completeActive: true })}
           disabled={busy}
           className="w-full inline-flex items-center justify-center gap-2 bg-teal hover:bg-teal-dark text-white text-xs font-bold px-3 py-2.5 rounded-lg disabled:opacity-60"
         >
@@ -172,7 +290,7 @@ function SwitchPrompt({ live }: { live: number }) {
           Complete &amp; start {context.clientName ? shortName(context.clientName) : "this one"}
         </button>
         <button
-          onClick={() => start(context.clientLinkId)}
+          onClick={() => start({ clientLinkId: context.clientLinkId })}
           disabled={busy}
           className="w-full text-[11px] font-semibold text-teal hover:underline disabled:opacity-60"
         >
@@ -190,7 +308,7 @@ function Pill({ entry, seconds, onExpand }: { entry: EntryView; seconds: number;
   return (
     <button
       onClick={onExpand}
-      title={`${entry.clientName || "Client"} — ${formatClock(seconds)} (${runningNow ? "running" : "paused"})`}
+      title={`${entry.label} — ${formatClock(seconds)} (${runningNow ? "running" : "paused"})`}
       className="fixed bottom-5 right-5 z-40 flex items-center gap-2.5 pl-3 pr-4 py-2.5 rounded-full text-white shadow-xl hover:shadow-2xl transition-all hover:scale-105"
       style={{ background: NAVY_GRADIENT }}
     >
@@ -199,7 +317,7 @@ function Pill({ entry, seconds, onExpand }: { entry: EntryView; seconds: number;
         {runningNow && <span className="absolute w-2.5 h-2.5 rounded-full bg-teal animate-ping opacity-60" />}
       </span>
       <span className="font-mono text-sm font-bold tabular-nums">{formatClock(seconds)}</span>
-      <span className="text-[11px] text-white/70 max-w-[130px] truncate">{shortName(entry.clientName || "")}</span>
+      <span className="text-[11px] text-white/70 max-w-[130px] truncate">{shortName(entry.label)}</span>
     </button>
   );
 }
@@ -211,7 +329,8 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
   const { context, paused, busy, error, pause, resume, complete, discard } = t;
   const runningNow = entry.status === "running";
   // Budget context is only meaningful when the page's client IS this timer's.
-  const onThisClient = !!context && context.clientLinkId === entry.clientLinkId;
+  // Budget context only applies to CLIENT entries whose client is this page's.
+  const onThisClient = !!entry.clientLinkId && !!context && context.clientLinkId === entry.clientLinkId;
   const budgetMinutes = onThisClient ? effectiveBudgetMinutes(context!.budgetMinutes) : null;
   const mtd = onThisClient ? context!.mtdSeconds : null;
   const projected = mtd !== null ? mtd + seconds : null;
@@ -231,7 +350,7 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
             <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-white/60">
               <Clock size={11} /> {runningNow ? "Tracking" : entry.autoPaused ? "Auto-paused" : "Paused"}
             </div>
-            <div className="text-sm font-bold text-white truncate">{entry.clientName || "Client"}</div>
+            <div className="text-sm font-bold text-white truncate">{entry.label}</div>
           </div>
           <button onClick={onMinimize} className="text-white/60 hover:text-white shrink-0" aria-label="Minimize">
             <ChevronDown size={16} />
@@ -298,7 +417,7 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
           </button>
           <button
             onClick={() => {
-              if (confirm(`Discard this session on ${entry.clientName || "this client"}? The time won't be recorded.`)) {
+              if (confirm(`Discard this session on ${entry.label}? The time won't be recorded.`)) {
                 void discard(entry.id);
               }
             }}
@@ -318,7 +437,7 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
             <div className="space-y-1">
               {otherPaused.slice(0, 3).map((p) => (
                 <div key={p.id} className="flex items-center justify-between gap-2 text-[11px]">
-                  <span className="truncate text-navy">{p.clientName || "Client"}</span>
+                  <span className="truncate text-navy">{p.label}</span>
                   <span className="font-mono text-ink-slate shrink-0">{formatClock(p.accumulatedSeconds)}</span>
                   <button
                     onClick={() => complete(p.id)}
@@ -353,8 +472,10 @@ function NoteModal() {
   const submit = () => {
     const text = note.trim();
     if (!text) return;
-    // Two callers: a plain Complete, or the compound "Complete A & start B".
-    if (n.thenStartClientLinkId) void start(n.thenStartClientLinkId, { completeActive: true, overBudgetNote: text });
+    // Two callers: a plain Complete, or the compound "Complete A & start B"
+    // (where B is either a client or an overhead bucket).
+    if (n.thenStartClientLinkId) void start({ clientLinkId: n.thenStartClientLinkId }, { completeActive: true, overBudgetNote: text });
+    else if (n.thenStartCategory) void start({ category: n.thenStartCategory }, { completeActive: true, overBudgetNote: text });
     else if (n.entryId) void complete(n.entryId, text);
   };
 

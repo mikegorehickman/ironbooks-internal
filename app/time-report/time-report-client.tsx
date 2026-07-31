@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, ChevronDown, ChevronRight, Clock, Download, Loader2, MessageSquare, Pencil, Users,
+  AlertTriangle, ChevronDown, ChevronRight, Clock, Download, Layers, Loader2, MessageSquare, Pencil, Users,
 } from "lucide-react";
 import { formatDuration } from "@/lib/time-tracking";
 
@@ -28,21 +28,31 @@ interface ClientRow {
   overBudget: boolean; overBySeconds: number;
   byUser: ByUser[]; notes: NoteRow[];
 }
-interface StaffRow { userId: string; userName: string; role: string | null; seconds: number; sessions: number; clients: number }
+interface StaffRow {
+  userId: string; userName: string; role: string | null;
+  seconds: number; overheadSeconds: number; sessions: number; clients: number;
+}
 interface Zombie {
   entryId: string; clientName: string; userName: string; status: string;
   autoPaused: boolean; seconds: number; startedAt: string; updatedAt: string;
 }
 interface EntryRow {
-  id: string; clientLinkId: string; clientName: string; userId: string; userName: string;
+  id: string; clientLinkId: string | null; clientName: string; category: string | null;
+  userId: string; userName: string;
   startedAt: string; endedAt: string | null; seconds: number; sourcePath: string | null; note: string | null;
 }
+interface OverheadRow { category: string; label: string; seconds: number; sessions: number }
 interface Report {
   month: string;
   setup_pending?: boolean;
   defaultBudgetMinutes: number;
-  totals: { trackedSeconds: number; openSeconds: number; sessions: number; clients: number; overBudgetClients: number };
+  totals: {
+    trackedSeconds: number; overheadSeconds: number; clientSharePct: number | null;
+    openSeconds: number; sessions: number; overheadSessions: number;
+    clients: number; overBudgetClients: number;
+  };
   clients: ClientRow[];
+  overhead: OverheadRow[];
   staff: StaffRow[];
   zombies: Zombie[];
   entries: EntryRow[];
@@ -122,11 +132,13 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const rows = [
-      ["Client", "Bookkeeper", "Started", "Completed", "Minutes", "Note"].join(","),
+      ["Client / category", "Type", "Bookkeeper", "Started", "Completed", "Minutes", "Note"].join(","),
       ...data.entries.map((e) =>
-        [e.clientName, e.userName, e.startedAt, e.endedAt ?? "", Math.round(e.seconds / 60), e.note ?? ""]
-          .map(esc)
-          .join(",")
+        [
+          e.clientName,
+          e.category ? "Overhead" : "Client",
+          e.userName, e.startedAt, e.endedAt ?? "", Math.round(e.seconds / 60), e.note ?? "",
+        ].map(esc).join(",")
       ),
     ];
     return rows.join("\n");
@@ -193,8 +205,12 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
         <>
           {/* Totals */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Kpi label="Tracked" value={formatDuration(data.totals.trackedSeconds)} sub={`${data.totals.sessions} session${data.totals.sessions === 1 ? "" : "s"}`} />
-            <Kpi label="Clients worked" value={String(data.totals.clients)} sub={`default budget ${formatDuration(data.defaultBudgetMinutes * 60)}`} />
+            <Kpi label="Client time" value={formatDuration(data.totals.trackedSeconds)} sub={`${data.totals.sessions} session${data.totals.sessions === 1 ? "" : "s"} · ${data.totals.clients} client${data.totals.clients === 1 ? "" : "s"}`} />
+            <Kpi
+              label="Overhead"
+              value={formatDuration(data.totals.overheadSeconds)}
+              sub={data.totals.clientSharePct !== null ? `${data.totals.clientSharePct}% of time is client work` : "no time tracked yet"}
+            />
             <Kpi label="Over budget" value={String(data.totals.overBudgetClients)} sub="clients past their month" tone={data.totals.overBudgetClients > 0 ? "warn" : undefined} />
             <Kpi label="Still open" value={formatDuration(data.totals.openSeconds)} sub="running or paused now" />
           </div>
@@ -365,6 +381,40 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
             )}
           </div>
 
+          {/* Overhead — real work that belongs to no single client */}
+          {data.overhead.length > 0 && (
+            <div className="rounded-xl border border-cardline bg-white overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2">
+                <Layers size={14} className="text-teal" />
+                <span className="text-sm font-bold text-navy">Not for one client</span>
+                <span className="text-[11px] text-ink-light">· never counted against a client&apos;s budget</span>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {data.overhead.map((o) => {
+                  const share = data.totals.overheadSeconds > 0
+                    ? Math.round((o.seconds / data.totals.overheadSeconds) * 100)
+                    : 0;
+                  return (
+                    <div key={o.category} className="px-4 py-2.5 flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-semibold text-navy">{o.label}</div>
+                        <div className="mt-1 h-1.5 rounded-full bg-gray-100 overflow-hidden max-w-[280px]">
+                          <div className="h-full rounded-full bg-navy/40" style={{ width: `${share}%` }} />
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="font-mono text-xs font-bold text-navy">{formatDuration(o.seconds)}</div>
+                        <div className="text-[10px] text-ink-light">
+                          {o.sessions} session{o.sessions === 1 ? "" : "s"} · {share}%
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Per bookkeeper */}
           <div className="rounded-xl border border-cardline bg-white overflow-hidden">
             <button onClick={() => setShowStaff((s) => !s)} className="w-full px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 text-left">
@@ -386,6 +436,11 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                       <span className="text-[11px] text-ink-slate shrink-0">
                         {s.clients} client{s.clients === 1 ? "" : "s"} · {s.sessions} session{s.sessions === 1 ? "" : "s"}
                       </span>
+                      {s.overheadSeconds > 0 && (
+                        <span className="text-[10px] text-ink-light shrink-0 w-[76px] text-right">
+                          +{formatDuration(s.overheadSeconds)} other
+                        </span>
+                      )}
                       <span className="font-mono font-bold text-navy shrink-0 w-[70px] text-right">{formatDuration(s.seconds)}</span>
                     </div>
                   ))}

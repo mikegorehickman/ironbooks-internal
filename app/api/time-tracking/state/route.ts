@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { currentMonth, resolvePathContext, type JobTable } from "@/lib/time-tracking";
+import { OVERHEAD_CATEGORIES, currentMonth, resolvePathContext, type JobTable } from "@/lib/time-tracking";
 import {
   requireTimerActor,
   sweepStaleEntries,
@@ -84,11 +84,12 @@ export async function GET(request: Request) {
       fetchPausedEntries(service, actor.userId),
     ]);
 
-    // Name every client we're about to mention, in one query.
+    // Name every client we're about to mention, in one query. (Overhead entries
+    // carry no client_link_id — their label comes from the category.)
     const ids = new Set<string>();
     if (clientLinkId) ids.add(clientLinkId);
-    if (running) ids.add(running.client_link_id);
-    for (const p of paused) ids.add(p.client_link_id);
+    if (running?.client_link_id) ids.add(running.client_link_id);
+    for (const p of paused) if (p.client_link_id) ids.add(p.client_link_id);
     const names = new Map<string, string>();
     if (ids.size > 0) {
       const { data: clients } = await service
@@ -114,13 +115,18 @@ export async function GET(request: Request) {
       context: clientLinkId
         ? { clientLinkId, clientName: names.get(clientLinkId) ?? null, mtdSeconds, budgetMinutes }
         : null,
-      running: running ? toEntryView(running, nowMs, names.get(running.client_link_id)) : null,
-      paused: paused.map((p) => toEntryView(p, nowMs, names.get(p.client_link_id))),
+      running: running ? toEntryView(running, nowMs, running.client_link_id ? names.get(running.client_link_id) : null) : null,
+      paused: paused.map((p) => toEntryView(p, nowMs, p.client_link_id ? names.get(p.client_link_id) : null)),
+      /** For the widget's "what are you working on?" picker on non-client pages. */
+      categories: OVERHEAD_CATEGORIES,
     });
   } catch (err: any) {
     if (tableMissing(err)) {
       // Migration 146 not applied yet — the widget stays quiet instead of erroring.
-      return NextResponse.json({ serverNow, context: null, running: null, paused: [], setup_pending: true });
+      return NextResponse.json({
+        serverNow, context: null, running: null, paused: [],
+        categories: OVERHEAD_CATEGORIES, setup_pending: true,
+      });
     }
     console.error("[time-tracking/state]", err?.message);
     return NextResponse.json({ error: "Failed to load timer state" }, { status: 500 });

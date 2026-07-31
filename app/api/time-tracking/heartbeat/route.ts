@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     // Always answer with the truth, whether or not the ping matched.
     const running = await fetchRunningEntry(service, auth.actor.userId);
     let clientName: string | null = null;
-    if (running) {
+    if (running?.client_link_id) {
       const { data: client } = await service
         .from("client_links")
         .select("client_name")

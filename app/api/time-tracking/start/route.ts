@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import {
+  OVERHEAD_CATEGORIES,
+  isOverheadCategory,
+  overheadLabel,
+  type OverheadCategory,
+} from "@/lib/time-tracking";
+import {
   requireTimerActor,
   fetchRunningEntry,
   pauseEntry,
@@ -16,11 +22,16 @@ import {
  * POST /api/time-tracking/start   (WRITES)
  *
  * Body: {
- *   clientLinkId: string,
+ *   clientLinkId?: string,      // client work — counts against their budget
+ *   category?: OverheadCategory,// OR overhead: work belonging to no one client
  *   sourcePath?: string,
  *   completeActive?: boolean,   // one-click "Complete {A} & start {B}"
  *   overBudgetNote?: string,    // for that A completion, if it needs one
  * }
+ *
+ * Exactly one of clientLinkId / category. The client form is also how time on a
+ * NON-client page gets attributed — the widget's picker lets a bookkeeper answer
+ * Dominion's request from /inbox and still bill it to Dominion's month.
  *
  * Starting while another timer runs is normal (the bookkeeper moved on), so:
  *   - completeActive:true  → complete the old one first (enforcing its
@@ -55,47 +66,73 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const clientLinkId = String(body.clientLinkId || "").trim();
+  const rawCategory = body.category ? String(body.category).trim() : "";
   const sourcePath = body.sourcePath ? String(body.sourcePath).slice(0, 500) : null;
   const completeActive = body.completeActive === true;
   const overBudgetNote = body.overBudgetNote ? String(body.overBudgetNote).slice(0, 2000) : null;
-  if (!clientLinkId) {
-    return NextResponse.json({ error: "clientLinkId is required" }, { status: 400 });
-  }
 
-  // The client must exist and be active — a timer on a dead link is noise.
-  const { data: client } = await service
-    .from("client_links")
-    .select("id, client_name, is_active")
-    .eq("id", clientLinkId)
-    .single();
-  if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
-  if ((client as any).is_active === false) {
-    return NextResponse.json({ error: "Client is inactive" }, { status: 400 });
+  if (!clientLinkId && !rawCategory) {
+    return NextResponse.json({ error: "clientLinkId or category is required" }, { status: 400 });
   }
+  if (clientLinkId && rawCategory) {
+    return NextResponse.json(
+      { error: "Pass either clientLinkId (client work) or category (overhead), not both" },
+      { status: 400 }
+    );
+  }
+  // Validate against the canonical list — never write a raw body value.
+  if (rawCategory && !isOverheadCategory(rawCategory)) {
+    return NextResponse.json(
+      { error: `Unknown category "${rawCategory}"`, allowed: OVERHEAD_CATEGORIES.map((c) => c.key) },
+      { status: 400 }
+    );
+  }
+  const category = rawCategory ? (rawCategory as OverheadCategory) : null;
+
+  // For client work the client must exist and be active — a timer on a dead
+  // link is noise. Overhead has no client to check.
+  let client: any = null;
+  if (clientLinkId) {
+    const { data } = await service
+      .from("client_links")
+      .select("id, client_name, is_active")
+      .eq("id", clientLinkId)
+      .single();
+    if (!data) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    if ((data as any).is_active === false) {
+      return NextResponse.json({ error: "Client is inactive" }, { status: 400 });
+    }
+    client = data;
+  }
+  const startLabel = client ? (client as any).client_name : overheadLabel(category);
 
   try {
     const running = await fetchRunningEntry(service, actor.userId);
 
-    // Same client already ticking → hand it back untouched.
-    if (running && running.client_link_id === clientLinkId) {
+    // Already ticking on this exact target → hand it back untouched.
+    const sameTarget = running
+      ? clientLinkId
+        ? running.client_link_id === clientLinkId
+        : running.category === category
+      : false;
+    if (running && sameTarget) {
       return NextResponse.json({
         serverNow,
-        entry: toEntryView(running, nowMs, (client as any).client_name),
+        entry: toEntryView(running, nowMs, client ? (client as any).client_name : null),
         already_running: true,
       });
     }
 
-    // A different client is ticking → close it or park it.
+    // Something else is ticking → close it or park it.
     if (running) {
       if (completeActive) {
         const outcome = await completeEntry(service, running, nowMs, overBudgetNote);
         if (!outcome.ok && outcome.noteRequired) {
           // The widget shows the note modal, then retries with overBudgetNote.
-          const { data: prev } = await service
-            .from("client_links")
-            .select("client_name")
-            .eq("id", running.client_link_id)
-            .single();
+          // (Only client entries can hit this — overhead has no budget.)
+          const { data: prev } = running.client_link_id
+            ? await service.from("client_links").select("client_name").eq("id", running.client_link_id).single()
+            : { data: null as any };
           return NextResponse.json(
             {
               error: "over_budget_note_required",
@@ -130,7 +167,8 @@ export async function POST(request: Request) {
       const { data, error } = await (service as any)
         .from("time_entries")
         .insert({
-          client_link_id: clientLinkId,
+          client_link_id: clientLinkId || null,
+          category,
           user_id: actor.userId,
           status: "running",
           started_at: serverNow,
@@ -146,14 +184,19 @@ export async function POST(request: Request) {
       if (!isUniqueViolation(err)) throw err;
       // Another tab/device won the race — return the winner, don't 500.
       const winner = await fetchRunningEntry(service, actor.userId);
-      if (winner && winner.client_link_id === clientLinkId) {
+      const winnerIsSame = winner
+        ? clientLinkId
+          ? winner.client_link_id === clientLinkId
+          : winner.category === category
+        : false;
+      if (winner && winnerIsSame) {
         return NextResponse.json({
           serverNow,
-          entry: toEntryView(winner, nowMs, (client as any).client_name),
+          entry: toEntryView(winner, nowMs, client ? (client as any).client_name : null),
           already_running: true,
         });
       }
-      const { data: other } = winner
+      const { data: other } = winner?.client_link_id
         ? await service.from("client_links").select("client_name").eq("id", winner.client_link_id).single()
         : { data: null as any };
       return NextResponse.json(
@@ -169,14 +212,15 @@ export async function POST(request: Request) {
 
     await auditSafe(service, actor.userId, "time_entry_started", {
       entry_id: created?.id,
-      client_link_id: clientLinkId,
-      client_name: (client as any).client_name,
+      client_link_id: clientLinkId || null,
+      category,
+      label: startLabel,
       source_path: sourcePath,
     });
 
     return NextResponse.json({
       serverNow,
-      entry: created ? toEntryView(created, nowMs, (client as any).client_name) : null,
+      entry: created ? toEntryView(created, nowMs, client ? (client as any).client_name : null) : null,
     });
   } catch (err: any) {
     if (tableMissing(err)) {

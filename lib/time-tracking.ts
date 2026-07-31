@@ -32,6 +32,38 @@ export const HEARTBEAT_MS = 60_000;
 /** Business timezone for month boundaries (Ironbooks HQ; no DST in Regina). */
 export const BUSINESS_TZ = "America/Regina";
 
+// ── Overhead categories ─────────────────────────────────────────────────────
+// Work that belongs to no single client (migration 147). The rule: track against
+// a CLIENT when the effort varies per client — answering one client's requests is
+// their cost and counts against their budget, which is why the widget has a
+// client picker for non-client-scoped pages like /inbox — and against a CATEGORY
+// when it doesn't. Overhead is reported separately and NEVER counted against a
+// client's monthly budget.
+//
+// One definition, so adding a bucket is this list + the CHECK in migration 147.
+
+export const OVERHEAD_CATEGORIES = [
+  {
+    key: "client_comms",
+    label: "Client comms & requests",
+    hint: "Batch inbox/message work spanning several clients — when picking one would be arbitrary",
+  },
+  { key: "internal", label: "Meetings & training", hint: "Team calls, coaching, onboarding, SOP/handbook work" },
+  { key: "fleet", label: "Fleet-wide production", hint: "Month-end sweeps, COA audit, bank-rule pushes — work across the whole fleet" },
+  { key: "admin", label: "Admin & other", hint: "Firm admin, SNAP tooling, sales support" },
+] as const;
+
+export type OverheadCategory = (typeof OVERHEAD_CATEGORIES)[number]["key"];
+
+/** Validate a category from a request body — never trust the raw value. */
+export function isOverheadCategory(value: unknown): value is OverheadCategory {
+  return typeof value === "string" && OVERHEAD_CATEGORIES.some((c) => c.key === value);
+}
+
+export function overheadLabel(key: string | null | undefined): string | null {
+  return OVERHEAD_CATEGORIES.find((c) => c.key === key)?.label ?? null;
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export type TimeEntryStatus = "running" | "paused" | "completed" | "discarded";

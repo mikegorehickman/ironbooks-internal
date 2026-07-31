@@ -27,6 +27,7 @@ import {
   currentMonth,
   effectiveBudgetMinutes,
   isOverBudget,
+  overheadLabel,
   type TimerFields,
 } from "./time-tracking";
 
@@ -85,13 +86,15 @@ export function tableMissing(err: any): boolean {
 }
 
 export const ENTRY_COLS =
-  "id, client_link_id, user_id, status, started_at, last_resumed_at, accumulated_seconds, " +
+  "id, client_link_id, category, user_id, status, started_at, last_resumed_at, accumulated_seconds, " +
   "ended_at, source_path, over_budget_note, budget_minutes_at_completion, " +
   "mtd_seconds_at_completion, auto_paused, last_heartbeat_at, created_at, updated_at";
 
 export interface TimeEntryRow extends TimerFields {
   id: string;
-  client_link_id: string;
+  /** NULL on overhead entries (migration 147) — exactly one of these two is set. */
+  client_link_id: string | null;
+  category: string | null;
   user_id: string;
   started_at: string;
   ended_at: string | null;
@@ -105,8 +108,11 @@ export interface TimeEntryRow extends TimerFields {
 /** Shape returned to the widget — server-computed so the client never guesses. */
 export interface EntryView {
   id: string;
-  clientLinkId: string;
+  clientLinkId: string | null;
   clientName: string | null;
+  category: string | null;
+  /** What to show: the client's name, or the overhead bucket's label. */
+  label: string;
   status: string;
   elapsedSeconds: number;
   accumulatedSeconds: number;
@@ -117,10 +123,13 @@ export interface EntryView {
 }
 
 export function toEntryView(row: TimeEntryRow, nowMs: number, clientName?: string | null): EntryView {
+  const name = clientName ?? null;
   return {
     id: row.id,
     clientLinkId: row.client_link_id,
-    clientName: clientName ?? null,
+    clientName: name,
+    category: row.category,
+    label: row.category ? overheadLabel(row.category) || "Other work" : name || "Client",
     status: String(row.status),
     elapsedSeconds: elapsedSeconds(row, nowMs),
     accumulatedSeconds: Math.max(0, row.accumulated_seconds | 0),
@@ -188,7 +197,8 @@ export async function sweepStaleEntries(
  * Completed seconds for a client in a month (all bookkeepers — the budget is
  * the client's, not one person's). Discarded entries are excluded; in-flight
  * entries are excluded so the number is deterministic and the widget's warning
- * predicts the server check exactly.
+ * predicts the server check exactly. Overhead rows carry no client_link_id, so
+ * they can never land in a client's month by construction.
  */
 export async function clientMonthToDateSeconds(
   service: AnySupabase,
@@ -323,13 +333,19 @@ export async function completeEntry(
   // ended_at is the fold's effective end (the last proof of life for a stale
   // entry) — never a fabricated "now" hours after the laptop died.
   const endedAtMs = row.status === "running" ? fold.effectiveEndMs : nowMs;
-  const month = currentMonth(endedAtMs);
-  const budgetMinutes = await clientBudgetMinutes(service, row.client_link_id);
-  const mtdSeconds = await clientMonthToDateSeconds(service, row.client_link_id, month);
-
   const note = (overBudgetNote || "").trim();
-  if (isOverBudget(mtdSeconds, entrySeconds, budgetMinutes) && !note) {
-    return { ok: false, noteRequired: { mtdSeconds, entrySeconds, budgetMinutes } };
+
+  // Overhead (no client) has no budget to exceed — nothing to explain, and it
+  // must never be measured against a client's month.
+  let budgetMinutes: number | null = null;
+  let mtdSeconds: number | null = null;
+  if (row.client_link_id) {
+    const month = currentMonth(endedAtMs);
+    budgetMinutes = await clientBudgetMinutes(service, row.client_link_id);
+    mtdSeconds = await clientMonthToDateSeconds(service, row.client_link_id, month);
+    if (isOverBudget(mtdSeconds, entrySeconds, budgetMinutes) && !note) {
+      return { ok: false, noteRequired: { mtdSeconds, entrySeconds, budgetMinutes } };
+    }
   }
 
   const { data } = await (service as any)
