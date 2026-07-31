@@ -243,17 +243,17 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                   <div className="text-sm font-bold text-amber-900">
                     {data.zombies.length} timer{data.zombies.length === 1 ? "" : "s"} left open
                   </div>
-                  <p className="text-[11px] text-amber-800 mt-0.5">
+                  <p className="text-xs text-amber-800 mt-0.5">
                     Auto-paused after inactivity, or paused for over a week. The time isn&apos;t counted until someone
                     completes the session.
                   </p>
                   <ul className="mt-1.5 space-y-0.5">
                     {data.zombies.map((z) => (
-                      <li key={z.entryId} className="text-[11px] text-amber-900 flex items-center gap-2">
+                      <li key={z.entryId} className="text-xs text-amber-900 flex items-center gap-2">
                         <span className="font-semibold truncate">{z.clientName}</span>
                         <span className="text-amber-700">· {z.userName}</span>
                         <span className="font-mono">{formatDuration(z.seconds)}</span>
-                        {z.autoPaused && <span className="text-[9px] font-bold uppercase bg-amber-200 px-1 rounded">auto</span>}
+                        {z.autoPaused && <span className="text-[10px] font-bold uppercase bg-amber-200 px-1 rounded">auto</span>}
                       </li>
                     ))}
                   </ul>
@@ -269,10 +269,10 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
               onClick={() => setShowClients((v) => !v)}
               className="w-full px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 text-left hover:bg-gray-50/60"
             >
-              {showClients ? <ChevronDown size={14} className="text-ink-light" /> : <ChevronRight size={14} className="text-ink-light" />}
+              {showClients ? <ChevronDown size={14} className="text-ink-slate" /> : <ChevronRight size={14} className="text-ink-slate" />}
               <Clock size={14} className="text-teal" />
               <span className="text-sm font-bold text-navy">By client</span>
-              <span className="text-[11px] text-ink-light">
+              <span className="text-xs text-ink-slate">
                 · actual vs monthly budget
                 {!showClients && data.clients.length > 0 && <> · {data.clients.length} client{data.clients.length === 1 ? "" : "s"}</>}
                 {data.totals.overBudgetClients > 0 && <span className="text-rust font-semibold"> · {data.totals.overBudgetClients} over</span>}
@@ -291,13 +291,13 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                   return (
                     <div key={c.clientLinkId}>
                       <div className="px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50/60">
-                        <button onClick={() => toggle(c.clientLinkId)} className="shrink-0 text-ink-light hover:text-navy">
+                        <button onClick={() => toggle(c.clientLinkId)} className="shrink-0 text-ink-slate hover:text-navy">
                           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         </button>
                         <button onClick={() => toggle(c.clientLinkId)} className="min-w-0 flex-1 text-left">
                           <div className="text-xs font-bold text-navy truncate">
                             {c.clientName}
-                            {!c.isActive && <span className="ml-1.5 text-[10px] font-semibold text-ink-light">(inactive)</span>}
+                            {!c.isActive && <span className="ml-1.5 text-[11px] font-semibold text-ink-slate">(inactive)</span>}
                           </div>
                           <div className="mt-1 h-1.5 rounded-full bg-gray-100 overflow-hidden max-w-[280px]">
                             <div className={`h-full rounded-full ${c.overBudget ? "bg-rust" : "bg-teal"}`} style={{ width: `${pct}%` }} />
@@ -307,7 +307,7 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                           <div className={`font-mono text-xs font-bold ${c.overBudget ? "text-rust" : "text-navy"}`}>
                             {formatDuration(c.actualSeconds)}
                           </div>
-                          <div className="text-[10px] text-ink-light">
+                          <div className="text-[11px] text-ink-slate">
                             {c.sessions} session{c.sessions === 1 ? "" : "s"}
                             {c.openSeconds > 0 && <> · {formatDuration(c.openSeconds)} open</>}
                           </div>
@@ -325,12 +325,12 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                                   if (e.key === "Escape") setEditing(null);
                                 }}
                                 placeholder="min"
-                                className="w-14 text-[11px] border border-gray-300 rounded px-1.5 py-1 text-right"
+                                className="w-14 text-xs border border-gray-300 rounded px-1.5 py-1 text-right"
                               />
                               <button
                                 onClick={() => void saveBudget(c.clientLinkId)}
                                 disabled={saving}
-                                className="text-[11px] font-bold text-teal hover:underline disabled:opacity-50"
+                                className="text-xs font-bold text-teal hover:underline disabled:opacity-50"
                               >
                                 {saving ? "…" : "Save"}
                               </button>
@@ -338,18 +338,18 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                           ) : (
                             <button
                               onClick={() => { setEditing(c.clientLinkId); setEditValue(c.budgetIsDefault ? "" : String(c.budgetMinutes)); }}
-                              className="group inline-flex items-center gap-1 text-[11px] text-ink-slate hover:text-navy"
+                              className="group inline-flex items-center gap-1 text-xs text-ink-slate hover:text-navy"
                               title="Set this client's monthly budget"
                             >
                               <span>
                                 {formatDuration(c.budgetMinutes * 60)}
-                                {c.budgetIsDefault && <span className="text-ink-light"> (default)</span>}
+                                {c.budgetIsDefault && <span className="text-ink-slate"> (default)</span>}
                               </span>
                               <Pencil size={10} className="opacity-0 group-hover:opacity-100" />
                             </button>
                           )}
                           {c.overBudget && (
-                            <div className="text-[10px] font-bold text-rust">+{formatDuration(c.overBySeconds)}</div>
+                            <div className="text-[11px] font-bold text-rust">+{formatDuration(c.overBySeconds)}</div>
                           )}
                         </div>
                       </div>
@@ -359,7 +359,7 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                           {c.byUser.length > 0 && (
                             <div className="flex flex-wrap gap-1.5 pt-2">
                               {c.byUser.map((u) => (
-                                <span key={u.userId} className="text-[10px] font-semibold bg-white border border-gray-200 rounded-full px-2 py-0.5 text-ink-slate">
+                                <span key={u.userId} className="text-[11px] font-semibold bg-white border border-gray-200 rounded-full px-2 py-0.5 text-ink-slate">
                                   {u.userName} · {formatDuration(u.seconds)}
                                 </span>
                               ))}
@@ -372,8 +372,8 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                                   <div className="flex items-start gap-1.5">
                                     <MessageSquare size={11} className="text-amber-600 mt-0.5 shrink-0" />
                                     <div className="min-w-0">
-                                      <div className="text-[11px] text-amber-900">{n.note}</div>
-                                      <div className="text-[10px] text-amber-700 mt-0.5">
+                                      <div className="text-xs text-amber-900">{n.note}</div>
+                                      <div className="text-[11px] text-amber-700 mt-0.5">
                                         {n.userName} · {formatDuration(n.seconds)} session
                                         {n.budgetMinutesAtCompletion !== null && (
                                           <> · was {formatDuration((n.mtdSecondsAtCompletion ?? 0) + n.seconds)} of a{" "}
@@ -410,7 +410,7 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
               <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2">
                 <Layers size={14} className="text-teal" />
                 <span className="text-sm font-bold text-navy">Not for one client</span>
-                <span className="text-[11px] text-ink-light">· never counted against a client&apos;s budget</span>
+                <span className="text-xs text-ink-slate">· never counted against a client&apos;s budget</span>
               </div>
               <div className="divide-y divide-gray-100">
                 {data.overhead.map((o) => {
@@ -427,7 +427,7 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                       </div>
                       <div className="shrink-0 text-right">
                         <div className="font-mono text-xs font-bold text-navy">{formatDuration(o.seconds)}</div>
-                        <div className="text-[10px] text-ink-light">
+                        <div className="text-[11px] text-ink-slate">
                           {o.sessions} session{o.sessions === 1 ? "" : "s"} · {share}%
                         </div>
                       </div>
@@ -477,10 +477,10 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
         onClick={() => setOpen((v) => !v)}
         className="w-full px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 text-left hover:bg-gray-50/60"
       >
-        {open ? <ChevronDown size={14} className="text-ink-light" /> : <ChevronRight size={14} className="text-ink-light" />}
+        {open ? <ChevronDown size={14} className="text-ink-slate" /> : <ChevronRight size={14} className="text-ink-slate" />}
         <Users size={14} className="text-teal" />
         <span className="text-sm font-bold text-navy">By bookkeeper</span>
-        <span className="text-[11px] text-ink-light">
+        <span className="text-xs text-ink-slate">
           · {logged.length} logging{idle.length > 0 && <> · {idle.length} with nothing this month</>}
         </span>
       </button>
@@ -489,7 +489,7 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
         <>
           {idle.length > 0 && (
             <div className="px-4 pt-2.5 flex items-center justify-end">
-              <label className="inline-flex items-center gap-1.5 text-[11px] text-ink-slate cursor-pointer">
+              <label className="inline-flex items-center gap-1.5 text-xs text-ink-slate cursor-pointer">
                 <input type="checkbox" checked={hideIdle} onChange={(e) => setHideIdle(e.target.checked)} className="accent-teal" />
                 Hide the {idle.length} not logging
               </label>
@@ -516,14 +516,14 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
                           {s.userName}
                         </button>
                         {s.role && (
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-light">{s.role}</span>
+                          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-slate">{s.role}</span>
                         )}
                         <span className="flex-1" />
                         {nothing ? (
-                          <span className="text-[11px] text-ink-light">nothing logged in {monthLabel(month)}</span>
+                          <span className="text-xs text-ink-slate">nothing logged in {monthLabel(month)}</span>
                         ) : (
                           <>
-                            <span className="text-[11px] text-ink-slate">
+                            <span className="text-xs text-ink-slate">
                               {formatDuration(s.seconds)} client
                               {s.overheadSeconds > 0 && <> · {formatDuration(s.overheadSeconds)} other</>}
                             </span>
@@ -536,7 +536,7 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
 
                       {!nothing && (
                         <>
-                          <div className="mt-1 text-[10px] text-ink-light">
+                          <div className="mt-1 text-[11px] text-ink-slate">
                             {s.activeDays} day{s.activeDays === 1 ? "" : "s"} worked · avg{" "}
                             <span className="font-semibold text-ink-slate">{formatDuration(s.avgSecondsPerActiveDay)}</span>/day ·{" "}
                             {s.clients} client{s.clients === 1 ? "" : "s"} · {s.sessions} session{s.sessions === 1 ? "" : "s"}
@@ -589,28 +589,28 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
                         {s.topClients.length > 0 && (
                           <div className="pt-2 flex flex-wrap gap-1.5">
                             {s.topClients.map((c) => (
-                              <span key={c.clientLinkId} className="text-[10px] font-semibold bg-white border border-gray-200 rounded-full px-2 py-0.5 text-ink-slate">
+                              <span key={c.clientLinkId} className="text-[11px] font-semibold bg-white border border-gray-200 rounded-full px-2 py-0.5 text-ink-slate">
                                 {c.clientName} · {formatDuration(c.seconds)}
                               </span>
                             ))}
                           </div>
                         )}
                         <div className="space-y-0.5">
-                          <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-wide text-ink-light">
+                          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-ink-slate">
                             <span className="w-[70px] shrink-0">Day</span>
                             <span className="w-[60px] shrink-0 text-right">Time</span>
                             <span className="w-[64px] shrink-0 text-right">Clients</span>
                             <span className="flex-1">Worked on</span>
                           </div>
                           {s.byDay.map((d) => (
-                            <div key={d.date} className="flex items-center gap-2 text-[11px] text-ink-slate">
+                            <div key={d.date} className="flex items-center gap-2 text-xs text-ink-slate">
                               <span className="w-[70px] shrink-0 font-semibold text-navy">{shortDate(d.date)}</span>
                               <span className="w-[60px] shrink-0 text-right font-mono">{formatDuration(d.seconds)}</span>
                               <span className="w-[64px] shrink-0 text-right">{d.clients || "—"}</span>
                               <span className="flex-1 truncate" title={d.clientNames.join(", ")}>
-                                {d.clientNames.length > 0 ? d.clientNames.join(", ") : <span className="text-ink-light">overhead only</span>}
+                                {d.clientNames.length > 0 ? d.clientNames.join(", ") : <span className="text-ink-slate">overhead only</span>}
                                 {d.overheadSeconds > 0 && d.clientNames.length > 0 && (
-                                  <span className="text-ink-light"> · +{formatDuration(d.overheadSeconds)} other</span>
+                                  <span className="text-ink-slate"> · +{formatDuration(d.overheadSeconds)} other</span>
                                 )}
                               </span>
                             </div>
@@ -623,7 +623,7 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
               })}
             </div>
           )}
-          <div className="px-4 py-2 border-t border-gray-100 flex items-center gap-3 text-[10px] text-ink-light">
+          <div className="px-4 py-2 border-t border-gray-100 flex items-center gap-3 text-[11px] text-ink-slate">
             <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-teal" /> client work</span>
             <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-navy/35" /> overhead</span>
             <span>· one bar per day of {monthLabel(month)} · click a name for the day-by-day list</span>
@@ -703,20 +703,20 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
         onClick={() => { setOpen((o) => !o); if (!rows) void load(); }}
         className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50/60"
       >
-        {open ? <ChevronDown size={14} className="text-ink-light" /> : <ChevronRight size={14} className="text-ink-light" />}
+        {open ? <ChevronDown size={14} className="text-ink-slate" /> : <ChevronRight size={14} className="text-ink-slate" />}
         <SlidersHorizontal size={14} className="text-teal" />
         <span className="text-sm font-bold text-navy">Monthly budgets</span>
-        <span className="text-[11px] text-ink-light">
+        <span className="text-xs text-ink-slate">
           · every active client · {rows ? `${customCount} set, rest inherit ${formatDuration(defaultMinutes * 60)}` : "set the time each client should take"}
         </span>
       </button>
 
       {open && (
         <div className="border-t border-gray-100">
-          {err && <div className="mx-4 mt-3 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">{err}</div>}
+          {err && <div className="mx-4 mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">{err}</div>}
           <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap">
             <div className="relative flex-1 min-w-[180px]">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-light pointer-events-none" />
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-slate pointer-events-none" />
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -724,7 +724,7 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
                 className="w-full text-xs border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal/40"
               />
             </div>
-            <label className="inline-flex items-center gap-1.5 text-[11px] text-ink-slate cursor-pointer">
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-slate cursor-pointer">
               <input type="checkbox" checked={onlySet} onChange={(e) => setOnlySet(e.target.checked)} className="accent-teal" />
               Only clients with a custom budget
             </label>
@@ -742,7 +742,7 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-semibold text-navy truncate">{c.clientName}</div>
                     {c.assignedBookkeeperName && (
-                      <div className="text-[10px] text-ink-light">{c.assignedBookkeeperName}</div>
+                      <div className="text-[11px] text-ink-slate">{c.assignedBookkeeperName}</div>
                     )}
                   </div>
                   {editing === c.clientLinkId ? (
@@ -753,20 +753,20 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
                         onChange={(e) => setVal(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") void save(c.clientLinkId); if (e.key === "Escape") setEditing(null); }}
                         placeholder="min"
-                        className="w-16 text-[11px] border border-gray-300 rounded px-1.5 py-1 text-right"
+                        className="w-16 text-xs border border-gray-300 rounded px-1.5 py-1 text-right"
                       />
-                      <button onClick={() => void save(c.clientLinkId)} disabled={busy} className="text-[11px] font-bold text-teal hover:underline disabled:opacity-50">
+                      <button onClick={() => void save(c.clientLinkId)} disabled={busy} className="text-xs font-bold text-teal hover:underline disabled:opacity-50">
                         {busy ? "…" : "Save"}
                       </button>
-                      <button onClick={() => setEditing(null)} className="text-[11px] text-ink-light hover:text-navy">Cancel</button>
+                      <button onClick={() => setEditing(null)} className="text-xs text-ink-slate hover:text-navy">Cancel</button>
                     </div>
                   ) : (
                     <button
                       onClick={() => { setEditing(c.clientLinkId); setVal(c.budgetIsDefault ? "" : String(c.budgetMinutes)); }}
-                      className="group shrink-0 inline-flex items-center gap-1 text-[11px] text-ink-slate hover:text-navy"
+                      className="group shrink-0 inline-flex items-center gap-1 text-xs text-ink-slate hover:text-navy"
                       title="Set this client's monthly time budget (blank inherits the default)"
                     >
-                      <span className={c.budgetIsDefault ? "text-ink-light" : "font-semibold text-navy"}>
+                      <span className={c.budgetIsDefault ? "text-ink-slate" : "font-semibold text-navy"}>
                         {formatDuration(c.budgetMinutes * 60)}
                         {c.budgetIsDefault && " (default)"}
                       </span>
@@ -777,7 +777,7 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
               ))
             )}
           </div>
-          <div className="px-4 py-2 border-t border-gray-100 text-[10px] text-ink-light">
+          <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-ink-slate">
             Blank inherits the {formatDuration(defaultMinutes * 60)} default. <span className="font-semibold">0</span> means every
             session on that client needs an explanation.
           </div>
@@ -837,7 +837,7 @@ function EntryLine({ entry, onChanged }: { entry: EntryRow; onChanged: () => voi
   };
 
   return (
-    <div className="group flex items-center gap-2 text-[11px] text-ink-slate">
+    <div className="group flex items-center gap-2 text-xs text-ink-slate">
       <span className="w-[86px] shrink-0">
         {entry.endedAt ? new Date(entry.endedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}
       </span>
@@ -850,22 +850,22 @@ function EntryLine({ entry, onChanged }: { entry: EntryRow; onChanged: () => voi
             value={mins}
             onChange={(e) => setMins(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void save(); if (e.key === "Escape") setEditing(false); }}
-            className="w-14 text-[11px] border border-gray-300 rounded px-1.5 py-0.5 text-right"
+            className="w-14 text-xs border border-gray-300 rounded px-1.5 py-0.5 text-right"
           />
-          <span className="text-ink-light">min</span>
+          <span className="text-ink-slate">min</span>
           <button onClick={() => void save()} disabled={busy} className="font-bold text-teal hover:underline disabled:opacity-50">
             {busy ? "…" : "Save"}
           </button>
-          <button onClick={() => setEditing(false)} className="text-ink-light hover:text-navy">Cancel</button>
+          <button onClick={() => setEditing(false)} className="text-ink-slate hover:text-navy">Cancel</button>
         </span>
       ) : (
         <>
           <span className="font-mono shrink-0">{formatDuration(entry.seconds)}</span>
           <span className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={() => setEditing(true)} title="Correct the minutes" className="text-ink-light hover:text-teal">
+            <button onClick={() => setEditing(true)} title="Correct the minutes" className="text-ink-slate hover:text-teal">
               <Pencil size={10} />
             </button>
-            <button onClick={() => void remove()} disabled={busy} title="Remove this session from the numbers" className="text-ink-light hover:text-rust disabled:opacity-50">
+            <button onClick={() => void remove()} disabled={busy} title="Remove this session from the numbers" className="text-ink-slate hover:text-rust disabled:opacity-50">
               <Trash2 size={10} />
             </button>
           </span>
@@ -878,9 +878,9 @@ function EntryLine({ entry, onChanged }: { entry: EntryRow; onChanged: () => voi
 function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "warn" }) {
   return (
     <div className={`rounded-xl border bg-white px-4 py-3 ${tone === "warn" ? "border-amber-300" : "border-cardline"}`}>
-      <div className="text-[10px] font-bold uppercase tracking-wide text-ink-light">{label}</div>
+      <div className="text-[11px] font-bold uppercase tracking-wide text-ink-slate">{label}</div>
       <div className={`text-xl font-bold mt-0.5 ${tone === "warn" ? "text-rust" : "text-navy"}`}>{value}</div>
-      {sub && <div className="text-[10px] text-ink-slate mt-0.5">{sub}</div>}
+      {sub && <div className="text-[11px] text-ink-slate mt-0.5">{sub}</div>}
     </div>
   );
 }

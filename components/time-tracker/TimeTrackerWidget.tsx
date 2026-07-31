@@ -160,9 +160,9 @@ function WorkPicker() {
 
         {/* A client — this is how inbox/request time still lands on their budget. */}
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-light mb-1.5">For a client</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-slate mb-1.5">For a client</div>
           <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-light pointer-events-none" />
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-slate pointer-events-none" />
             <input
               autoFocus
               value={q}
@@ -193,7 +193,7 @@ function WorkPicker() {
 
         {/* Overhead — real work that belongs to no one client. */}
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-light mb-1.5">Not for one client</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-slate mb-1.5">Not for one client</div>
           <div className="space-y-1">
             {categories.map((c) => (
               <button
@@ -204,11 +204,11 @@ function WorkPicker() {
                 className="w-full text-left px-2.5 py-2 rounded-lg border border-gray-200 hover:border-teal hover:bg-teal-lighter/20 disabled:opacity-60"
               >
                 <div className="text-xs font-semibold text-navy">{c.label}</div>
-                <div className="text-[10px] text-ink-slate leading-snug">{c.hint}</div>
+                <div className="text-[11px] text-ink-slate leading-snug">{c.hint}</div>
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-ink-light mt-1.5">
+          <p className="text-[11px] text-ink-slate mt-1.5">
             These don&apos;t count against any client&apos;s budget — they show separately on the time report.
           </p>
         </div>
@@ -381,7 +381,7 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
               />
             </div>
             {over && (
-              <div className="text-[10px] text-ink-slate mt-1">Completing will ask why this client needed the extra time.</div>
+              <div className="text-[11px] text-ink-slate mt-1">Completing will ask why this client needed the extra time.</div>
             )}
           </div>
         )}
@@ -423,7 +423,7 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
             }}
             disabled={busy}
             title="Discard — wrong client, or the time isn't real"
-            className="text-ink-light hover:text-rust shrink-0 disabled:opacity-60"
+            className="text-ink-slate hover:text-rust shrink-0 disabled:opacity-60"
           >
             <Trash2 size={14} />
           </button>
@@ -431,7 +431,7 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
 
         {otherPaused.length > 0 && (
           <div className="pt-2 border-t border-gray-100">
-            <div className="text-[10px] font-bold uppercase tracking-wide text-ink-light mb-1">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-ink-slate mb-1">
               Also paused ({otherPaused.length})
             </div>
             <div className="space-y-1">
@@ -508,7 +508,7 @@ function NoteModal() {
             placeholder="e.g. Two years of unreconciled Stripe deposits; client sent statements late."
             className="w-full text-xs border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal/40 resize-none"
           />
-          <p className="text-[10px] text-ink-light mt-1.5">
+          <p className="text-[11px] text-ink-slate mt-1.5">
             This shows on the time report next to the overage, so the extra time is explained rather than questioned.
           </p>
         </div>
