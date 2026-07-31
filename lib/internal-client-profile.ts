@@ -213,11 +213,16 @@ export interface ActivityEvent {
 }
 
 /**
- * Last N audit_log entries scoped to this client. We have no FK from
- * audit_log → client_link_id, so we filter on request_payload->>client_link_id
- * (or fields like reclass_job_id that resolve back to this client). This
- * is best-effort — some events won't carry the client ID and will be missed,
- * but the ones we do surface are the bookkeeper-meaningful ones.
+ * Last N audit_log entries scoped to this client, for the Overview strip.
+ *
+ * Filters on the `client_link_id` COLUMN (migration 145) with the old
+ * payload-only filter kept as an OR fallback. That old filter alone was an
+ * undercount: measured on one client 2026-07-31 it returned 101 rows where 179
+ * exist, because two thirds of audit_log carried the client id only in a job
+ * reference. It also cannot see the QuickBooks writes at all — those live in
+ * `reclassifications` / `coa_actions`. For the complete record use
+ * /api/clients/[id]/audit-trail, which the Activity tab renders; this stays a
+ * short recent-activity strip.
  */
 export async function fetchRecentActivity(
   service: SupabaseClient,
@@ -227,7 +232,9 @@ export async function fetchRecentActivity(
   const { data } = await service
     .from("audit_log")
     .select("id, event_type, occurred_at, request_payload")
-    .filter("request_payload->>client_link_id", "eq", clientLinkId)
+    .or(
+      `client_link_id.eq.${clientLinkId},request_payload->>client_link_id.eq.${clientLinkId}`
+    )
     .order("occurred_at", { ascending: false })
     .limit(limit);
 
@@ -614,10 +621,15 @@ export async function fetchClientProgress(
   // (guards against "enabled but the engine never runs" — LT Woodworks).
   const enrolled = clientLink.daily_recon_enabled === true;
   const dailyReconPaused = clientLink.daily_recon_paused === true;
+  // Counts on the client_link_id column as well as the payload. Payload-only
+  // undercounted, which made this report "enabled but the engine never ran"
+  // for clients whose recon events carried the client via their job instead.
   const { count: recentReconCount } = await service
     .from("audit_log")
     .select("id", { count: "exact", head: true })
-    .filter("request_payload->>client_link_id", "eq", clientLinkId)
+    .or(
+      `client_link_id.eq.${clientLinkId},request_payload->>client_link_id.eq.${clientLinkId}`
+    )
     .ilike("event_type", "%recon%")
     .gte("occurred_at", new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString());
   const reconFired = (recentReconCount ?? 0) > 0;

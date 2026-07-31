@@ -159,3 +159,58 @@ export function humanizeEventType(eventType: string): string {
   const s = eventType.replace(/_/g, " ").trim();
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+/** Payload keys that are plumbing, not content — they identify the row rather
+ *  than say what happened, so they never earn space in a one-line summary. */
+const NOISE_KEYS = new Set([
+  "client_link_id",
+  "client_name",
+  "job_id",
+  "reclass_job_id",
+  "coa_job_id",
+  "discovery_job_id",
+  "action_id",
+  "user_id",
+  "id",
+]);
+
+/**
+ * One line describing what an audit event actually did, from a free-form JSONB
+ * payload written by any of 143 call sites.
+ *
+ * Shared by /admin/audit and the per-client timeline on purpose: the same event
+ * described two different ways on two screens is how people stop trusting both.
+ * Recognised shapes are named explicitly; anything unrecognised degrades to its
+ * own keys and values rather than to "—", because an event whose detail exists
+ * but isn't rendered looks identical to one that carries no detail at all.
+ */
+export function summarizeAuditPayload(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "—";
+  const p = payload as Record<string, any>;
+
+  // Named shapes, most specific first.
+  if (p.old_name && p.new_name) return `"${p.old_name}" → "${p.new_name}"`;
+  if (p.source && p.target) return `"${p.source}" → "${p.target}"`;
+  if (p.from_account_name && p.to_account_name) {
+    return `${p.from_account_name} → ${p.to_account_name}`;
+  }
+  if (p.account_name && p.new_name) return `"${p.account_name}" → "${p.new_name}"`;
+  if (typeof p.message === "string") return p.message.slice(0, 200);
+  if (typeof p.reason === "string") return p.reason.slice(0, 200);
+  if (Array.isArray(p.changed)) return `changed: ${p.changed.join(", ")}`;
+  if (typeof p.target_email === "string") return `as ${p.target_email}`;
+
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(p)) {
+    if (NOISE_KEYS.has(k) || v === null || v === undefined || v === "") continue;
+    // Skip a nested object/array — a flattened blob is unreadable in a table
+    // cell, and the expandable detail below the row shows it in full anyway.
+    if (typeof v === "object") {
+      parts.push(`${k}: ${Array.isArray(v) ? `${v.length} item(s)` : "{…}"}`);
+    } else {
+      parts.push(`${k}: ${v}`);
+    }
+    if (parts.length === 6) break;
+  }
+  return parts.length ? parts.join(" · ").slice(0, 220) : "—";
+}

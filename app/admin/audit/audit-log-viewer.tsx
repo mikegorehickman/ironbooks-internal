@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Filter, Download, Clock, User as UserIcon, FileText, Database, X } from "lucide-react";
+import { Search, Filter, Download, Database, ChevronDown, ChevronRight } from "lucide-react";
+import { summarizeAuditPayload } from "@/lib/audit";
 
+/** Mirrors AuditFeedRow from lib/audit-query — the shape both the page and the
+ *  filter API now return, straight off audit_log rather than the capped view. */
 interface AuditEvent {
   id: string;
   event_type: string;
-  occurred_at: string;
+  occurred_at: string | null;
   user_id: string | null;
   user_name: string | null;
   user_role: string | null;
@@ -14,7 +17,6 @@ interface AuditEvent {
   action_id: string | null;
   client_link_id: string | null;
   client_name: string | null;
-  jurisdiction: string | null;
   request_payload: any;
   response_payload: any;
   error_message: string | null;
@@ -42,14 +44,17 @@ const EVENT_TYPES = [
 
 export function AuditLogViewer({
   initialEvents,
+  initialNotes = [],
   users,
   clients,
 }: {
   initialEvents: AuditEvent[];
+  initialNotes?: string[];
   users: User[];
   clients: Client[];
 }) {
   const [events, setEvents] = useState(initialEvents);
+  const [notes, setNotes] = useState<string[]>(initialNotes);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
     user_id: "",
@@ -58,7 +63,15 @@ export function AuditLogViewer({
     since: "",
     search: "",
   });
-  const [selected, setSelected] = useState<AuditEvent | null>(null);
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
+
+  function toggleRow(id: string) {
+    setOpenRows((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   async function applyFilters() {
     setLoading(true);
@@ -71,12 +84,14 @@ export function AuditLogViewer({
     const res = await fetch(`/api/admin/audit?${params}`);
     const data = await res.json();
     setEvents(data.events || []);
+    setNotes(data.error ? [data.error] : data.notes || []);
     setLoading(false);
   }
 
   function resetFilters() {
     setFilters({ user_id: "", client_link_id: "", event_type: "", since: "", search: "" });
     setEvents(initialEvents);
+    setNotes(initialNotes);
   }
 
   const filteredEvents = useMemo(() => {
@@ -93,14 +108,17 @@ export function AuditLogViewer({
   }, [events, filters.search]);
 
   function exportCSV() {
+    // client_id travels alongside client — an event whose name didn't resolve is
+    // still traceable, instead of exporting as an anonymous blank cell.
     const rows = [
-      ["timestamp", "user", "role", "event_type", "client", "job_id", "details"],
+      ["timestamp", "user", "role", "event_type", "client", "client_id", "job_id", "details"],
       ...filteredEvents.map((e) => [
-        e.occurred_at,
+        e.occurred_at || "",
         e.user_name || "system",
         e.user_role || "",
         e.event_type,
-        e.client_name || "",
+        e.client_name || (e.client_link_id ? "(unnamed client)" : "(no client — fleet-level)"),
+        e.client_link_id || "",
         e.job_id || "",
         JSON.stringify(e.request_payload || e.response_payload || ""),
       ]),
@@ -189,32 +207,48 @@ export function AuditLogViewer({
             Reset
           </button>
 
-          <button
-            onClick={exportCSV}
-            className="ml-auto inline-flex items-center gap-2 bg-teal hover:bg-teal-dark text-white text-xs font-semibold px-3 py-1.5 rounded-md"
-          >
-            <Download size={12} />
-            Export CSV
-          </button>
         </div>
       </div>
+
+      {/* Coverage notes — what this result does NOT include. Stated because a
+          short list with no explanation reads as "nothing happened". */}
+      {notes.length > 0 && (
+        <div className="mb-3 rounded-lg border border-[#DAB461]/40 bg-[#DAB461]/10 px-4 py-3">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-[#8A6D2F] mb-1">
+            Coverage
+          </div>
+          <ul className="space-y-1">
+            {notes.map((n, i) => (
+              <li key={i} className="text-xs text-[#6B5524] leading-relaxed">
+                {n}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Results count */}
       <div className="text-xs text-ink-slate mb-3 px-1">
         {filteredEvents.length} events{loading && " (loading...)"}
+        {filteredEvents.length > 0 && (
+          <>
+            {" · "}
+            {filteredEvents.filter((e) => e.client_link_id).length} tied to a client
+          </>
+        )}
       </div>
 
       {/* Events table */}
       <div className="rounded-xl overflow-hidden bg-white border border-gray-200">
         <div
           className="grid items-center px-5 py-3 text-xs font-bold uppercase tracking-wider bg-gray-50 text-ink-slate border-b border-gray-200"
-          style={{ gridTemplateColumns: "1.2fr 1.2fr 1.5fr 1.5fr 1fr" }}
+          style={{ gridTemplateColumns: "1fr 1.1fr 1.3fr 1.2fr 2.2fr" }}
         >
           <div>Time</div>
           <div>User</div>
           <div>Event</div>
-          <div>Target</div>
-          <div></div>
+          <div>Client</div>
+          <div>What changed</div>
         </div>
 
         {filteredEvents.length === 0 ? (
@@ -223,141 +257,168 @@ export function AuditLogViewer({
           filteredEvents.map((event) => (
             <div
               key={event.id}
-              className="grid items-center px-5 py-3 hover:bg-teal-lighter cursor-pointer border-b border-gray-100"
-              style={{ gridTemplateColumns: "1.2fr 1.2fr 1.5fr 1.5fr 1fr" }}
-              onClick={() => setSelected(event)}
+              className="border-b border-gray-100"
             >
-              <div className="text-xs text-navy">
-                <div className="font-medium">
-                  {new Date(event.occurred_at).toLocaleTimeString("en-US", {
-                    hour12: false,
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })}
+              <div
+                className="grid items-start px-5 py-3 hover:bg-teal-lighter cursor-pointer"
+                style={{ gridTemplateColumns: "1fr 1.1fr 1.3fr 1.2fr 2.2fr" }}
+                onClick={() => toggleRow(event.id)}
+              >
+                <div className="text-xs text-navy">
+                  <div className="font-medium">
+                    {new Date(event.occurred_at || 0).toLocaleTimeString("en-US", {
+                      hour12: false,
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </div>
+                  <div className="text-ink-light">
+                    {new Date(event.occurred_at || 0).toLocaleDateString()}
+                  </div>
                 </div>
-                <div className="text-ink-light">
-                  {new Date(event.occurred_at).toLocaleDateString()}
-                </div>
-              </div>
 
-              <div className="flex items-center gap-2">
-                {event.user_name ? (
-                  <>
-                    <div className="rounded-full flex items-center justify-center font-bold text-[10px] flex-shrink-0 w-6 h-6 bg-teal-light text-teal">
-                      {event.user_name.charAt(0)}
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-navy truncate">
-                        {event.user_name}
+                <div className="flex items-center gap-2">
+                  {event.user_name ? (
+                    <>
+                      <div className="rounded-full flex items-center justify-center font-bold text-[10px] flex-shrink-0 w-6 h-6 bg-teal-light text-teal">
+                        {event.user_name.charAt(0)}
                       </div>
-                      <div className="text-[10px] text-ink-slate capitalize">{event.user_role}</div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-navy truncate">
+                          {event.user_name}
+                        </div>
+                        <div className="text-[10px] text-ink-slate capitalize">
+                          {event.user_role}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-xs text-ink-light italic">System</span>
+                  )}
+                </div>
+
+                <div>
+                  <span
+                    className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                    style={getEventStyle(event.event_type)}
+                  >
+                    {event.event_type.replace(/_/g, " ")}
+                  </span>
+                </div>
+
+                <div className="text-xs min-w-0">
+                  {event.client_name ? (
+                    <div className="flex items-center gap-1 text-navy">
+                      <Database size={11} className="text-ink-light flex-shrink-0" />
+                      <span className="font-medium truncate">{event.client_name}</span>
                     </div>
-                  </>
-                ) : (
-                  <span className="text-xs text-ink-light italic">System</span>
-                )}
+                  ) : (
+                    <span className="text-[11px] text-ink-light italic">
+                      {event.client_link_id ? "unnamed client" : "fleet-level"}
+                    </span>
+                  )}
+                  {event.job_id && (
+                    <div className="text-ink-light text-[10px] mt-0.5 truncate">
+                      Job: {event.job_id.slice(0, 8)}…
+                    </div>
+                  )}
+                </div>
+
+                {/* The payload, rendered in the table. This is the column that
+                    used to require downloading the CSV to read. */}
+                <div className="flex items-start gap-2 min-w-0">
+                  <span className="text-ink-light mt-0.5 flex-shrink-0">
+                    {openRows.has(event.id) ? (
+                      <ChevronDown size={13} />
+                    ) : (
+                      <ChevronRight size={13} />
+                    )}
+                  </span>
+                  <span className="text-xs text-ink-slate break-words min-w-0">
+                    {event.error_message ? (
+                      <span className="text-[#954E44] font-medium">
+                        Failed: {String(event.error_message).slice(0, 180)}
+                      </span>
+                    ) : (
+                      summarizeAuditPayload(event.request_payload)
+                    )}
+                  </span>
+                </div>
               </div>
 
-              <div>
-                <span
-                  className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
-                  style={getEventStyle(event.event_type)}
-                >
-                  {event.event_type.replace(/_/g, " ")}
-                </span>
-                {event.request_payload?.message && (
-                  <div className="text-xs text-ink-slate mt-1 line-clamp-1">
-                    {event.request_payload.message}
+              {/* Full payload inline — nothing needs a modal or a download. */}
+              {openRows.has(event.id) && (
+                <div className="px-5 pb-4 bg-[#FBFCFD] border-t border-gray-100">
+                  <div className="grid grid-cols-2 gap-4 py-3">
+                    <Field label="Event Type" value={event.event_type} />
+                    <Field
+                      label="Timestamp"
+                      value={
+                        event.occurred_at
+                          ? new Date(event.occurred_at).toLocaleString()
+                          : "\u2014"
+                      }
+                    />
+                    <Field
+                      label="Client"
+                      value={event.client_name || event.client_link_id || "\u2014 fleet-level"}
+                    />
+                    <Field label="Job ID" value={event.job_id || "\u2014"} />
                   </div>
-                )}
-              </div>
-
-              <div className="text-xs">
-                {event.client_name && (
-                  <div className="flex items-center gap-1 text-navy">
-                    <Database size={11} className="text-ink-light" />
-                    <span className="font-medium truncate">{event.client_name}</span>
-                  </div>
-                )}
-                {event.job_id && (
-                  <div className="text-ink-light text-[10px] mt-0.5 truncate">
-                    Job: {event.job_id.slice(0, 8)}...
-                  </div>
-                )}
-              </div>
-
-              <div className="text-right">
-                <button className="text-xs font-semibold text-teal hover:text-teal-dark">
-                  View →
-                </button>
-              </div>
+                  {event.request_payload && (
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">
+                        Request payload
+                      </div>
+                      <pre className="bg-white border border-gray-200 rounded-md p-3 text-[11px] overflow-x-auto text-navy">
+                        {JSON.stringify(event.request_payload, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {event.response_payload && (
+                    <div className="mt-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-ink-slate mb-1">
+                        Response payload
+                      </div>
+                      <pre className="bg-white border border-gray-200 rounded-md p-3 text-[11px] overflow-x-auto text-navy">
+                        {JSON.stringify(event.response_payload, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {event.error_message && (
+                    <div className="mt-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-[#954E44] mb-1">
+                        Error
+                      </div>
+                      <pre className="bg-[#954E44]/8 border border-[#954E44]/25 rounded-md p-3 text-[11px] text-[#7A3F37] whitespace-pre-wrap">
+                        {event.error_message}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}
       </div>
 
-      {/* Event detail modal */}
-      {selected && <EventDetailModal event={selected} onClose={() => setSelected(null)} />}
-    </div>
-  );
-}
-
-function EventDetailModal({ event, onClose }: { event: AuditEvent; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-base font-bold text-navy">Event Details</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100">
-            <X size={18} className="text-ink-slate" />
+      {/* Export offered after the data, not instead of it. */}
+      {filteredEvents.length > 0 && (
+        <div className="mt-4 rounded-lg border border-gray-200 bg-[#F5F7F9] px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-xs text-ink-slate">
+            <span className="font-semibold text-navy">{filteredEvents.length} events</span> shown
+            above, with the full payload on any row. Need them outside SNAP?
+          </div>
+          <button
+            onClick={exportCSV}
+            className="inline-flex items-center gap-1.5 bg-teal hover:bg-teal-dark text-white text-xs font-semibold px-3 py-1.5 rounded-md flex-shrink-0"
+          >
+            <Download size={12} />
+            Export these {filteredEvents.length} as CSV
           </button>
         </div>
-
-        <div className="p-6 overflow-y-auto space-y-4">
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <Field label="Event Type" value={event.event_type} />
-            <Field label="Timestamp" value={new Date(event.occurred_at).toLocaleString()} />
-            <Field label="User" value={event.user_name || "System"} />
-            <Field label="Role" value={event.user_role || "—"} />
-            <Field label="Client" value={event.client_name || "—"} />
-            <Field label="Job ID" value={event.job_id || "—"} />
-          </div>
-
-          {event.request_payload && (
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wider text-ink-slate mb-2">
-                Request Payload
-              </div>
-              <pre className="bg-gray-50 rounded-lg p-3 text-xs overflow-x-auto text-navy">
-                {JSON.stringify(event.request_payload, null, 2)}
-              </pre>
-            </div>
-          )}
-
-          {event.response_payload && (
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wider text-ink-slate mb-2">
-                Response Payload
-              </div>
-              <pre className="bg-gray-50 rounded-lg p-3 text-xs overflow-x-auto text-navy">
-                {JSON.stringify(event.response_payload, null, 2)}
-              </pre>
-            </div>
-          )}
-
-          {event.error_message && (
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2">
-                Error
-              </div>
-              <pre className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
-                {event.error_message}
-              </pre>
-            </div>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

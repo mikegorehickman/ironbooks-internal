@@ -1,11 +1,13 @@
-import { createServerSupabase } from "@/lib/supabase";
+import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { queryAuditLog } from "@/lib/audit-query";
 import { NextResponse } from "next/server";
 
 /**
  * GET /api/admin/audit
  *
- * Searchable audit log. Filters: user_id, client_link_id, job_id, event_type, since, until.
- * Returns last 500 events by default.
+ * Searchable audit log. Filters: user_id, client_link_id, job_id, event_type,
+ * since, until. Returns the 200 most recent matches by default (max 2,000), and
+ * says so in `notes` when the cap bites — an unreported cap reads as complete.
  */
 export async function GET(request: Request) {
   const supabase = await createServerSupabase();
@@ -32,22 +34,24 @@ export async function GET(request: Request) {
   const until = searchParams.get("until");
   const limit = parseInt(searchParams.get("limit") || "200");
 
-  let query = supabase
-    .from("recent_activity_feed")
-    .select("*")
-    .order("occurred_at", { ascending: false })
-    .limit(Math.min(limit, 500));
+  // Reads audit_log directly via lib/audit-query. The previous implementation
+  // read `recent_activity_feed`, a 500-row view — so every filter here searched
+  // only the last ~29 hours of a 23,211-row log, and a client filter matched
+  // nothing at all because that view resolves the client only through job_id.
+  const { rows, notes, hasClientColumn } = await queryAuditLog(createServiceSupabase(), {
+    userId,
+    clientLinkId,
+    jobId,
+    eventType,
+    since,
+    until,
+    limit,
+  });
 
-  if (userId) query = query.eq("user_id", userId);
-  if (clientLinkId) query = query.eq("client_link_id", clientLinkId);
-  if (jobId) query = query.eq("job_id", jobId);
-  if (eventType) query = query.eq("event_type", eventType);
-  if (since) query = query.gte("occurred_at", since);
-  if (until) query = query.lte("occurred_at", until);
-
-  const { data: events, error } = await query;
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json({ events: events || [], count: events?.length || 0 });
+  return NextResponse.json({
+    events: rows,
+    count: rows.length,
+    notes,
+    client_attribution_complete: hasClientColumn,
+  });
 }
