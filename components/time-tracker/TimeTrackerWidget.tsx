@@ -380,8 +380,19 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
                 style={{ width: `${pct ?? 100}%` }}
               />
             </div>
+            {/* Over budget is a warning the bookkeeper should see WHILE working,
+                not a surprise at completion — by then the time is already spent
+                and the only option left is writing an explanation. */}
             {over && (
-              <div className="text-[11px] text-ink-slate mt-1">Completing will ask why this client needed the extra time.</div>
+              <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-rust-tint border border-rust-border px-2 py-1.5">
+                <AlertCircle size={12} className="text-rust shrink-0 mt-0.5" />
+                <div className="text-[11px] text-rust leading-snug">
+                  <span className="font-bold">
+                    {formatDuration(projected! - budgetMinutes * 60)} over this client&apos;s monthly budget.
+                  </span>{" "}
+                  Completing will ask why — worth flagging to a lead if it&apos;s becoming the norm.
+                </div>
+              </div>
             )}
           </div>
         )}

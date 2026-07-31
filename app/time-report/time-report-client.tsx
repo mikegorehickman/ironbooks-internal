@@ -30,7 +30,8 @@ interface ClientRow {
   byUser: ByUser[]; notes: NoteRow[];
 }
 interface StaffDay {
-  date: string; seconds: number; clientSeconds: number; overheadSeconds: number;
+  date: string; belowTarget?: boolean;
+  seconds: number; clientSeconds: number; overheadSeconds: number;
   sessions: number; clients: number; clientNames: string[];
 }
 interface StaffRow {
@@ -38,6 +39,7 @@ interface StaffRow {
   seconds: number; overheadSeconds: number; totalSeconds: number;
   sessions: number; clients: number;
   activeDays: number; avgSecondsPerActiveDay: number;
+  targetMinutes?: number; targetIsDefault?: boolean; daysBelowTarget?: number;
   busiestDay: { date: string; seconds: number } | null;
   byDay: StaffDay[];
   topClients: { clientLinkId: string; clientName: string; seconds: number }[];
@@ -232,7 +234,7 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
 
           {/* By bookkeeper — first, because "how is each person's month
               shaped" is the question this page gets opened for. */}
-          <StaffSection staff={data.staff} monthDays={data.monthDays} month={month} />
+          <StaffSection staff={data.staff} monthDays={data.monthDays} month={month} onTargetsChanged={() => void load(month)} />
 
           {/* Forgotten timers */}
           {data.zombies.length > 0 && (
@@ -460,10 +462,41 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
  * ISN'T logging is the adoption signal, and a table built only from existing
  * rows can never show it.
  */
-function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDays: string[]; month: string }) {
+function StaffSection({ staff, monthDays, month, onTargetsChanged }: { staff: StaffRow[]; monthDays: string[]; month: string; onTargetsChanged: () => void }) {
   const [open, setOpen] = useState(true);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [hideIdle, setHideIdle] = useState(false);
+  const [editTarget, setEditTarget] = useState<string | null>(null);
+  const [targetVal, setTargetVal] = useState("");
+  const [savingTarget, setSavingTarget] = useState(false);
+  const [targetErr, setTargetErr] = useState<string | null>(null);
+
+  const saveTarget = async (userId: string) => {
+    const raw = targetVal.trim();
+    // Entered in HOURS (what people actually say: "six hours a day"), stored in
+    // minutes. Blank inherits the default; 0 means no target.
+    const hours = raw === "" ? null : Number(raw);
+    if (raw !== "" && (!Number.isFinite(hours as number) || (hours as number) < 0 || (hours as number) > 24)) {
+      setTargetErr("Daily target must be between 0 and 24 hours (blank to inherit the default).");
+      return;
+    }
+    setSavingTarget(true); setTargetErr(null);
+    try {
+      const r = await fetch("/api/time-tracking/targets", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: [userId], dailyTargetMinutes: hours === null ? null : Math.round(hours * 60) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || "Failed to set the target");
+      setEditTarget(null);
+      onTargetsChanged();
+    } catch (e: any) {
+      setTargetErr(e?.message || "Failed to set the target");
+    } finally {
+      setSavingTarget(false);
+    }
+  };
 
   const logged = staff.filter((s) => s.totalSeconds > 0);
   const idle = staff.filter((s) => s.totalSeconds === 0);
@@ -487,6 +520,9 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
 
       {open && (
         <>
+          {targetErr && (
+            <div className="mx-4 mt-2.5 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">{targetErr}</div>
+          )}
           {idle.length > 0 && (
             <div className="px-4 pt-2.5 flex items-center justify-end">
               <label className="inline-flex items-center gap-1.5 text-xs text-ink-slate cursor-pointer">
@@ -543,10 +579,60 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
                             {s.busiestDay && (
                               <> · busiest {shortDate(s.busiestDay.date)} ({formatDuration(s.busiestDay.seconds)})</>
                             )}
+                            {/* Short days, flagged. Only days with SOME logging count —
+                                a blank day is a day off, not a shortfall. */}
+                            {!!s.daysBelowTarget && (
+                              <span
+                                className="ml-1.5 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 align-middle"
+                                title={`${s.daysBelowTarget} worked day(s) under the ${formatDuration((s.targetMinutes ?? 0) * 60)} daily target`}
+                              >
+                                <AlertTriangle size={9} /> {s.daysBelowTarget} short day{s.daysBelowTarget === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {editTarget === s.userId ? (
+                              <span className="ml-1.5 inline-flex items-center gap-1 align-middle">
+                                <input
+                                  autoFocus
+                                  value={targetVal}
+                                  onChange={(e) => setTargetVal(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter") void saveTarget(s.userId); if (e.key === "Escape") setEditTarget(null); }}
+                                  placeholder="hrs"
+                                  className="w-12 text-[11px] border border-gray-300 rounded px-1 py-0.5 text-right"
+                                />
+                                <span>h/day</span>
+                                <button onClick={() => void saveTarget(s.userId)} disabled={savingTarget} className="font-bold text-teal hover:underline disabled:opacity-50">
+                                  {savingTarget ? "…" : "Save"}
+                                </button>
+                                <button onClick={() => setEditTarget(null)} className="hover:text-navy">Cancel</button>
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setEditTarget(s.userId);
+                                  setTargetVal(s.targetIsDefault ? "" : String(+(((s.targetMinutes ?? 0) / 60).toFixed(2))));
+                                }}
+                                className="group ml-1.5 inline-flex items-center gap-1 text-[10px] hover:text-navy align-middle"
+                                title="Expected hours logged per working day"
+                              >
+                                target {formatDuration((s.targetMinutes ?? 0) * 60)}/day{s.targetIsDefault ? " (default)" : ""}
+                                <Pencil size={9} className="opacity-0 group-hover:opacity-100" />
+                              </button>
+                            )}
                           </div>
 
                           {/* Daily strip — one column per calendar day. */}
-                          <div className="mt-1.5 flex items-end gap-[2px] h-9" title="Hours logged per day">
+                          <div className="relative mt-1.5 flex items-end gap-[2px] h-9" title="Hours logged per day">
+                            {(() => {
+                              const t = (s.targetMinutes ?? 0) * 60;
+                              if (t <= 0 || t > peakDaySeconds) return null;
+                              return (
+                                <div
+                                  className="absolute left-0 right-0 border-t border-dashed border-ink-slate/50 pointer-events-none"
+                                  style={{ bottom: Math.round((t / peakDaySeconds) * 34) }}
+                                  title={`daily target ${formatDuration(t)}`}
+                                />
+                              );
+                            })()}
                             {monthDays.map((date) => {
                               const d = byDate.get(date);
                               const total = d?.seconds ?? 0;
@@ -569,7 +655,7 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
                                         <div className="w-full rounded-t-sm bg-navy/35" style={{ height: h - clientH }} />
                                       )}
                                       <div
-                                        className={`w-full bg-teal ${d!.overheadSeconds > 0 ? "" : "rounded-t-sm"}`}
+                                        className={`w-full ${d!.belowTarget ? "bg-amber-400" : "bg-teal"} ${d!.overheadSeconds > 0 ? "" : "rounded-t-sm"}`}
                                         style={{ height: clientH }}
                                       />
                                     </>
@@ -605,7 +691,12 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
                           {s.byDay.map((d) => (
                             <div key={d.date} className="flex items-center gap-2 text-xs text-ink-slate">
                               <span className="w-[70px] shrink-0 font-semibold text-navy">{shortDate(d.date)}</span>
-                              <span className="w-[60px] shrink-0 text-right font-mono">{formatDuration(d.seconds)}</span>
+                              <span
+                                className={`w-[60px] shrink-0 text-right font-mono ${d.belowTarget ? "font-bold text-amber-900" : ""}`}
+                                title={d.belowTarget ? "under the daily target" : undefined}
+                              >
+                                {formatDuration(d.seconds)}{d.belowTarget ? " ↓" : ""}
+                              </span>
                               <span className="w-[64px] shrink-0 text-right">{d.clients || "—"}</span>
                               <span className="flex-1 truncate" title={d.clientNames.join(", ")}>
                                 {d.clientNames.length > 0 ? d.clientNames.join(", ") : <span className="text-ink-slate">overhead only</span>}
@@ -626,7 +717,8 @@ function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDay
           <div className="px-4 py-2 border-t border-gray-100 flex items-center gap-3 text-[11px] text-ink-slate">
             <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-teal" /> client work</span>
             <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-navy/35" /> overhead</span>
-            <span>· one bar per day of {monthLabel(month)} · click a name for the day-by-day list</span>
+            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-400" /> under target</span>
+            <span>· dashed line = daily target · click a name for the day-by-day list</span>
           </div>
         </>
       )}
@@ -653,6 +745,8 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [onlySet, setOnlySet] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkVal, setBulkVal] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
@@ -667,6 +761,36 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
       setErr(e?.message || "Failed to load clients");
     }
   }, []);
+
+  /** Same budget on many clients at once — setting ~80 one at a time is the kind
+   *  of chore that gets abandoned half-done, leaving the fleet on a default
+   *  nobody chose. */
+  const saveBulk = async () => {
+    const raw = bulkVal.trim();
+    if (raw !== "" && (!Number.isInteger(Number(raw)) || Number(raw) < 0)) {
+      setErr("Budget must be a whole number of minutes (or blank to inherit the default).");
+      return;
+    }
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/time-tracking/budgets", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientLinkIds: ids, timeBudgetMinutes: raw === "" ? null : Number(raw) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || "Failed to set budgets");
+      setSelected(new Set());
+      setBulkVal("");
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to set budgets");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const save = async (clientLinkId: string) => {
     const raw = val.trim();
@@ -696,6 +820,7 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
     .filter((c) => (onlySet ? !c.budgetIsDefault : true))
     .filter((c) => (q ? c.clientName.toLowerCase().includes(q.toLowerCase()) : true));
   const customCount = (rows || []).filter((c) => !c.budgetIsDefault).length;
+  const allFilteredSelected = filtered.length > 0 && filtered.every((c) => selected.has(c.clientLinkId));
 
   return (
     <div className="rounded-xl border border-cardline bg-white overflow-hidden">
@@ -729,6 +854,48 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
               Only clients with a custom budget
             </label>
           </div>
+
+          {/* Select-all applies to what's FILTERED, not the whole fleet — so
+              "search 'painting' → select all → 180" does what it looks like. */}
+          {filtered.length > 0 && (
+            <div className="px-4 pb-2 flex items-center gap-3 flex-wrap">
+              <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-navy cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allFilteredSelected}
+                  onChange={() => setSelected(allFilteredSelected ? new Set() : new Set(filtered.map((c) => c.clientLinkId)))}
+                  className="accent-teal"
+                />
+                Select all {q || onlySet ? `${filtered.length} shown` : filtered.length}
+              </label>
+              {selected.size > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs text-ink-slate">
+                    {selected.size} selected →
+                  </span>
+                  <input
+                    value={bulkVal}
+                    onChange={(e) => setBulkVal(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void saveBulk(); }}
+                    placeholder="minutes"
+                    className="w-20 text-xs border border-gray-300 rounded px-1.5 py-1 text-right"
+                  />
+                  <button
+                    onClick={() => void saveBulk()}
+                    disabled={busy}
+                    className="text-xs font-bold px-2.5 py-1 rounded bg-teal text-white hover:bg-teal-dark disabled:opacity-50"
+                  >
+                    {busy ? "Saving…" : `Set ${selected.size}`}
+                  </button>
+                  <button onClick={() => setSelected(new Set())} className="text-xs text-ink-slate hover:text-navy">
+                    Clear
+                  </button>
+                  <span className="text-[11px] text-ink-slate">(blank = inherit the default)</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="max-h-[420px] overflow-auto divide-y divide-gray-50">
             {rows === null ? (
               <div className="px-4 py-6 text-center text-xs text-ink-slate">
@@ -738,7 +905,18 @@ function BudgetSetup({ defaultMinutes }: { defaultMinutes: number }) {
               <div className="px-4 py-6 text-center text-xs text-ink-slate">No matching clients.</div>
             ) : (
               filtered.map((c) => (
-                <div key={c.clientLinkId} className="px-4 py-2 flex items-center gap-3">
+                <div key={c.clientLinkId} className={`px-4 py-2 flex items-center gap-3 ${selected.has(c.clientLinkId) ? "bg-teal-lighter/40" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(c.clientLinkId)}
+                    onChange={() => setSelected((prev) => {
+                      const n = new Set(prev);
+                      n.has(c.clientLinkId) ? n.delete(c.clientLinkId) : n.add(c.clientLinkId);
+                      return n;
+                    })}
+                    className="accent-teal shrink-0"
+                    aria-label={`Select ${c.clientName}`}
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-semibold text-navy truncate">{c.clientName}</div>
                     {c.assignedBookkeeperName && (
