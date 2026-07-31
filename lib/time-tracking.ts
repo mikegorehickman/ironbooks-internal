@@ -196,6 +196,29 @@ export function currentMonth(nowMs: number, tz: string = BUSINESS_TZ): string {
   return attributionMonth(new Date(nowMs).toISOString(), tz);
 }
 
+/** "YYYY-MM-DD" the instant falls on, in `tz` — the per-day rollup key. Must use
+ *  the same timezone as month attribution or a 7pm session would land on
+ *  tomorrow (UTC) and the daily bars wouldn't match the calendar. */
+export function attributionDay(endedAtIso: string, tz: string = BUSINESS_TZ): string {
+  const dtf = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const p: Record<string, string> = {};
+  for (const part of dtf.formatToParts(new Date(endedAtIso))) p[part.type] = part.value;
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+/** Every "YYYY-MM-DD" in a month, in order — so a daily chart shows empty days
+ *  as gaps rather than silently omitting them. */
+export function daysInMonth(month: string): string[] {
+  const m = /^(\d{4})-(\d{2})$/.exec(month || "");
+  if (!m) throw new Error(`daysInMonth: bad month "${month}" (want YYYY-MM)`);
+  const y = +m[1];
+  const mo = +m[2];
+  const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  return Array.from({ length: last }, (_, i) => `${m[1]}-${m[2]}-${String(i + 1).padStart(2, "0")}`);
+}
+
 // ── Budget ──────────────────────────────────────────────────────────────────
 
 /** NULL budget → default. `??` on purpose: 0 is a real budget, `||` would eat it. */

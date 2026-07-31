@@ -12,6 +12,8 @@ import {
   applyResume,
   monthRangeUtc,
   attributionMonth,
+  attributionDay,
+  daysInMonth,
   currentMonth,
   isOverBudget,
   effectiveBudgetMinutes,
@@ -150,6 +152,26 @@ console.log("monthRangeUtc / attributionMonth");
 eq("Aug 1 02:00Z is July in Regina", attributionMonth("2026-08-01T02:00:00.000Z", "America/Regina"), "2026-07");
 eq("Aug 1 07:00Z is August in Regina", attributionMonth("2026-08-01T07:00:00.000Z", "America/Regina"), "2026-08");
 eq("currentMonth agrees with attributionMonth", currentMonth(Date.parse("2026-08-01T02:00:00.000Z"), "America/Regina"), "2026-07");
+
+// ── per-day rollup keys (staff daily chart) ─────────────────────────────────
+console.log("attributionDay / daysInMonth");
+// Same timezone rule as the month, or an evening session lands on tomorrow.
+eq("evening in Regina stays on the same local day",
+  attributionDay("2026-07-31T00:02:00.000Z", "America/Regina"), "2026-07-30");
+eq("after local midnight rolls to the next day",
+  attributionDay("2026-07-31T06:30:00.000Z", "America/Regina"), "2026-07-31");
+eq("midday is unambiguous", attributionDay("2026-07-15T18:00:00.000Z", "America/Regina"), "2026-07-15");
+eq("31-day month", daysInMonth("2026-07").length, 31);
+eq("30-day month", daysInMonth("2026-06").length, 30);
+eq("Feb non-leap", daysInMonth("2026-02").length, 28);
+eq("Feb leap", daysInMonth("2028-02").length, 29);
+eq("first day formatted", daysInMonth("2026-07")[0], "2026-07-01");
+eq("last day formatted", daysInMonth("2026-07")[30], "2026-07-31");
+{
+  let threw = false;
+  try { daysInMonth("nope"); } catch { threw = true; }
+  eq("malformed month rejected", threw, true);
+}
 
 // ── budget ──────────────────────────────────────────────────────────────────
 console.log("isOverBudget");

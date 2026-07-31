@@ -29,9 +29,18 @@ interface ClientRow {
   overBudget: boolean; overBySeconds: number;
   byUser: ByUser[]; notes: NoteRow[];
 }
+interface StaffDay {
+  date: string; seconds: number; clientSeconds: number; overheadSeconds: number;
+  sessions: number; clients: number; clientNames: string[];
+}
 interface StaffRow {
   userId: string; userName: string; role: string | null;
-  seconds: number; overheadSeconds: number; sessions: number; clients: number;
+  seconds: number; overheadSeconds: number; totalSeconds: number;
+  sessions: number; clients: number;
+  activeDays: number; avgSecondsPerActiveDay: number;
+  busiestDay: { date: string; seconds: number } | null;
+  byDay: StaffDay[];
+  topClients: { clientLinkId: string; clientName: string; seconds: number }[];
 }
 interface Zombie {
   entryId: string; clientName: string; userName: string; status: string;
@@ -59,6 +68,7 @@ interface Report {
   clients: ClientRow[];
   overhead: OverheadRow[];
   staff: StaffRow[];
+  monthDays: string[];
   zombies: Zombie[];
   entries: EntryRow[];
 }
@@ -84,7 +94,7 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
-  const [showStaff, setShowStaff] = useState(true);
+  const [showClients, setShowClients] = useState(true);
 
   const load = useCallback(async (m: string) => {
     setLoading(true);
@@ -220,6 +230,10 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
             <Kpi label="Still open" value={formatDuration(data.totals.openSeconds)} sub="running or paused now" />
           </div>
 
+          {/* By bookkeeper — first, because "how is each person's month
+              shaped" is the question this page gets opened for. */}
+          <StaffSection staff={data.staff} monthDays={data.monthDays} month={month} />
+
           {/* Forgotten timers */}
           {data.zombies.length > 0 && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
@@ -248,14 +262,23 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
             </div>
           )}
 
-          {/* Per-client */}
+          {/* Per-client — collapsible; the whole section folds away when the
+              bookkeeper view is what's being read. */}
           <div className="rounded-xl border border-cardline bg-white overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2">
+            <button
+              onClick={() => setShowClients((v) => !v)}
+              className="w-full px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 text-left hover:bg-gray-50/60"
+            >
+              {showClients ? <ChevronDown size={14} className="text-ink-light" /> : <ChevronRight size={14} className="text-ink-light" />}
               <Clock size={14} className="text-teal" />
               <span className="text-sm font-bold text-navy">By client</span>
-              <span className="text-[11px] text-ink-light">· actual vs monthly budget · click a row for detail</span>
-            </div>
-            {data.clients.length === 0 ? (
+              <span className="text-[11px] text-ink-light">
+                · actual vs monthly budget
+                {!showClients && data.clients.length > 0 && <> · {data.clients.length} client{data.clients.length === 1 ? "" : "s"}</>}
+                {data.totals.overBudgetClients > 0 && <span className="text-rust font-semibold"> · {data.totals.overBudgetClients} over</span>}
+              </span>
+            </button>
+            {!showClients ? null : data.clients.length === 0 ? (
               <div className="px-4 py-10 text-center text-xs text-ink-slate">
                 No time tracked in {monthLabel(month)}.
               </div>
@@ -415,44 +438,208 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
             </div>
           )}
 
-          {/* Per bookkeeper */}
-          <div className="rounded-xl border border-cardline bg-white overflow-hidden">
-            <button onClick={() => setShowStaff((s) => !s)} className="w-full px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 text-left">
-              {showStaff ? <ChevronDown size={14} className="text-ink-light" /> : <ChevronRight size={14} className="text-ink-light" />}
-              <Users size={14} className="text-teal" />
-              <span className="text-sm font-bold text-navy">By bookkeeper</span>
-            </button>
-            {showStaff && (
-              data.staff.length === 0 ? (
-                <div className="px-4 py-6 text-center text-xs text-ink-slate">Nothing tracked this month.</div>
-              ) : (
-                <div className="divide-y divide-gray-100">
-                  {data.staff.map((s) => (
-                    <div key={s.userId} className="px-4 py-2 flex items-center gap-3 text-xs">
-                      <span className="flex-1 min-w-0 truncate font-semibold text-navy">
-                        {s.userName}
-                        {s.role && <span className="ml-1.5 text-[10px] font-normal text-ink-light">{s.role}</span>}
-                      </span>
-                      <span className="text-[11px] text-ink-slate shrink-0">
-                        {s.clients} client{s.clients === 1 ? "" : "s"} · {s.sessions} session{s.sessions === 1 ? "" : "s"}
-                      </span>
-                      {s.overheadSeconds > 0 && (
-                        <span className="text-[10px] text-ink-light shrink-0 w-[76px] text-right">
-                          +{formatDuration(s.overheadSeconds)} other
-                        </span>
+
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * By bookkeeper — the shape of each person's month, not just a total.
+ *
+ * A single number ("Lisa: 15h") answers almost nothing useful. What a manager
+ * actually needs is the rhythm: which days were worked, how long each ran, how
+ * many clients got touched in a day, and how much of it was client work versus
+ * overhead. So each person gets a day-by-day bar strip across the month (teal =
+ * client, navy = overhead), headline stats averaged over days ACTUALLY worked —
+ * averaging over calendar days makes every part-timer look idle — and an
+ * expandable day list with the clients touched on each.
+ *
+ * Everyone doing production is listed, managers included, even at zero: who
+ * ISN'T logging is the adoption signal, and a table built only from existing
+ * rows can never show it.
+ */
+function StaffSection({ staff, monthDays, month }: { staff: StaffRow[]; monthDays: string[]; month: string }) {
+  const [open, setOpen] = useState(true);
+  const [expandedUser, setExpandedUser] = useState<string | null>(null);
+  const [hideIdle, setHideIdle] = useState(false);
+
+  const logged = staff.filter((s) => s.totalSeconds > 0);
+  const idle = staff.filter((s) => s.totalSeconds === 0);
+  const shown = hideIdle ? logged : staff;
+  // One scale across everyone, so bar heights are comparable person to person.
+  const peakDaySeconds = Math.max(1, ...staff.flatMap((s) => s.byDay.map((d) => d.seconds)));
+
+  return (
+    <div className="rounded-xl border border-cardline bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 text-left hover:bg-gray-50/60"
+      >
+        {open ? <ChevronDown size={14} className="text-ink-light" /> : <ChevronRight size={14} className="text-ink-light" />}
+        <Users size={14} className="text-teal" />
+        <span className="text-sm font-bold text-navy">By bookkeeper</span>
+        <span className="text-[11px] text-ink-light">
+          · {logged.length} logging{idle.length > 0 && <> · {idle.length} with nothing this month</>}
+        </span>
+      </button>
+
+      {open && (
+        <>
+          {idle.length > 0 && (
+            <div className="px-4 pt-2.5 flex items-center justify-end">
+              <label className="inline-flex items-center gap-1.5 text-[11px] text-ink-slate cursor-pointer">
+                <input type="checkbox" checked={hideIdle} onChange={(e) => setHideIdle(e.target.checked)} className="accent-teal" />
+                Hide the {idle.length} not logging
+              </label>
+            </div>
+          )}
+          {shown.length === 0 ? (
+            <div className="px-4 py-6 text-center text-xs text-ink-slate">No production staff found.</div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {shown.map((s) => {
+                const isOpen = expandedUser === s.userId;
+                const byDate = new Map(s.byDay.map((d) => [d.date, d]));
+                const nothing = s.totalSeconds === 0;
+                return (
+                  <div key={s.userId} className={nothing ? "bg-gray-50/40" : undefined}>
+                    <div className="px-4 py-2.5">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <button
+                          onClick={() => setExpandedUser(isOpen ? null : s.userId)}
+                          className="text-xs font-bold text-navy hover:text-teal inline-flex items-center gap-1"
+                          disabled={nothing}
+                        >
+                          {!nothing && (isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />)}
+                          {s.userName}
+                        </button>
+                        {s.role && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-light">{s.role}</span>
+                        )}
+                        <span className="flex-1" />
+                        {nothing ? (
+                          <span className="text-[11px] text-ink-light">nothing logged in {monthLabel(month)}</span>
+                        ) : (
+                          <>
+                            <span className="text-[11px] text-ink-slate">
+                              {formatDuration(s.seconds)} client
+                              {s.overheadSeconds > 0 && <> · {formatDuration(s.overheadSeconds)} other</>}
+                            </span>
+                            <span className="font-mono text-xs font-bold text-navy w-[70px] text-right">
+                              {formatDuration(s.totalSeconds)}
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {!nothing && (
+                        <>
+                          <div className="mt-1 text-[10px] text-ink-light">
+                            {s.activeDays} day{s.activeDays === 1 ? "" : "s"} worked · avg{" "}
+                            <span className="font-semibold text-ink-slate">{formatDuration(s.avgSecondsPerActiveDay)}</span>/day ·{" "}
+                            {s.clients} client{s.clients === 1 ? "" : "s"} · {s.sessions} session{s.sessions === 1 ? "" : "s"}
+                            {s.busiestDay && (
+                              <> · busiest {shortDate(s.busiestDay.date)} ({formatDuration(s.busiestDay.seconds)})</>
+                            )}
+                          </div>
+
+                          {/* Daily strip — one column per calendar day. */}
+                          <div className="mt-1.5 flex items-end gap-[2px] h-9" title="Hours logged per day">
+                            {monthDays.map((date) => {
+                              const d = byDate.get(date);
+                              const total = d?.seconds ?? 0;
+                              const h = total > 0 ? Math.max(3, Math.round((total / peakDaySeconds) * 34)) : 2;
+                              const clientH = total > 0 ? Math.round((d!.clientSeconds / total) * h) : 0;
+                              return (
+                                <div
+                                  key={date}
+                                  className="flex-1 min-w-[2px] flex flex-col justify-end cursor-default"
+                                  style={{ height: 34 }}
+                                  title={
+                                    total > 0
+                                      ? `${shortDate(date)} — ${formatDuration(total)}, ${d!.clients} client${d!.clients === 1 ? "" : "s"}`
+                                      : `${shortDate(date)} — nothing`
+                                  }
+                                >
+                                  {total > 0 ? (
+                                    <>
+                                      {d!.overheadSeconds > 0 && (
+                                        <div className="w-full rounded-t-sm bg-navy/35" style={{ height: h - clientH }} />
+                                      )}
+                                      <div
+                                        className={`w-full bg-teal ${d!.overheadSeconds > 0 ? "" : "rounded-t-sm"}`}
+                                        style={{ height: clientH }}
+                                      />
+                                    </>
+                                  ) : (
+                                    <div className="w-full rounded-sm bg-gray-100" style={{ height: 2 }} />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
                       )}
-                      <span className="font-mono font-bold text-navy shrink-0 w-[70px] text-right">{formatDuration(s.seconds)}</span>
                     </div>
-                  ))}
-                </div>
-              )
-            )}
+
+                    {isOpen && !nothing && (
+                      <div className="px-4 pb-3 pl-8 bg-gray-50/40 space-y-2">
+                        {s.topClients.length > 0 && (
+                          <div className="pt-2 flex flex-wrap gap-1.5">
+                            {s.topClients.map((c) => (
+                              <span key={c.clientLinkId} className="text-[10px] font-semibold bg-white border border-gray-200 rounded-full px-2 py-0.5 text-ink-slate">
+                                {c.clientName} · {formatDuration(c.seconds)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-wide text-ink-light">
+                            <span className="w-[70px] shrink-0">Day</span>
+                            <span className="w-[60px] shrink-0 text-right">Time</span>
+                            <span className="w-[64px] shrink-0 text-right">Clients</span>
+                            <span className="flex-1">Worked on</span>
+                          </div>
+                          {s.byDay.map((d) => (
+                            <div key={d.date} className="flex items-center gap-2 text-[11px] text-ink-slate">
+                              <span className="w-[70px] shrink-0 font-semibold text-navy">{shortDate(d.date)}</span>
+                              <span className="w-[60px] shrink-0 text-right font-mono">{formatDuration(d.seconds)}</span>
+                              <span className="w-[64px] shrink-0 text-right">{d.clients || "—"}</span>
+                              <span className="flex-1 truncate" title={d.clientNames.join(", ")}>
+                                {d.clientNames.length > 0 ? d.clientNames.join(", ") : <span className="text-ink-light">overhead only</span>}
+                                {d.overheadSeconds > 0 && d.clientNames.length > 0 && (
+                                  <span className="text-ink-light"> · +{formatDuration(d.overheadSeconds)} other</span>
+                                )}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="px-4 py-2 border-t border-gray-100 flex items-center gap-3 text-[10px] text-ink-light">
+            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-teal" /> client work</span>
+            <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-navy/35" /> overhead</span>
+            <span>· one bar per day of {monthLabel(month)} · click a name for the day-by-day list</span>
           </div>
         </>
       )}
     </div>
   );
 }
+
+const shortDate = (iso: string) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, (m || 1) - 1, d || 1)).toLocaleDateString(undefined, {
+    weekday: "short", month: "short", day: "numeric", timeZone: "UTC",
+  });
+};
 
 /**
  * Fleet budget setup. The "By client" table can only list clients with tracked

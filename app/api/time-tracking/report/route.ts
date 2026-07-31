@@ -6,8 +6,10 @@ import {
   monthRangeUtc,
   effectiveBudgetMinutes,
   elapsedSeconds,
+  overheadLabel,
+  attributionDay,
+  daysInMonth,
 } from "@/lib/time-tracking";
-import { overheadLabel } from "@/lib/time-tracking";
 import { requireTimerActor, sweepStaleEntries, tableMissing, ENTRY_COLS } from "@/lib/time-tracking-server";
 
 /**
@@ -207,37 +209,86 @@ export async function GET(request: Request) {
     }
     const overheadSeconds = [...overheadByCategory.values()].reduce((s, c) => s + c.seconds, 0);
 
-    // ── Per-bookkeeper rollup (client time, overhead, and the split) ──
-    const staff = new Map<string, {
+    // ── Per-bookkeeper rollup ──
+    // The question this answers isn't just "who logged the most" — it's how a
+    // person's month is actually shaped: which days they worked, how long, how
+    // many clients they touched in a day, and how much of it was client work vs
+    // overhead. Days are keyed in the business timezone (same rule as the month)
+    // so an evening session lands on the day the bookkeeper thinks it did.
+    type DayBucket = {
+      date: string;
+      seconds: number;
+      clientSeconds: number;
+      overheadSeconds: number;
+      sessions: number;
+      clients: Set<string>;
+    };
+    type Staff = {
       userId: string; userName: string; role: string | null;
-      seconds: number; overheadSeconds: number; sessions: number; clients: Set<string>;
-    }>();
-    const staffFor = (userId: string) => {
+      seconds: number; overheadSeconds: number; sessions: number;
+      clients: Set<string>;
+      days: Map<string, DayBucket>;
+      perClient: Map<string, number>;
+    };
+    const staff = new Map<string, Staff>();
+    const staffFor = (userId: string): Staff => {
       let s = staff.get(userId);
       if (!s) {
         s = {
           userId,
           userName: userName(userId),
           role: userById.get(userId)?.role ?? null,
-          seconds: 0,
-          overheadSeconds: 0,
-          sessions: 0,
+          seconds: 0, overheadSeconds: 0, sessions: 0,
           clients: new Set<string>(),
+          days: new Map<string, DayBucket>(),
+          perClient: new Map<string, number>(),
         };
         staff.set(userId, s);
       }
       return s;
     };
+    const dayFor = (s: Staff, iso: string | null): DayBucket | null => {
+      if (!iso) return null;
+      const date = attributionDay(iso);
+      let d = s.days.get(date);
+      if (!d) {
+        d = { date, seconds: 0, clientSeconds: 0, overheadSeconds: 0, sessions: 0, clients: new Set<string>() };
+        s.days.set(date, d);
+      }
+      return d;
+    };
+
     for (const e of completed) {
+      const secs = Math.max(0, e.accumulated_seconds | 0);
       const s = staffFor(e.user_id);
-      s.seconds += Math.max(0, e.accumulated_seconds | 0);
+      s.seconds += secs;
       s.sessions += 1;
       s.clients.add(e.client_link_id);
+      s.perClient.set(e.client_link_id, (s.perClient.get(e.client_link_id) || 0) + secs);
+      const d = dayFor(s, e.ended_at);
+      if (d) { d.seconds += secs; d.clientSeconds += secs; d.sessions += 1; d.clients.add(e.client_link_id); }
     }
     for (const e of overheadCompleted) {
+      const secs = Math.max(0, e.accumulated_seconds | 0);
       const s = staffFor(e.user_id);
-      s.overheadSeconds += Math.max(0, e.accumulated_seconds | 0);
+      s.overheadSeconds += secs;
       s.sessions += 1;
+      const d = dayFor(s, e.ended_at);
+      if (d) { d.seconds += secs; d.overheadSeconds += secs; d.sessions += 1; }
+    }
+
+    // Include every production person even at zero — "who ISN'T logging" is the
+    // adoption signal a rollup built only from existing rows can never show.
+    // Managers (lead) do production too, so they're in scope; billing_admin,
+    // viewer and client are not.
+    const { data: productionStaff } = await service
+      .from("users")
+      .select("id, full_name, role, is_active")
+      .in("role", ["admin", "lead", "bookkeeper"])
+      .eq("is_active", true);
+    for (const u of (productionStaff || []) as any[]) {
+      if (!userById.has(u.id)) userById.set(u.id, u);
+      staffFor(u.id); // creates a zero row if they logged nothing
     }
 
     // ── Forgotten timers (paused for a week+, or auto-paused) ──
@@ -279,9 +330,53 @@ export async function GET(request: Request) {
       clients: clientRows,
       /** Work belonging to no single client — never counted against a budget. */
       overhead: [...overheadByCategory.values()].sort((a, b) => b.seconds - a.seconds),
+      /** Calendar days of the month, so the daily chart can show empty days. */
+      monthDays: daysInMonth(month),
       staff: [...staff.values()]
-        .map((s) => ({ ...s, clients: s.clients.size }))
-        .sort((a, b) => b.seconds + b.overheadSeconds - (a.seconds + a.overheadSeconds)),
+        .map((s) => {
+          const byDay = [...s.days.values()].sort((a, b) => a.date.localeCompare(b.date));
+          const total = s.seconds + s.overheadSeconds;
+          const activeDays = byDay.filter((d) => d.seconds > 0).length;
+          const busiest = byDay.reduce<{ date: string; seconds: number } | null>(
+            (best, d) => (!best || d.seconds > best.seconds ? { date: d.date, seconds: d.seconds } : best),
+            null
+          );
+          return {
+            userId: s.userId,
+            userName: s.userName,
+            role: s.role,
+            seconds: s.seconds,               // client work
+            overheadSeconds: s.overheadSeconds,
+            totalSeconds: total,
+            sessions: s.sessions,
+            clients: s.clients.size,
+            activeDays,
+            // Averaged over days actually worked, not calendar days — otherwise
+            // part-timers and mid-month starters look idle.
+            avgSecondsPerActiveDay: activeDays > 0 ? Math.round(total / activeDays) : 0,
+            busiestDay: busiest,
+            byDay: byDay.map((d) => ({
+              date: d.date,
+              seconds: d.seconds,
+              clientSeconds: d.clientSeconds,
+              overheadSeconds: d.overheadSeconds,
+              sessions: d.sessions,
+              clients: d.clients.size,
+              clientNames: [...d.clients]
+                .map((id) => clientById.get(id)?.client_name || "Unknown client")
+                .sort(),
+            })),
+            topClients: [...s.perClient.entries()]
+              .map(([id, secs]) => ({
+                clientLinkId: id,
+                clientName: clientById.get(id)?.client_name || "Unknown client",
+                seconds: secs,
+              }))
+              .sort((a, b) => b.seconds - a.seconds),
+          };
+        })
+        // Anyone who logged nothing sinks to the bottom, but stays visible.
+        .sort((a, b) => b.totalSeconds - a.totalSeconds || a.userName.localeCompare(b.userName)),
       zombies,
       entries: allCompleted.map((e) => ({
         id: e.id,
@@ -310,7 +405,7 @@ export async function GET(request: Request) {
           trackedSeconds: 0, overheadSeconds: 0, clientSharePct: null, openSeconds: 0,
           sessions: 0, overheadSessions: 0, clients: 0, overBudgetClients: 0,
         },
-        clients: [], overhead: [], staff: [], zombies: [], entries: [],
+        clients: [], overhead: [], staff: [], zombies: [], entries: [], monthDays: [],
       });
     }
     console.error("[time-tracking/report]", err?.message);
