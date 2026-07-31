@@ -7,8 +7,9 @@ import { AdminSearch } from "./admin-search";
 import {
   Users, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Repeat,
   Landmark, ReceiptText, CheckCheck, ListChecks, Copy, TrendingUp, Unplug, Flag,
-  XCircle, Timer, CalendarCheck, Hourglass,
+  XCircle, Timer, CalendarCheck, Hourglass, ScrollText,
 } from "lucide-react";
+import { queryAuditLog } from "@/lib/audit-query";
 
 /**
  * /admin — the control room, not a trophy case. Exceptions that need an admin
@@ -46,7 +47,7 @@ export default async function AdminOverviewPage() {
     failedReviewClients,
     failedReviewRuns,
     lastReconRun,
-    { data: recentActivity },
+    recentTrail,
   ] = await Promise.all([
     supabase.from("coa_jobs").select("*", { count: "exact", head: true }).eq("status", "failed"),
     safe<any[]>(svc.from("client_links").select("id, client_name").eq("is_active", true).order("client_name"), []),
@@ -63,8 +64,11 @@ export default async function AdminOverviewPage() {
     safe<any[]>(svc.from("client_links").select("id, client_name").eq("is_active", true).eq("cleanup_review_state", "failed_review"), []),
     safe<any[]>(svc.from("monthly_rec_runs").select("client_link_id").eq("status", "failed_review"), []),
     safe<any[]>(svc.from("daily_recon_runs").select("created_at").order("created_at", { ascending: false }).limit(1), []),
-    supabase.from("recent_activity_feed").select("*").limit(15),
+    // Not `recent_activity_feed` — that view caps at 500 rows and resolves the
+    // client only through job_id, so most rows here showed no client at all.
+    queryAuditLog(svc, { limit: 15 }),
   ]);
+  const recentActivity = recentTrail.rows;
 
   // ── Exceptions — fleet attention states, aggregated ──
   const disconnected: { id: string; name: string }[] = [];
@@ -285,6 +289,7 @@ export default async function AdminOverviewPage() {
         {/* Admin tools — everything that used to have its own sidebar row. */}
         <div className="space-y-2">
           {[
+            { href: "/admin/audit", icon: ScrollText, title: "Audit log", desc: "Every action on every client — who, when, and what changed in QuickBooks · filter by user, client, date or event · CSV export" },
             { href: "/admin/close-coverage", icon: CalendarCheck, title: "Close coverage", desc: "Every client × month — the date they received their completed books · gaps flagged" },
             { href: "/time-report", icon: Hourglass, title: "Time report", desc: "Tracked bookkeeper time per client vs its monthly budget · who spent it · why anything ran over" },
             { href: "/admin/backfill-portal-package", icon: Mail, title: "Backfill portal packages", desc: "Publish P&L (+BS) to the portal + email clients whose close only went out as a plain summary email" },
@@ -348,7 +353,7 @@ export default async function AdminOverviewPage() {
                         </>
                       )}
                     </div>
-                    <div className="text-ink-light mt-0.5">{formatTimeAgo(event.occurred_at)}</div>
+                    <div className="text-ink-light mt-0.5">{event.occurred_at ? formatTimeAgo(event.occurred_at) : "—"}</div>
                   </div>
                 </div>
               </div>

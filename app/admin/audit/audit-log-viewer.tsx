@@ -3,10 +3,12 @@
 import { useState, useMemo } from "react";
 import { Search, Filter, Download, Clock, User as UserIcon, FileText, Database, X } from "lucide-react";
 
+/** Mirrors AuditFeedRow from lib/audit-query — the shape both the page and the
+ *  filter API now return, straight off audit_log rather than the capped view. */
 interface AuditEvent {
   id: string;
   event_type: string;
-  occurred_at: string;
+  occurred_at: string | null;
   user_id: string | null;
   user_name: string | null;
   user_role: string | null;
@@ -14,7 +16,6 @@ interface AuditEvent {
   action_id: string | null;
   client_link_id: string | null;
   client_name: string | null;
-  jurisdiction: string | null;
   request_payload: any;
   response_payload: any;
   error_message: string | null;
@@ -42,14 +43,17 @@ const EVENT_TYPES = [
 
 export function AuditLogViewer({
   initialEvents,
+  initialNotes = [],
   users,
   clients,
 }: {
   initialEvents: AuditEvent[];
+  initialNotes?: string[];
   users: User[];
   clients: Client[];
 }) {
   const [events, setEvents] = useState(initialEvents);
+  const [notes, setNotes] = useState<string[]>(initialNotes);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
     user_id: "",
@@ -71,12 +75,14 @@ export function AuditLogViewer({
     const res = await fetch(`/api/admin/audit?${params}`);
     const data = await res.json();
     setEvents(data.events || []);
+    setNotes(data.error ? [data.error] : data.notes || []);
     setLoading(false);
   }
 
   function resetFilters() {
     setFilters({ user_id: "", client_link_id: "", event_type: "", since: "", search: "" });
     setEvents(initialEvents);
+    setNotes(initialNotes);
   }
 
   const filteredEvents = useMemo(() => {
@@ -93,14 +99,17 @@ export function AuditLogViewer({
   }, [events, filters.search]);
 
   function exportCSV() {
+    // client_id travels alongside client — an event whose name didn't resolve is
+    // still traceable, instead of exporting as an anonymous blank cell.
     const rows = [
-      ["timestamp", "user", "role", "event_type", "client", "job_id", "details"],
+      ["timestamp", "user", "role", "event_type", "client", "client_id", "job_id", "details"],
       ...filteredEvents.map((e) => [
-        e.occurred_at,
+        e.occurred_at || "",
         e.user_name || "system",
         e.user_role || "",
         e.event_type,
-        e.client_name || "",
+        e.client_name || (e.client_link_id ? "(unnamed client)" : "(no client — fleet-level)"),
+        e.client_link_id || "",
         e.job_id || "",
         JSON.stringify(e.request_payload || e.response_payload || ""),
       ]),
@@ -199,9 +208,32 @@ export function AuditLogViewer({
         </div>
       </div>
 
+      {/* Coverage notes — what this result does NOT include. Stated because a
+          short list with no explanation reads as "nothing happened". */}
+      {notes.length > 0 && (
+        <div className="mb-3 rounded-lg border border-[#DAB461]/40 bg-[#DAB461]/10 px-4 py-3">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-[#8A6D2F] mb-1">
+            Coverage
+          </div>
+          <ul className="space-y-1">
+            {notes.map((n, i) => (
+              <li key={i} className="text-xs text-[#6B5524] leading-relaxed">
+                {n}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Results count */}
       <div className="text-xs text-ink-slate mb-3 px-1">
         {filteredEvents.length} events{loading && " (loading...)"}
+        {filteredEvents.length > 0 && (
+          <>
+            {" · "}
+            {filteredEvents.filter((e) => e.client_link_id).length} tied to a client
+          </>
+        )}
       </div>
 
       {/* Events table */}
@@ -229,7 +261,7 @@ export function AuditLogViewer({
             >
               <div className="text-xs text-navy">
                 <div className="font-medium">
-                  {new Date(event.occurred_at).toLocaleTimeString("en-US", {
+                  {new Date(event.occurred_at || 0).toLocaleTimeString("en-US", {
                     hour12: false,
                     hour: "2-digit",
                     minute: "2-digit",
@@ -237,7 +269,7 @@ export function AuditLogViewer({
                   })}
                 </div>
                 <div className="text-ink-light">
-                  {new Date(event.occurred_at).toLocaleDateString()}
+                  {new Date(event.occurred_at || 0).toLocaleDateString()}
                 </div>
               </div>
 
@@ -317,7 +349,7 @@ function EventDetailModal({ event, onClose }: { event: AuditEvent; onClose: () =
         <div className="p-6 overflow-y-auto space-y-4">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <Field label="Event Type" value={event.event_type} />
-            <Field label="Timestamp" value={new Date(event.occurred_at).toLocaleString()} />
+            <Field label="Timestamp" value={event.occurred_at ? new Date(event.occurred_at).toLocaleString() : "—"} />
             <Field label="User" value={event.user_name || "System"} />
             <Field label="Role" value={event.user_role || "—"} />
             <Field label="Client" value={event.client_name || "—"} />
