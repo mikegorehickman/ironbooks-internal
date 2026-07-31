@@ -24,6 +24,7 @@ interface NoteRow {
 }
 interface ClientRow {
   clientLinkId: string; clientName: string; isActive: boolean;
+  costCents?: number; feeCents?: number | null; marginPct?: number | null;
   budgetMinutes: number; budgetIsDefault: boolean;
   actualSeconds: number; openSeconds: number; sessions: number;
   overBudget: boolean; overBySeconds: number;
@@ -66,6 +67,7 @@ interface Report {
     trackedSeconds: number; overheadSeconds: number; clientSharePct: number | null;
     openSeconds: number; sessions: number; overheadSessions: number;
     clients: number; overBudgetClients: number;
+    costCents?: number; feeCents?: number; defaultHourlyCostCents?: number;
   };
   clients: ClientRow[];
   overhead: OverheadRow[];
@@ -74,6 +76,9 @@ interface Report {
   zombies: Zombie[];
   entries: EntryRow[];
 }
+
+/** Cents → "$1,234" (no cents shown: these are planning numbers, not invoices). */
+const money = (cents: number) => `$${Math.round(cents / 100).toLocaleString()}`;
 
 const monthLabel = (m: string) => {
   const [y, mo] = m.split("-").map(Number);
@@ -230,6 +235,22 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
             />
             <Kpi label="Over budget" value={String(data.totals.overBudgetClients)} sub="clients past their month" tone={data.totals.overBudgetClients > 0 ? "warn" : undefined} />
             <Kpi label="Still open" value={formatDuration(data.totals.openSeconds)} sub="running or paused now" />
+            {/* Cost to serve — hours priced at each person's loaded rate. Early
+                days until a few months of data exist; labelled as such. */}
+            {!!data.totals.costCents && (
+              <Kpi
+                label="Cost to serve"
+                value={money(data.totals.costCents)}
+                sub={
+                  data.totals.feeCents
+                    ? `of ${money(data.totals.feeCents)} billed · ${Math.round(((data.totals.feeCents - data.totals.costCents) / data.totals.feeCents) * 100)}% margin`
+                    : "fees unknown for these clients"
+                }
+                tone={
+                  data.totals.feeCents && data.totals.costCents > data.totals.feeCents * 0.6 ? "warn" : undefined
+                }
+              />
+            )}
           </div>
 
           {/* By bookkeeper — first, because "how is each person's month
@@ -352,6 +373,23 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
                           )}
                           {c.overBudget && (
                             <div className="text-[11px] font-bold text-rust">+{formatDuration(c.overBySeconds)}</div>
+                          )}
+                          {!!c.costCents && (
+                            <div
+                              className="text-[10px] text-ink-slate"
+                              title={
+                                c.feeCents
+                                  ? `${money(c.costCents)} of time against ${money(c.feeCents)}/mo`
+                                  : `${money(c.costCents)} of time · no fee on file`
+                              }
+                            >
+                              {money(c.costCents)} cost
+                              {c.marginPct != null && (
+                                <span className={c.marginPct < 40 ? " font-bold text-rust" : " text-ink-slate"}>
+                                  {" "}· {c.marginPct}% margin
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>

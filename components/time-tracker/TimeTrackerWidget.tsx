@@ -65,6 +65,10 @@ export function TimeTrackerWidget() {
   // 1. Over-budget note — blocking, because the rule is "explain or don't close".
   if (noteRequest) return <NoteModal />;
 
+  // 1b. Idle: a timer is running but nobody's been at the keyboard. Ask instead
+  // of silently banking it — or silently throwing it away.
+  if (t.idlePrompt && running) return <IdlePrompt entry={running} seconds={live} />;
+
   // 2. The "what are you working on?" picker (any client, or overhead).
   if (pickerOpen) return <WorkPicker />;
 
@@ -249,7 +253,12 @@ function StartPrompt() {
           className="w-full inline-flex items-center justify-center gap-2 bg-teal hover:bg-teal-dark text-white text-xs font-bold px-3 py-2.5 rounded-lg disabled:opacity-60"
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Start timer
+          <span className="text-white/50 font-normal">alt+T</span>
         </button>
+      </div>
+      <div className="px-4 pb-3 space-y-2" style={{ background: NAVY_GRADIENT }}>
+        <MyProgressPanel />
+        <NextUp />
       </div>
     </div>
   );
@@ -397,6 +406,9 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
           </div>
         )}
 
+        {/* Your own day/week — private. */}
+        <MyProgressPanel />
+
         {error && (
           <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">{error}</div>
         )}
@@ -543,4 +555,114 @@ function NoteModal() {
 /** Keep pills and buttons readable: "Charles and Crew Painting" → "Charles and Crew…" */
 function shortName(name: string): string {
   return name.length > 22 ? name.slice(0, 21).trimEnd() + "…" : name;
+}
+
+
+// ── Idle prompt ─────────────────────────────────────────────────────────────
+
+function IdlePrompt({ entry, seconds }: { entry: EntryView; seconds: number }) {
+  const t = useTimeTracker()!;
+  return (
+    <div className="fixed bottom-5 right-5 z-50 w-[320px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-amber-300 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+      <div className="px-4 py-3 bg-amber-50 border-b border-amber-200">
+        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-800">
+          <AlertCircle size={12} /> Still there?
+        </div>
+        <div className="mt-1 text-sm font-bold text-navy">{entry.label}</div>
+        <div className="text-[11px] text-amber-900">
+          {formatClock(seconds)} on the clock · no activity for a while
+        </div>
+      </div>
+      <div className="p-3 space-y-1.5">
+        <button
+          onClick={() => t.dismissIdle()}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-teal text-white text-xs font-bold hover:bg-teal-dark"
+        >
+          <Play size={13} /> Yes, keep timing
+        </button>
+        <button
+          onClick={() => t.pauseAtLastActivity()}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-navy text-xs font-semibold hover:border-gray-300"
+        >
+          <Pause size={13} /> Pause back at my last activity
+        </button>
+        <p className="text-[11px] text-ink-slate leading-snug pt-0.5">
+          Pausing drops the idle stretch instead of billing it — the honest answer
+          if you stepped away.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Private progress: today, this week, streak ───────────────────────────────
+// Yours only. Nothing here shows a teammate's numbers — a nudge you can act on,
+// not a ranking.
+
+function MyProgressPanel() {
+  const t = useTimeTracker()!;
+  const p = t.progress;
+  if (!p || p.targetMinutes <= 0) return null;
+  const todayPct = Math.min(100, Math.round((p.todaySeconds / (p.targetMinutes * 60)) * 100));
+  const weekPct = p.weekGoalMinutes > 0
+    ? Math.min(100, Math.round((p.weekSeconds / (p.weekGoalMinutes * 60)) * 100))
+    : 0;
+  const hitToday = p.todaySeconds >= p.targetMinutes * 60;
+  return (
+    <div className="rounded-lg bg-white/5 px-2.5 py-2 space-y-1.5">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-white/60">Today</span>
+        <span className={`font-mono font-bold ${hitToday ? "text-teal-light" : "text-white/90"}`}>
+          {formatDuration(p.todaySeconds)} / {formatDuration(p.targetMinutes * 60)}
+          {hitToday && " ✓"}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+        <div className={`h-full rounded-full ${hitToday ? "bg-teal-light" : "bg-teal"}`} style={{ width: `${todayPct}%` }} />
+      </div>
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-white/60">This week</span>
+        <span className="font-mono text-white/80">
+          {formatDuration(p.weekSeconds)} / {formatDuration(p.weekGoalMinutes * 60)}
+        </span>
+      </div>
+      <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+        <div className="h-full rounded-full bg-white/40" style={{ width: `${weekPct}%` }} />
+      </div>
+      <div className="flex items-center gap-2 text-[11px] text-white/60">
+        <span>{p.daysHitThisWeek} of {p.daysWorkedThisWeek || 0} days hit</span>
+        {p.streakDays > 1 && (
+          <span className="font-bold text-gold">🔥 {p.streakDays}-day streak</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── What next ───────────────────────────────────────────────────────────────
+// Offered right after a Complete, so the next client is one click rather than a
+// hunt. Least-tracked first — rotation, not ranking.
+
+function NextUp() {
+  const t = useTimeTracker()!;
+  if (t.running || t.suggestions.length === 0) return null;
+  return (
+    <div className="rounded-lg bg-white/5 px-2.5 py-2">
+      <div className="text-[11px] font-bold uppercase tracking-wide text-white/50 mb-1.5">Start next</div>
+      <div className="flex flex-wrap gap-1">
+        {t.suggestions.map((sug) => (
+          <button
+            key={sug.clientLinkId}
+            onClick={() => t.start({ clientLinkId: sug.clientLinkId })}
+            disabled={t.busy}
+            title={sug.loggedSeconds > 0 ? `${formatDuration(sug.loggedSeconds)} logged this month` : "nothing logged this month"}
+            className="text-[11px] font-semibold px-2 py-1 rounded bg-white/10 text-white/90 hover:bg-white/20 disabled:opacity-50"
+          >
+            {sug.clientName}
+            {sug.loggedSeconds === 0 && <span className="ml-1 text-gold">·new</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }

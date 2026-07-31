@@ -11,6 +11,9 @@ import {
   daysInMonth,
   effectiveDailyTargetMinutes,
   isBelowDailyTarget,
+  costOfSecondsCents,
+  marginPct,
+  DEFAULT_HOURLY_COST_CENTS,
 } from "@/lib/time-tracking";
 import { requireTimerActor, sweepStaleEntries, tableMissing, ENTRY_COLS } from "@/lib/time-tracking-server";
 
@@ -103,7 +106,10 @@ export async function GET(request: Request) {
         ? service.from("client_links").select("id, client_name, time_budget_minutes, is_active").in("id", clientIds)
         : Promise.resolve({ data: [] as any[] }),
       userIds.length
-        ? service.from("users").select("id, full_name, role").in("id", userIds)
+        ? service.from("users").select("id, full_name, role, hourly_cost_cents").in("id", userIds)
+            .then((r: any) => (r.error && /hourly_cost_cents/.test(r.error.message || "")
+              ? service.from("users").select("id, full_name, role").in("id", userIds)
+              : r))
         : Promise.resolve({ data: [] as any[] }),
     ]);
     const clientById = new Map<string, any>(((clients || []) as any[]).map((c) => [c.id, c]));
@@ -158,12 +164,20 @@ export async function GET(request: Request) {
       return r;
     };
 
+    // Cost to serve: price every entry at the rate of the person who did it, so
+    // a client worked mostly by a lead is correctly more expensive than one
+    // handled by a junior.
+    const rateOf = (userId: string): number =>
+      userById.get(userId)?.hourly_cost_cents ?? DEFAULT_HOURLY_COST_CENTS;
+    const costByClient = new Map<string, number>();
+
     const perUser = new Map<string, Map<string, { seconds: number; sessions: number }>>();
     for (const e of completed) {
       const r = rowFor(e.client_link_id);
       const secs = Math.max(0, e.accumulated_seconds | 0);
       r.actualSeconds += secs;
       r.sessions += 1;
+      costByClient.set(e.client_link_id, (costByClient.get(e.client_link_id) || 0) + costOfSecondsCents(secs, rateOf(e.user_id)));
       const byUser = perUser.get(e.client_link_id) || new Map();
       const cur = byUser.get(e.user_id) || { seconds: 0, sessions: 0 };
       byUser.set(e.user_id, { seconds: cur.seconds + secs, sessions: cur.sessions + 1 });
@@ -324,7 +338,31 @@ export async function GET(request: Request) {
         updatedAt: e.updated_at,
       }));
 
-    const clientRows = [...rows.values()].sort((a, b) => b.actualSeconds - a.actualSeconds);
+    // What each client actually pays. Authority order matches lib/upgrade-signals:
+    // the Stripe-synced MRR, else the manually recorded one. service_tier is often
+    // NULL, so a missing fee stays NULL — margin then reads "unknown" rather than
+    // a fake 0%.
+    const feeByClient = new Map<string, number>();
+    if (clientIds.length > 0) {
+      try {
+        const { data: subs } = await (service as any)
+          .from("billing_subscriptions")
+          .select("client_link_id, mrr_cents, manual_mrr_cents")
+          .in("client_link_id", clientIds);
+        for (const b of (subs || []) as any[]) {
+          const fee = b.mrr_cents ?? b.manual_mrr_cents ?? null;
+          if (fee != null) feeByClient.set(b.client_link_id, Number(fee));
+        }
+      } catch { /* billing not readable → margin stays unknown */ }
+    }
+
+    const clientRows = [...rows.values()]
+      .map((r) => {
+        const costCents = costByClient.get(r.clientLinkId) || 0;
+        const feeCents = feeByClient.get(r.clientLinkId) ?? null;
+        return { ...r, costCents, feeCents, marginPct: marginPct(feeCents, costCents) };
+      })
+      .sort((a, b) => b.actualSeconds - a.actualSeconds);
     const clientSeconds = clientRows.reduce((s, r) => s + r.actualSeconds, 0);
     return NextResponse.json({
       month,
@@ -343,6 +381,10 @@ export async function GET(request: Request) {
         overheadSessions: overheadCompleted.length,
         clients: clientRows.length,
         overBudgetClients: clientRows.filter((r) => r.overBudget).length,
+        // Cost to serve the whole fleet this month, and how much of the fees it eats.
+        costCents: clientRows.reduce((s2, r) => s2 + r.costCents, 0),
+        feeCents: clientRows.reduce((s2, r) => s2 + (r.feeCents ?? 0), 0),
+        defaultHourlyCostCents: DEFAULT_HOURLY_COST_CENTS,
       },
       clients: clientRows,
       /** Work belonging to no single client — never counted against a budget. */

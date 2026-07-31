@@ -28,6 +28,9 @@ import {
   effectiveBudgetMinutes,
   isOverBudget,
   overheadLabel,
+  attributionDay,
+  weekRangeUtc,
+  effectiveDailyTargetMinutes,
   type TimerFields,
 } from "./time-tracking";
 
@@ -269,10 +272,19 @@ export async function fetchPausedEntries(service: AnySupabase, userId: string): 
 export async function pauseEntry(
   service: AnySupabase,
   row: TimeEntryRow,
-  nowMs: number
+  nowMs: number,
+  opts: { asOfMs?: number } = {}
 ): Promise<TimeEntryRow | null> {
   if (row.status !== "running") return row;
-  const fold = finalizeSegment(row, nowMs);
+  // asOfMs backdates the pause to the last real activity — the honest answer
+  // when someone walked away and the idle prompt caught it. Clamped so it can
+  // never predate the segment or invent time past now.
+  const resumedMs = row.last_resumed_at ? Date.parse(row.last_resumed_at) : NaN;
+  const asOf =
+    opts.asOfMs != null && Number.isFinite(resumedMs)
+      ? Math.min(nowMs, Math.max(resumedMs, opts.asOfMs))
+      : nowMs;
+  const fold = finalizeSegment(row, asOf);
   const { data } = await (service as any)
     .from("time_entries")
     .update({
@@ -396,4 +408,91 @@ export async function discardEntry(
 /** Postgres unique-violation (the one-running-per-user index). */
 export function isUniqueViolation(err: any): boolean {
   return err?.code === "23505";
+}
+
+// ── Personal progress (the private nudge) ───────────────────────────────────
+
+export interface MyProgress {
+  /** Today, in the business timezone. */
+  todaySeconds: number;
+  /** Monday-start week containing today. */
+  weekSeconds: number;
+  targetMinutes: number;
+  targetIsDefault: boolean;
+  /** Derived: daily target × 5. No separate goal to maintain and drift. */
+  weekGoalMinutes: number;
+  /** Worked days this week that met the target. */
+  daysHitThisWeek: number;
+  /** Days this week with any logged time. */
+  daysWorkedThisWeek: number;
+  /** Consecutive met-target days ending today (days with nothing logged are
+   *  skipped, not treated as breaks — weekends and days off shouldn't reset it). */
+  streakDays: number;
+  perDay: { date: string; seconds: number; hit: boolean }[];
+}
+
+/**
+ * One person's own numbers, for the widget. Deliberately scoped to the caller:
+ * the nudge is private, and nothing here exposes a teammate's time.
+ *
+ * Counts COMPLETED sessions plus whatever is running right now, so the bar moves
+ * while you work rather than jumping only when you complete something.
+ */
+export async function myProgress(
+  service: AnySupabase,
+  userId: string,
+  nowMs: number,
+  opts: { targetMinutesRaw?: number | null } = {}
+): Promise<MyProgress> {
+  const week = weekRangeUtc(nowMs);
+  const today = attributionDay(new Date(nowMs).toISOString());
+
+  const { data } = await (service as any)
+    .from("time_entries")
+    .select("status, accumulated_seconds, last_resumed_at, last_heartbeat_at, ended_at, started_at")
+    .eq("user_id", userId)
+    .in("status", ["completed", "running", "paused"])
+    .gte("started_at", week.startUtc);
+
+  const byDay = new Map<string, number>();
+  for (const row of (data || []) as any[]) {
+    // Completed sessions land on the day they ended; in-flight ones on today,
+    // which is where their time is being spent.
+    const key =
+      row.status === "completed"
+        ? row.ended_at ? attributionDay(row.ended_at) : null
+        : today;
+    if (!key || !week.days.includes(key)) continue;
+    const secs = row.status === "running" ? elapsedSeconds(row, nowMs) : Math.max(0, row.accumulated_seconds | 0);
+    byDay.set(key, (byDay.get(key) || 0) + secs);
+  }
+
+  const targetMinutes = effectiveDailyTargetMinutes(opts.targetMinutesRaw);
+  const perDay = week.days.map((date) => {
+    const seconds = byDay.get(date) || 0;
+    return { date, seconds, hit: targetMinutes > 0 && seconds >= targetMinutes * 60 };
+  });
+
+  // Streak walks backwards from today; a day with nothing logged is skipped
+  // (weekend, day off) rather than breaking the run.
+  let streakDays = 0;
+  for (let i = perDay.length - 1; i >= 0; i--) {
+    const d = perDay[i];
+    if (d.date > today) continue;
+    if (d.seconds === 0) continue;
+    if (d.hit) streakDays++;
+    else break;
+  }
+
+  return {
+    todaySeconds: byDay.get(today) || 0,
+    weekSeconds: perDay.reduce((s, d) => s + d.seconds, 0),
+    targetMinutes,
+    targetIsDefault: opts.targetMinutesRaw == null,
+    weekGoalMinutes: targetMinutes * 5,
+    daysHitThisWeek: perDay.filter((d) => d.hit).length,
+    daysWorkedThisWeek: perDay.filter((d) => d.seconds > 0).length,
+    streakDays,
+    perDay,
+  };
 }

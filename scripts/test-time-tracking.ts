@@ -14,6 +14,12 @@ import {
   attributionMonth,
   attributionDay,
   daysInMonth,
+  weekRangeUtc,
+  workingDaysInMonth,
+  DEFAULT_HOURLY_COST_CENTS,
+  effectiveHourlyCostCents,
+  costOfSecondsCents,
+  marginPct,
   currentMonth,
   isOverBudget,
   effectiveBudgetMinutes,
@@ -243,6 +249,51 @@ eq("zero logged is NOT flagged (day off, not a shortfall)", isBelowDailyTarget(0
 eq("no target set (0) is never short", isBelowDailyTarget(60, 0), false);
 eq("custom 4h target: 3h is short", isBelowDailyTarget(3 * 3600, 240), true);
 eq("custom 4h target: 5h is fine", isBelowDailyTarget(5 * 3600, 240), false);
+
+// ── week ranges + working days (scoreboard goals) ───────────────────────────
+console.log("weekRangeUtc / workingDaysInMonth");
+{
+  // Wed 2026-07-15 → Monday-start week is Jul 13–19.
+  const w = weekRangeUtc(Date.parse("2026-07-15T18:00:00.000Z"), "America/Regina");
+  eq("week has 7 days", w.days.length, 7);
+  eq("week starts Monday", w.days[0], "2026-07-13");
+  eq("week ends Sunday", w.days[6], "2026-07-19");
+  eq("start is local midnight Monday", w.startUtc, "2026-07-13T06:00:00.000Z");
+  eq("end is local midnight the NEXT Monday (half-open)", w.endUtc, "2026-07-20T06:00:00.000Z");
+}
+{
+  // A Sunday must belong to the week that STARTED the previous Monday.
+  const w = weekRangeUtc(Date.parse("2026-07-19T18:00:00.000Z"), "America/Regina");
+  eq("Sunday belongs to the Mon-start week", w.days[0], "2026-07-13");
+}
+{
+  // Late-evening local time must not roll the week forward.
+  const w = weekRangeUtc(Date.parse("2026-07-20T02:00:00.000Z"), "America/Regina");
+  eq("7pm Sunday local is still last week", w.days[0], "2026-07-13");
+}
+eq("July 2026 has 23 working days", workingDaysInMonth("2026-07").length, 23);
+eq("no weekend days in the working list",
+  workingDaysInMonth("2026-07").some((d) => {
+    const [y, m, dd] = d.split("-").map(Number);
+    const dow = new Date(Date.UTC(y, m - 1, dd)).getUTCDay();
+    return dow === 0 || dow === 6;
+  }), false);
+
+// ── cost to serve ───────────────────────────────────────────────────────────
+console.log("costOfSecondsCents / marginPct");
+eq("default rate is $45/h", DEFAULT_HOURLY_COST_CENTS, 4500);
+eq("NULL rate inherits the default", effectiveHourlyCostCents(null), 4500);
+eq("0 rate is preserved (excluded from costing)", effectiveHourlyCostCents(0), 0);
+eq("one hour at the default costs $45", costOfSecondsCents(3600, null), 4500);
+eq("30 min at $60/h costs $30", costOfSecondsCents(1800, 6000), 3000);
+eq("0 rate costs nothing", costOfSecondsCents(7200, 0), 0);
+eq("negative seconds clamp to 0", costOfSecondsCents(-100, 4500), 0);
+// $497 fee against $100 of time = 80% margin.
+eq("margin computed", marginPct(49700, 10000), 80);
+eq("cost above fee is negative margin", marginPct(10000, 15000), -50);
+// An unknown fee must read as unknown, not as a 0% margin disaster.
+eq("no fee → null, never 0%", marginPct(null, 10000), null);
+eq("zero fee → null", marginPct(0, 10000), null);
 
 // ── formatting ──────────────────────────────────────────────────────────────
 console.log("formatClock / formatDuration");

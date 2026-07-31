@@ -211,6 +211,45 @@ export function attributionDay(endedAtIso: string, tz: string = BUSINESS_TZ): st
   return `${p.year}-${p.month}-${p.day}`;
 }
 
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const dayKey = (y: number, m0: number, d: number) => {
+  const dt = new Date(Date.UTC(y, m0, d));
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+};
+
+/**
+ * The Monday-start week containing `nowMs`, in `tz`. Weeks are the unit people
+ * actually plan in ("I'm behind for the week"), and a Monday start matches how
+ * the team talks about it.
+ */
+export function weekRangeUtc(nowMs: number, tz: string = BUSINESS_TZ): {
+  startUtc: string; endUtc: string; days: string[];
+} {
+  const today = attributionDay(new Date(nowMs).toISOString(), tz);
+  const [y, m, d] = today.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun
+  const backToMonday = (dow + 6) % 7;
+  const days = Array.from({ length: 7 }, (_, i) => dayKey(y, m - 1, d - backToMonday + i));
+  const first = days[0].split("-").map(Number);
+  const afterLast = dayKey(y, m - 1, d - backToMonday + 7).split("-").map(Number);
+  return {
+    startUtc: new Date(wallMidnightUtcMs(first[0], first[1], first[2], tz)).toISOString(),
+    endUtc: new Date(wallMidnightUtcMs(afterLast[0], afterLast[1], afterLast[2], tz)).toISOString(),
+    days,
+  };
+}
+
+/** Mon–Fri days in a month. Drives derived team goals: nobody should have to
+ *  maintain a separate goal number that silently drifts from the per-person
+ *  targets it's supposed to be the sum of. */
+export function workingDaysInMonth(month: string): string[] {
+  return daysInMonth(month).filter((iso) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    return dow !== 0 && dow !== 6;
+  });
+}
+
 /** Every "YYYY-MM-DD" in a month, in order — so a daily chart shows empty days
  *  as gaps rather than silently omitting them. */
 export function daysInMonth(month: string): string[] {
@@ -260,6 +299,35 @@ export function isBelowDailyTarget(
   if (target <= 0) return false;
   if (daySeconds <= 0) return false;
   return daySeconds < target * 60;
+}
+
+// ── Cost to serve (migration 149) ───────────────────────────────────────────
+// Hours only become a business number when they're priced. Cost to serve a
+// client = tracked time × the loaded hourly cost of whoever did the work;
+// compared against what the client pays, that's the real margin per client —
+// the input for pricing and upgrade conversations.
+
+/** Loaded hourly cost used when users.hourly_cost_cents is NULL. $45/h. */
+export const DEFAULT_HOURLY_COST_CENTS = 4500;
+
+/** `??` again — 0 is a valid rate (an owner not costed against production). */
+export function effectiveHourlyCostCents(cents: number | null | undefined): number {
+  return cents ?? DEFAULT_HOURLY_COST_CENTS;
+}
+
+/** Cost of a stretch of tracked time, in cents. */
+export function costOfSecondsCents(seconds: number, hourlyCents: number | null | undefined): number {
+  return Math.round((Math.max(0, seconds) / 3600) * effectiveHourlyCostCents(hourlyCents));
+}
+
+/**
+ * Gross margin percent for a client-month. Null when there's no fee to compare
+ * against — an unknown fee must read as "unknown", never as 0% margin (which
+ * would look like a disaster and put the wrong client at the top of the list).
+ */
+export function marginPct(feeCents: number | null | undefined, costCents: number): number | null {
+  if (feeCents == null || feeCents <= 0) return null;
+  return Math.round(((feeCents - costCents) / feeCents) * 100);
 }
 
 // ── Route → client context resolution ───────────────────────────────────────

@@ -42,6 +42,8 @@ const SKIP_PREFIXES = [
 ];
 
 const MINIMIZED_KEY = "snap.timer.minimized";
+/** No input for this long with a timer running → ask if they're still working. */
+const IDLE_MS = 10 * 60_000;
 const CHANNEL = "snap.timer";
 
 export interface EntryView {
@@ -66,6 +68,19 @@ export interface PageContext {
   mtdSeconds: number;
   budgetMinutes: number | null;
 }
+export interface MyProgress {
+  todaySeconds: number;
+  weekSeconds: number;
+  targetMinutes: number;
+  targetIsDefault: boolean;
+  weekGoalMinutes: number;
+  daysHitThisWeek: number;
+  daysWorkedThisWeek: number;
+  streakDays: number;
+  perDay: { date: string; seconds: number; hit: boolean }[];
+}
+export interface Suggestion { clientLinkId: string; clientName: string; loggedSeconds: number }
+
 export interface NoteRequest {
   entryId: string | null;
   clientName: string | null;
@@ -97,6 +112,14 @@ interface TimerCtx {
     opts?: { completeActive?: boolean; overBudgetNote?: string }
   ) => Promise<void>;
   categories: { key: string; label: string; hint: string }[];
+  /** The caller's OWN day/week progress — private, never a teammate's. */
+  progress: MyProgress | null;
+  suggestions: Suggestion[];
+  /** True when there's been no keyboard/mouse activity while a timer runs. */
+  idlePrompt: boolean;
+  dismissIdle: () => void;
+  /** Pause, backdated to the last real activity (drops the idle gap). */
+  pauseAtLastActivity: () => void;
   /** Lazy-loaded client list for the "any client from anywhere" picker. */
   clients: { id: string; client_name: string }[] | null;
   loadClients: () => void;
@@ -130,6 +153,10 @@ export function TimeTrackerProvider() {
   const [categories, setCategories] = useState<{ key: string; label: string; hint: string }[]>([]);
   const [clients, setClients] = useState<{ id: string; client_name: string }[] | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [progress, setProgress] = useState<MyProgress | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [idlePrompt, setIdlePrompt] = useState(false);
+  const lastActivityRef = useRef<number>(Date.now());
   const abortRef = useRef<AbortController | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
 
@@ -165,6 +192,8 @@ export function TimeTrackerProvider() {
     if ("running" in d) setRunning(d.running ?? null);
     if ("paused" in d) setPaused(d.paused ?? []);
     if (Array.isArray(d?.categories)) setCategories(d.categories);
+    if ("me" in d) setProgress(d.me ?? null);
+    if (Array.isArray(d?.suggestions)) setSuggestions(d.suggestions);
   }, []);
 
   /** Client list for the picker — fetched once, on first open. */
@@ -361,18 +390,86 @@ export function TimeTrackerProvider() {
   }, []);
   const dismissedForClient = useCallback((clientLinkId: string) => dismissed.has(clientLinkId), [dismissed]);
 
+  // ── Idle detection ──────────────────────────────────────────────────────
+  // Heartbeats keep firing whether or not anyone is at the keyboard, so a timer
+  // left running through a long lunch quietly banks it. Watching real input lets
+  // us ASK rather than guess, and pause back at the last activity if the answer
+  // is "no" — better than silently trusting or silently discarding.
+  const runningId = running?.id ?? null;
+  useEffect(() => {
+    if (!enabled) return;
+    const mark = () => {
+      lastActivityRef.current = Date.now();
+      if (idlePrompt) setIdlePrompt(false);
+    };
+    const evts = ["keydown", "mousedown", "mousemove", "wheel", "touchstart"] as const;
+    for (const e of evts) window.addEventListener(e, mark, { passive: true });
+    return () => { for (const e of evts) window.removeEventListener(e, mark); };
+  }, [enabled, idlePrompt]);
+
+  useEffect(() => {
+    if (!enabled || !runningId) { setIdlePrompt(false); return; }
+    const id = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > IDLE_MS) setIdlePrompt(true);
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [enabled, runningId]);
+
+  const dismissIdle = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    setIdlePrompt(false);
+  }, []);
+
+  const pauseAtLastActivity = useCallback(async () => {
+    if (!runningId) return;
+    setIdlePrompt(false);
+    const d = await act(`/api/time-tracking/${runningId}/pause`, { asOfMs: lastActivityRef.current });
+    if (d) { await loadState(); broadcast(); }
+  }, [runningId, act, loadState, broadcast]);
+
+  // ── Keyboard shortcuts ──────────────────────────────────────────────────
+  // Alt-chords only, and never while typing — the whole point is saving a trip
+  // to the mouse, not stealing keystrokes from a memo field.
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === "t") {
+        e.preventDefault();
+        if (running) { void complete(running.id); }
+        else if (context) { void start({ clientLinkId: context.clientLinkId }); }
+        else { loadClients(); setPickerOpen(true); }
+      } else if (k === "p") {
+        e.preventDefault();
+        if (running) void pause(running.id);
+        else if (paused[0]) void resume(paused[0].id);
+      } else if (k === "m") {
+        e.preventDefault();
+        setMinimized(!minimized);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [enabled, running, paused, context, minimized, complete, pause, resume, start, setMinimized, loadClients]);
+
   const value = useMemo<TimerCtx>(
     () => ({
       me, context, running, paused, offsetMs, busy, error, noteRequest, minimized,
       setMinimized, dismissedForClient, dismissPrompt,
       start, pause, resume, complete, discard,
       categories, clients, loadClients, pickerOpen, setPickerOpen,
+      progress, suggestions, idlePrompt, dismissIdle,
+      pauseAtLastActivity: () => { void pauseAtLastActivity(); },
       cancelNote: () => setNoteRequest(null),
       refresh: () => { void loadState(); },
     }),
     [me, context, running, paused, offsetMs, busy, error, noteRequest, minimized,
      setMinimized, dismissedForClient, dismissPrompt, start, pause, resume, complete, discard,
-     categories, clients, loadClients, pickerOpen, loadState]
+     categories, clients, loadClients, pickerOpen, loadState,
+     progress, suggestions, idlePrompt, dismissIdle, pauseAtLastActivity]
   );
 
   // Nothing to show for portal/public pages, or before we know the role (no

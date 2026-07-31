@@ -7,7 +7,7 @@ import {
   Shield, CreditCard, ChevronDown, ChevronRight, Sun, TrendingUp,
   HeartPulse, Gauge, BadgeCheck,
   ClipboardCheck, ListChecks, UserPlus, GraduationCap, Settings as SettingsIcon, Inbox, ListTodo, LifeBuoy, ExternalLink, Landmark, Mail,
-  Home as HomeIcon, Eye, FileText, CalendarClock, Hourglass,
+  Home as HomeIcon, Eye, FileText, CalendarClock, Hourglass, Trophy,
   PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
@@ -29,6 +29,7 @@ const dailyNav: { href: string; label: string; icon: any; senior?: boolean; newT
   { href: "/home", label: "Home", icon: HomeIcon },
   { href: "/board", label: "Pipelines", icon: ClipboardCheck },
   { href: "/clients", label: "Clients", icon: Users },
+  { href: "/scoreboard", label: "Scoreboard", icon: Trophy },
   { href: "/support", label: "Support", icon: LifeBuoy, newTab: true },
 ];
 

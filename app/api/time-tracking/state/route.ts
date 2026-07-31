@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
-import { OVERHEAD_CATEGORIES, currentMonth, resolvePathContext, type JobTable } from "@/lib/time-tracking";
+import { OVERHEAD_CATEGORIES, currentMonth, monthRangeUtc, resolvePathContext, type JobTable } from "@/lib/time-tracking";
 import {
   requireTimerActor,
   sweepStaleEntries,
@@ -9,6 +9,7 @@ import {
   clientMonthToDateSeconds,
   clientBudgetMinutes,
   toEntryView,
+  myProgress,
   tableMissing,
 } from "@/lib/time-tracking-server";
 
@@ -110,6 +111,19 @@ export async function GET(request: Request) {
       ]);
     }
 
+    // Own progress (the private nudge) + what to pick up next.
+    const { data: profile } = await service
+      .from("users")
+      .select("daily_target_minutes")
+      .eq("id", actor.userId)
+      .maybeSingle();
+    const me = await myProgress(service, actor.userId, nowMs, {
+      targetMinutesRaw: (profile as any)?.daily_target_minutes ?? null,
+    }).catch(() => null);
+    const suggestions = await nextClientSuggestions(service, actor.userId, nowMs, {
+      excludeClientLinkId: running?.client_link_id ?? clientLinkId ?? null,
+    }).catch(() => []);
+
     return NextResponse.json({
       serverNow,
       context: clientLinkId
@@ -117,6 +131,11 @@ export async function GET(request: Request) {
         : null,
       running: running ? toEntryView(running, nowMs, running.client_link_id ? names.get(running.client_link_id) : null) : null,
       paused: paused.map((p) => toEntryView(p, nowMs, p.client_link_id ? names.get(p.client_link_id) : null)),
+      /** The caller's OWN day/week progress — private; never a teammate's. */
+      me,
+      /** Assigned clients to jump to next, least-tracked first, so finishing one
+       *  session rolls into the next instead of hunting for it. */
+      suggestions,
       /** For the widget's "what are you working on?" picker on non-client pages. */
       categories: OVERHEAD_CATEGORIES,
     });
@@ -125,10 +144,53 @@ export async function GET(request: Request) {
       // Migration 146 not applied yet — the widget stays quiet instead of erroring.
       return NextResponse.json({
         serverNow, context: null, running: null, paused: [],
-        categories: OVERHEAD_CATEGORIES, setup_pending: true,
+        categories: OVERHEAD_CATEGORIES, me: null, suggestions: [], setup_pending: true,
       });
     }
     console.error("[time-tracking/state]", err?.message);
     return NextResponse.json({ error: "Failed to load timer state" }, { status: 500 });
   }
+}
+
+/**
+ * Clients this person is assigned to, ordered by LEAST time logged this month.
+ *
+ * Rotation, not ranking: the client nobody has touched this month is the one
+ * most likely to need attention, and offering it right after a Complete turns
+ * "what next?" into one click. Excludes whatever is already running or already
+ * on screen — suggesting the thing you're doing is noise.
+ */
+async function nextClientSuggestions(
+  service: any,
+  userId: string,
+  nowMs: number,
+  opts: { excludeClientLinkId?: string | null } = {}
+): Promise<{ clientLinkId: string; clientName: string; loggedSeconds: number }[]> {
+  const { data: mine } = await service
+    .from("client_links")
+    .select("id, client_name")
+    .eq("assigned_bookkeeper_id", userId)
+    .eq("is_active", true)
+    .order("client_name");
+  const clients: any[] = mine || [];
+  if (clients.length === 0) return [];
+
+  const range = monthRangeUtc(currentMonth(nowMs));
+  const { data: monthRows } = await (service as any)
+    .from("time_entries")
+    .select("client_link_id, accumulated_seconds")
+    .eq("status", "completed")
+    .gte("ended_at", range.startUtc)
+    .lt("ended_at", range.endUtc);
+  const logged = new Map<string, number>();
+  for (const r of (monthRows || []) as any[]) {
+    if (!r.client_link_id) continue;
+    logged.set(r.client_link_id, (logged.get(r.client_link_id) || 0) + Math.max(0, r.accumulated_seconds | 0));
+  }
+
+  return clients
+    .filter((c) => c.id !== opts.excludeClientLinkId)
+    .map((c) => ({ clientLinkId: c.id, clientName: c.client_name, loggedSeconds: logged.get(c.id) || 0 }))
+    .sort((a, b) => a.loggedSeconds - b.loggedSeconds || a.clientName.localeCompare(b.clientName))
+    .slice(0, 3);
 }

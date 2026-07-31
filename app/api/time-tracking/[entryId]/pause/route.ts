@@ -18,7 +18,7 @@ import {
  */
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: { params: Promise<{ entryId: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ entryId: string }> }) {
   const { entryId } = await context.params;
   const supabase = await createServerSupabase();
   const service = createServiceSupabase();
@@ -32,12 +32,14 @@ export async function POST(_request: Request, context: { params: Promise<{ entry
   const nowMs = Date.now();
 
   try {
+    const body = await request.json().catch(() => ({}));
+    const asOfMs = Number(body?.asOfMs);
     const row = await fetchEntry(service, entryId);
     if (!row) return NextResponse.json({ error: "Timer not found" }, { status: 404 });
     if (row.user_id !== auth.actor.userId) {
       return NextResponse.json({ error: "Forbidden — not your timer" }, { status: 403 });
     }
-    const updated = (await pauseEntry(service, row, nowMs)) ?? (await fetchEntry(service, entryId));
+    const updated = (await pauseEntry(service, row, nowMs, Number.isFinite(asOfMs) ? { asOfMs } : {})) ?? (await fetchEntry(service, entryId));
     return NextResponse.json({
       serverNow: new Date(nowMs).toISOString(),
       entry: updated ? toEntryView(updated, nowMs) : null,
