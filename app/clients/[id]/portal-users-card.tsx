@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Users, UserPlus, Mail, Loader2, Check, AlertTriangle, Trash2, X, KeyRound,
+  LayoutList, Pencil, Lock,
 } from "lucide-react";
+import { PORTAL_PAGES, PORTAL_PAGE_KEYS, ALWAYS_ALLOWED_LABELS } from "@/lib/portal-pages";
 
 /**
  * Profile-tab card: the client account's portal users. Admins/leads can add
@@ -22,6 +24,8 @@ type PortalUser = {
   first_login_at: string | null;
   last_login_at: string | null;
   has_logged_in: boolean;
+  /** Page keys this user may open; null = every portal page. */
+  allowed_pages: string[] | null;
 };
 
 export function PortalUsersCard({
@@ -40,6 +44,11 @@ export function PortalUsersCard({
   const [fullName, setFullName] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  // Page access for the new user — everything pre-selected (full access).
+  const [addPages, setAddPages] = useState<string[]>(PORTAL_PAGE_KEYS);
+
+  // "Edit page access" modal target
+  const [editingPages, setEditingPages] = useState<PortalUser | null>(null);
 
   // "User added — send login email?" popup
   const [justAdded, setJustAdded] = useState<{ user_id: string; name: string; email: string } | null>(null);
@@ -69,7 +78,12 @@ export function PortalUsersCard({
       const res = await fetch(`/api/clients/${clientLinkId}/portal-users`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), full_name: fullName.trim() }),
+        body: JSON.stringify({
+          email: email.trim(),
+          full_name: fullName.trim(),
+          // Full selection is stored as "all pages" server-side.
+          allowed_pages: addPages,
+        }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "Couldn't add user");
@@ -77,6 +91,7 @@ export function PortalUsersCard({
       const addedEmail = email.trim();
       setEmail("");
       setFullName("");
+      setAddPages(PORTAL_PAGE_KEYS);
       await load();
       // Open the "send login email" popup for the user we just added.
       setJustAdded({ user_id: json.user_id, name: addedName, email: addedEmail });
@@ -99,7 +114,8 @@ export function PortalUsersCard({
       </div>
 
       <p className="text-[11px] text-ink-light mb-3">
-        Everyone here signs in to the client portal with the same access. Additional users are free.
+        Everyone here signs in to the client portal. Each user can be limited to specific
+        pages ({ALWAYS_ALLOWED_LABELS.join(" and ")} are always available). Additional users are free.
       </p>
 
       {loading ? (
@@ -119,6 +135,7 @@ export function PortalUsersCard({
               clientLinkId={clientLinkId}
               canManage={canManage}
               onChanged={load}
+              onEditPages={() => setEditingPages(u)}
             />
           ))}
         </ul>
@@ -147,6 +164,16 @@ export function PortalUsersCard({
               className="w-full text-sm rounded-lg border border-gray-200 px-2.5 py-1.5 text-navy placeholder:text-ink-light focus:outline-none focus:border-teal"
             />
           </div>
+          {/* Which portal pages this user may open — all checked = full access */}
+          <div className="mt-3">
+            <div className="text-[11px] font-semibold text-ink-slate mb-1.5 flex items-center gap-1.5">
+              <LayoutList size={13} /> Page access
+              <span className="font-normal text-ink-light">
+                — {addPages.length === PORTAL_PAGE_KEYS.length ? "all pages" : `${addPages.length} of ${PORTAL_PAGE_KEYS.length} pages`}
+              </span>
+            </div>
+            <PageChecklist selected={addPages} onChange={setAddPages} />
+          </div>
           {addError && (
             <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{addError}</div>
           )}
@@ -168,6 +195,175 @@ export function PortalUsersCard({
           onClose={() => { setJustAdded(null); load(); }}
         />
       )}
+
+      {editingPages && (
+        <EditPagesModal
+          clientLinkId={clientLinkId}
+          user={editingPages}
+          onClose={() => setEditingPages(null)}
+          onSaved={() => { setEditingPages(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Human summary of a user's page access — "All pages" or "4 of 11 pages". */
+function pagesSummary(allowed: string[] | null): string {
+  if (!allowed) return "All pages";
+  const count = allowed.filter((k) => PORTAL_PAGE_KEYS.includes(k)).length;
+  if (count >= PORTAL_PAGE_KEYS.length) return "All pages";
+  return `${count} of ${PORTAL_PAGE_KEYS.length} pages`;
+}
+
+/**
+ * Grouped checkbox grid of restrictable portal pages, mirroring the portal
+ * sidebar's sections, with locked-on rows for the always-available pages
+ * and quick "All / None" toggles.
+ */
+function PageChecklist({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const sections = Array.from(new Set(PORTAL_PAGES.map((p) => p.section)));
+
+  function toggle(key: string) {
+    onChange(selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key]);
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50/50 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <button
+          type="button"
+          onClick={() => onChange(PORTAL_PAGE_KEYS)}
+          className="text-[10px] font-bold uppercase tracking-wide text-teal hover:underline"
+        >
+          Select all
+        </button>
+        <span className="text-[10px] text-ink-light">·</span>
+        <button
+          type="button"
+          onClick={() => onChange([])}
+          className="text-[10px] font-bold uppercase tracking-wide text-ink-slate hover:underline"
+        >
+          None
+        </button>
+        <span className="ml-auto text-[10px] text-ink-light flex items-center gap-1">
+          <Lock size={10} /> {ALWAYS_ALLOWED_LABELS.join(" & ")} always included
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+        {sections.map((section) => (
+          <div key={section}>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-ink-light mb-1">
+              {section}
+            </div>
+            <div className="space-y-0.5">
+              {PORTAL_PAGES.filter((p) => p.section === section).map((p) => (
+                <label
+                  key={p.key}
+                  className="flex items-center gap-2 text-xs text-navy cursor-pointer select-none py-0.5"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(p.key)}
+                    onChange={() => toggle(p.key)}
+                    className="rounded border-gray-300 text-teal focus:ring-teal"
+                  />
+                  {p.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Modal to edit an existing portal user's page access (PATCH). */
+function EditPagesModal({
+  clientLinkId,
+  user,
+  onClose,
+  onSaved,
+}: {
+  clientLinkId: string;
+  user: PortalUser;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [selected, setSelected] = useState<string[]>(
+    user.allowed_pages === null
+      ? PORTAL_PAGE_KEYS
+      : user.allowed_pages.filter((k) => PORTAL_PAGE_KEYS.includes(k))
+  );
+  const [state, setState] = useState<"idle" | "saving" | "error">("idle");
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function save() {
+    if (state === "saving") return;
+    setState("saving");
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/clients/${clientLinkId}/portal-users`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ user_id: user.user_id, allowed_pages: selected }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Couldn't save");
+      onSaved();
+    } catch (e: any) {
+      setState("error");
+      setMsg(e?.message || "Couldn't save");
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/30 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl border border-gray-100 shadow-xl w-full max-w-md p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-1">
+          <h4 className="text-sm font-bold text-navy flex items-center gap-2">
+            <LayoutList size={15} /> Page access
+          </h4>
+          <button onClick={onClose} className="text-ink-light hover:text-navy"><X size={16} /></button>
+        </div>
+        <p className="text-xs text-ink-slate mb-3">
+          Choose which portal pages <strong className="text-navy">{user.full_name || user.email}</strong> can
+          open. Changes apply on their next page load.
+        </p>
+
+        <PageChecklist selected={selected} onChange={setSelected} />
+
+        {msg && (
+          <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{msg}</div>
+        )}
+
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            onClick={save}
+            disabled={state === "saving"}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 text-[11px] font-bold px-3 py-2 rounded-lg bg-teal text-white hover:bg-teal-dark disabled:opacity-50"
+          >
+            {state === "saving" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+            Save page access
+          </button>
+          <button
+            onClick={onClose}
+            className="text-[11px] font-semibold px-3 py-2 rounded-lg border border-gray-200 text-ink-slate hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -177,11 +373,13 @@ function UserRow({
   clientLinkId,
   canManage,
   onChanged,
+  onEditPages,
 }: {
   user: PortalUser;
   clientLinkId: string;
   canManage: boolean;
   onChanged: () => void;
+  onEditPages: () => void;
 }) {
   const [sending, setSending] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [removing, setRemoving] = useState(false);
@@ -250,10 +448,24 @@ function UserRow({
           {user.email}
           {" · "}
           {user.has_logged_in ? "has logged in" : <span className="text-amber-600">not logged in yet</span>}
+          {" · "}
+          <span className={user.allowed_pages ? "text-amber-700 font-medium" : ""}>
+            {pagesSummary(user.allowed_pages)}
+          </span>
         </div>
         {msg && <div className="text-[11px] text-red-600 mt-0.5">{msg}</div>}
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
+        {canManage && (
+          <button
+            onClick={onEditPages}
+            title="Choose which portal pages this user can open"
+            className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border border-gray-200 text-ink-slate hover:text-navy hover:border-gray-300"
+          >
+            <Pencil size={12} />
+            Pages
+          </button>
+        )}
         <button
           onClick={sendLogin}
           disabled={sending === "sending"}
