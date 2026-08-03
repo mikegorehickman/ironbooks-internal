@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { isPortalPathAllowed } from "@/lib/portal-pages";
 
 /**
  * Routing rules (with client portal):
@@ -110,6 +111,20 @@ export async function middleware(request: NextRequest) {
         url.pathname = "/portal";
         return NextResponse.redirect(url);
       }
+      // Per-user page permissions (client_users.allowed_pages). This is the
+      // SERVER-SIDE gate — the sidebar hides blocked links, but a typed URL
+      // must also bounce. Overview/Settings/Onboarding are always allowed;
+      // NULL allowed_pages = full access, so this only ever costs a second
+      // query for users who actually have restrictions… and one lookup for
+      // everyone else. Blocked page → back to /portal (Overview).
+      if (isPortal && pathname !== "/portal") {
+        const allowedPages = await lookupAllowedPages(user.id);
+        if (!isPortalPathAllowed(allowedPages, pathname)) {
+          const url = request.nextUrl.clone();
+          url.pathname = "/portal";
+          return NextResponse.redirect(url);
+        }
+      }
     } else {
       // Internal staff: bounce them OUT of /portal/* — UNLESS they have
       // the impersonation cookie set (admin/lead only path). The portal
@@ -150,6 +165,32 @@ async function lookupRole(userId: string): Promise<string | null> {
     );
     const { data } = await svc.from("users").select("role").eq("id", userId).single();
     return (data as any)?.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch the client user's page permissions (client_users.allowed_pages).
+ * Returns null for "full access" — including on any error (e.g. migration
+ * 154 not applied yet), so the portal never breaks for unrestricted users.
+ */
+async function lookupAllowedPages(userId: string): Promise<string[] | null> {
+  try {
+    const svc = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    );
+    const { data, error } = await svc
+      .from("client_users")
+      .select("allowed_pages")
+      .eq("user_id", userId)
+      .eq("active", true)
+      .maybeSingle();
+    if (error) return null;
+    const pages = (data as any)?.allowed_pages;
+    return Array.isArray(pages) ? pages : null;
   } catch {
     return null;
   }
