@@ -13,6 +13,7 @@ import {
   FileText, Loader2, PlayCircle, RotateCcw, Send, Sparkles, XCircle,
 } from "lucide-react";
 import { playSound } from "@/lib/sounds";
+import { DEFAULT_BOILERPLATE, assuranceProblems } from "@/lib/statement-notices";
 import { VerificationPanel, vFixLink } from "./verification-panel";
 
 type CheckStatus = "pass" | "warn" | "fail";
@@ -176,6 +177,17 @@ export function ClientRecCard({
   // (duplicate expenses/revenue, COGS band, net-margin band); each must be
   // approved with a reason or fixed + re-verified before sending.
   const [redFlags, setRedFlags] = useState<any[] | null>(null);
+  // Notice to Reader — the client-visible letter that rides the close
+  //  (migration 156): boilerplate + AI-suggested section + custom, all edited
+  //  here. Boilerplate is the backbone — panel closed or boilerplate empty
+  //  means no notice this month.
+  const [ntrOpen, setNtrOpen] = useState(false);
+  const [ntrTouched, setNtrTouched] = useState(false);
+  const [ntrBoilerplate, setNtrBoilerplate] = useState("");
+  const [ntrAi, setNtrAi] = useState("");
+  const [ntrCustom, setNtrCustom] = useState("");
+  const [ntrGenBusy, setNtrGenBusy] = useState(false);
+  const [ntrGenError, setNtrGenError] = useState("");
   // Draft-with-a-question path — sends DRAFT numbers, month stays open.
   const [draftQuestion, setDraftQuestion] = useState("");
   const [draftBusy, setDraftBusy] = useState(false);
@@ -185,6 +197,39 @@ export function ClientRecCard({
     setLocalRun(client.run);
     setConcerns(client.run?.concerns || "");
   }, [client.run]);
+
+  // Entering the review step: prefill the notice boilerplate, and default the
+  // panel OPEN when the month has something worth telling the client about
+  // (failing checks or internal concerns) — closed otherwise so a clean month's
+  // send isn't lengthened.
+  useEffect(() => {
+    if (!reviewing) return;
+    setNtrBoilerplate((cur) => cur || DEFAULT_BOILERPLATE(client.client_name, periodLabel(period)));
+    if (!ntrTouched) {
+      const flagged = !!(concerns.trim() || (localRun?.checks?.overall && localRun.checks.overall !== "pass"));
+      if (flagged) setNtrOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewing]);
+
+  async function generateNtrDraft() {
+    setNtrGenBusy(true);
+    setNtrGenError("");
+    try {
+      const res = await fetch(`/api/clients/${client.id}/notice-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setNtrAi(json.draft || "");
+    } catch (e: any) {
+      setNtrGenError(e?.message || "Couldn't draft — write it manually.");
+    } finally {
+      setNtrGenBusy(false);
+    }
+  }
 
   const run = localRun;
   const checks = run?.checks?.checks || [];
@@ -282,6 +327,11 @@ export function ClientRecCard({
           attested: true,
           attest_scope: attestScope,
           concerns,
+          // Notice to Reader rides the close; null = none this month.
+          ntr:
+            ntrOpen && ntrBoilerplate.trim()
+              ? { boilerplate: ntrBoilerplate, ai: ntrAi, custom: ntrCustom }
+              : null,
           ...(overrideReason ? { override_reason: overrideReason } : {}),
           ...(managerOverrideReason ? { manager_override_reason: managerOverrideReason } : {}),
         }),
@@ -319,6 +369,13 @@ export function ClientRecCard({
           throw new Error("Send cancelled — ask Kedma to review, or provide an override reason.");
         }
         throw new Error(json.error || `HTTP ${res.status}`);
+      }
+      if (json.notice_error) {
+        setSendWarning(
+          "Month closed and statements sent — but the Notice to Reader did NOT save (" +
+            json.notice_error +
+            "). Nothing promised it to the client; re-send the month to attach it."
+        );
       }
       if (json.email_delivery && !json.email_delivery.sent) {
         setSendWarning(
@@ -705,6 +762,93 @@ export function ClientRecCard({
                 )}
               </div>
 
+              {/* Notice to Reader — the client-visible letter that ships WITH
+                  the close (unlike the internal Concerns above, the client
+                  reads every word). Modal-on-open in their portal until they
+                  acknowledge it; replies come back to /today and email the
+                  sender. Composed here, before attestation, because the notice
+                  is part of reviewing the month — attesting is the last
+                  gesture before send. */}
+              <div className="bg-white border border-gray-200 rounded-xl px-3 py-3 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => { setNtrOpen((v) => !v); setNtrTouched(true); }}
+                  className="w-full flex items-center gap-1.5 text-left"
+                >
+                  <span className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${ntrOpen ? "bg-teal text-white" : "bg-gray-200 text-ink-slate"}`}>
+                    {ntrOpen ? "✓" : "+"}
+                  </span>
+                  <span className="text-xs font-bold text-navy">
+                    {ntrOpen ? "Notice to Reader — going to the client with this close" : "Add a Notice to Reader (client-visible)"}
+                  </span>
+                </button>
+                {ntrOpen && (
+                  <div className="space-y-2.5 pt-1">
+                    <div>
+                      <div className="text-[11px] font-semibold text-ink-slate mb-1">Standard notice (edit as needed)</div>
+                      <textarea
+                        value={ntrBoilerplate}
+                        onChange={(e) => setNtrBoilerplate(e.target.value)}
+                        rows={5}
+                        maxLength={8000}
+                        className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:border-teal focus:outline-none leading-relaxed"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-semibold text-ink-slate">This month (AI-suggested — edit before sending)</span>
+                        <button
+                          type="button"
+                          onClick={generateNtrDraft}
+                          disabled={ntrGenBusy}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-teal hover:underline disabled:opacity-50"
+                        >
+                          {ntrGenBusy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                          {ntrAi ? "Regenerate" : "Generate from this month's checks"}
+                        </button>
+                      </div>
+                      <textarea
+                        value={ntrAi}
+                        onChange={(e) => setNtrAi(e.target.value)}
+                        rows={5}
+                        maxLength={8000}
+                        placeholder="What we noticed / what we need from you — generate a draft or write it here."
+                        className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:border-teal focus:outline-none leading-relaxed"
+                      />
+                      {ntrGenError && (
+                        <div className="mt-1 text-[11px] text-red-700">{ntrGenError}</div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold text-ink-slate mb-1">Anything else (optional)</div>
+                      <textarea
+                        value={ntrCustom}
+                        onChange={(e) => setNtrCustom(e.target.value)}
+                        rows={2}
+                        maxLength={8000}
+                        placeholder="A personal note, a heads-up about next month…"
+                        className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:border-teal focus:outline-none leading-relaxed"
+                      />
+                    </div>
+                    {(() => {
+                      // Soft compliance guard: an NTR must never CLAIM assurance
+                      // ("we have audited…"). The fixtures enforce the default
+                      // text; this catches hand-edits before they ship.
+                      const problems = assuranceProblems(`${ntrBoilerplate}\n${ntrAi}\n${ntrCustom}`);
+                      return problems.length > 0 ? (
+                        <div className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                          ⚠ This wording implies assurance we don&apos;t provide: {problems.map((w) => `"${w}"`).join(", ")}.
+                          A Notice to Reader must disclaim audit/review — please rephrase.
+                        </div>
+                      ) : null;
+                    })()}
+                    <div className="text-[11px] text-ink-light">
+                      The client sees this when they open their P&amp;L — every visit until they acknowledge it — and can reply to you from it.
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Attest the scope that's actually accurate. When a Balance
                   Sheet is present the senior can attest the full set OR just
                   the P&L (e.g. BS not yet reconciled but the P&L is good to
@@ -849,6 +993,7 @@ export function ClientRecCard({
                 <Send size={11} />
                 Sent to client{run?.sent_to_client_at ? ` · ${new Date(run.sent_to_client_at).toLocaleString()}` : ""}
               </div>
+              <NoticeAckLine clientId={client.id} period={period} />
               {run?.email_delivery && !run.email_delivery.sent && (
                 <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
                   No email went out ({run.email_delivery.reason === "no_portal_user" ? "client has no portal login" : "send failed"}) — the portal notification is there, but consider reaching them another way.
@@ -1577,5 +1722,33 @@ export function EligibleRow({
         </Link>
       )}
     </li>
+  );
+}
+
+
+/** One quiet line under "Sent to client": has anyone actually READ the Notice
+ *  to Reader? Fetched lazily; renders nothing when the month shipped without a
+ *  notice (or pre-migration-156). Ack counts respect the resend rule, so a
+ *  re-sent notice honestly reads "unviewed" again. */
+function NoticeAckLine({ clientId, period }: { clientId: string; period: string }) {
+  const [label, setLabel] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/clients/${clientId}/notice-status?period=${period}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d?.notice) return;
+        const replied = d.notice.first_reply_at ? " · client replied" : "";
+        setLabel(`${d.summary?.label || "Notice sent"}${replied}`);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clientId, period]);
+  if (!label) return null;
+  return (
+    <div className="text-[11px] text-ink-slate flex items-center gap-1.5">
+      <FileText size={11} className="text-teal shrink-0" />
+      {label}
+    </div>
   );
 }

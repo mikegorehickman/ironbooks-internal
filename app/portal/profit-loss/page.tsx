@@ -36,6 +36,15 @@ import { NoClosedPeriodState } from "../no-closed-period";
  */
 export const dynamic = "force-dynamic";
 
+// Notice to Reader: fetched server-side and passed as props so there's no
+// fetch flash before the modal decides whether to open. LATEST-SENT notice,
+// range-independent — a client parked on YTD must still see it. The receipt is
+// per-USER (many portal users per client), and "acked" honours the resend rule
+// (acknowledged_at >= sent_at).
+import { createServerSupabase } from "@/lib/supabase";
+import { isAcked } from "@/lib/statement-notices";
+import { fetchLatestNotice, fetchReceipt } from "@/lib/statement-notices-server";
+
 export default async function ProfitLossPage() {
   const ctxResult = await tryResolvePortalContext();
   if (!ctxResult.ok) return <PortalErrorState code={ctxResult.code} message={ctxResult.message} />;
@@ -90,6 +99,29 @@ export default async function ProfitLossPage() {
   const [thisMonthPL, quarterPL, ytdPL, lastYearPL] = await othersPromise;
   const accounts = (await accountsPromise) || [];
 
+  // Notice to Reader (fail-soft: pre-migration-156 environments render no notice).
+  let noticeProp: { view: any; acked: boolean } | null = null;
+  try {
+    const notice = await fetchLatestNotice(service, ctx.clientLinkId);
+    if (notice) {
+      const { data: { user } } = await (await createServerSupabase()).auth.getUser();
+      const receipt = user ? await fetchReceipt(service, notice.id, user.id) : null;
+      noticeProp = {
+        view: {
+          id: notice.id,
+          period_year: notice.period_year,
+          period_month: notice.period_month,
+          boilerplate_body: notice.boilerplate_body,
+          ai_body: notice.ai_body,
+          custom_body: notice.custom_body,
+          sent_by_name: notice.sent_by_name,
+          sent_at: notice.sent_at,
+        },
+        acked: isAcked(receipt, notice),
+      };
+    }
+  } catch { /* never let the notice break the P&L */ }
+
   const ranges: Record<string, DateRange> = {
     lastMonth: { ...closed.effectiveMonth, label: `Last month (${closed.effectiveMonth.label})` },
     thisMonth,
@@ -112,6 +144,8 @@ export default async function ProfitLossPage() {
         }}
         accounts={accounts as any}
         closedSource={closed.base.source}
+        notice={noticeProp}
+        impersonating={!!ctx.impersonating}
       />
       {ctx.impersonating && (
         <StatementReviewNotes clientLinkId={ctx.clientLinkId} kind="pl" statementLabel="P&L" />

@@ -12,7 +12,14 @@ export interface MonthEndEmailParams {
   recipientEmail: string;
   recipientFirstName: string;
   period: PeriodBounds;
-  aiSummaryExcerpt: string;
+  /**
+   * The send attached a Notice to Reader. Adds ONE teaser line — never the
+   * notice's content. (This slot used to be `aiSummaryExcerpt`, which was never
+   * rendered — deliberately deleted rather than resurrected: the call site fed
+   * it pkg.ai_summary, which discusses figures, and rendering it would have
+   * broken the no-figures rule this email is built on.)
+   */
+  includesNotice?: boolean;
   portalUrl: string;
   /**
    * Is a balance sheet actually visible to this client in the portal?
@@ -66,6 +73,9 @@ export async function sendMonthEndEmail(
       ? [`• Balance sheet — what the business owns and owes`]
       : []),
     `• A plain-English summary of what changed and why`,
+    ...(params.includesNotice
+      ? [`• A Notice to Reader from your bookkeeping team — read and reply in your portal`]
+      : []),
     ``,
     `Not sure what a number means? Reply to this email, or ask in the portal — that's what it's there for.`,
     ``,
@@ -91,6 +101,10 @@ export async function sendMonthEndEmail(
           ? ([["Balance sheet", "What the business owns and what it owes, side by side."]] as Array<[string, string]>)
           : []),
         ["A summary of what changed", "Written out, so you don't have to interpret the numbers yourself."],
+        // One teaser line only — the notice's CONTENT never rides in email.
+        ...(params.includesNotice
+          ? ([["A Notice to Reader from your bookkeeping team", "A short letter about your month — open your P&amp;L in the portal to read and reply."]] as Array<[string, string]>)
+          : []),
       ]) +
       emailParagraph(
         `They live in your portal rather than attached here &mdash; that keeps your numbers behind your own login instead of sitting in an inbox.`

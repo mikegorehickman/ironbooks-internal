@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import { resolvePortalContextAllowNoQbo } from "@/lib/portal-context";
 import { createServiceSupabase } from "@/lib/supabase";
+import { FileText } from "lucide-react";
+import { fetchNoticeForPeriod } from "@/lib/statement-notices-server";
 import { fetchPublishedPackage } from "@/lib/month-end/portal-package";
 import { PortalErrorState } from "../../../error-state";
 import type { PlSnapshot, BsSnapshot, ArApSnapshot } from "@/lib/month-end/types";
@@ -23,12 +25,22 @@ export default async function PortalStatementsPage({
   }
 
   const service = createServiceSupabase();
+
   const pkg = await fetchPublishedPackage(
     service,
     ctxResult.ctx.clientLinkId,
     periodYear,
     periodMonth
   );
+
+  // This period's Notice to Reader, read-only (the P&L carries the reply box).
+  // Fail-soft: pre-migration environments simply show no card.
+  const notice = await fetchNoticeForPeriod(
+    service,
+    ctxResult.ctx.clientLinkId,
+    periodYear,
+    periodMonth
+  ).catch(() => null);
 
   if (!pkg) {
     return (
@@ -58,6 +70,24 @@ export default async function PortalStatementsPage({
         </div>
         <h1 className="text-2xl font-bold text-navy mt-2">{pkg.label} Statements</h1>
       </div>
+
+      {notice && (
+        <div className="bg-white border border-cardline rounded-2xl p-6">
+          <div className="text-xs font-bold text-teal-dark uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <FileText size={13} />
+            Notice to Reader
+            {notice.sent_by_name ? <span className="normal-case font-semibold text-ink-slate tracking-normal">· from {notice.sent_by_name}</span> : null}
+          </div>
+          <div className="text-sm text-navy/85 leading-relaxed whitespace-pre-wrap space-y-3">
+            <div>{notice.boilerplate_body}</div>
+            {notice.ai_body && <div>{notice.ai_body}</div>}
+            {notice.custom_body && <div>{notice.custom_body}</div>}
+          </div>
+          <div className="text-xs text-ink-slate mt-3">
+            To reply, open your <a href="/portal/profit-loss" className="text-teal-dark font-semibold hover:underline">Profit &amp; Loss</a> — the notice there has a reply box.
+          </div>
+        </div>
+      )}
 
       {pkg.aiSummary && (
         <div className="bg-gradient-to-br from-teal/10 to-teal/5 border-2 border-teal/30 rounded-2xl p-6">

@@ -9,6 +9,7 @@ import {
 import type { ProfitLossData } from "@/lib/qbo-reports";
 import { classifyProfitLoss, marginVerdict, netMarginVerdict, type PortalPl } from "@/lib/portal-pl";
 import { buildPLHierarchy, type PLHierSection, type PLHierRow, type PLAccountLite, formatPctOfIncome } from "@/lib/pl-hierarchy";
+import { NoticeModal, NoticeButton, type StatementNoticeView } from "../notice-modal";
 import { AskAboutButton } from "../ask-about";
 
 /** The five ranges the server pre-fetches. */
@@ -33,6 +34,8 @@ export function ProfitLossClient({
   data,
   accounts = [],
   closedSource,
+  notice = null,
+  impersonating = false,
 }: {
   ranges: Record<FixedRangeKey, { label: string; start: string; end: string }>;
   data: Record<FixedRangeKey, ProfitLossData | null>;
@@ -40,8 +43,17 @@ export function ProfitLossClient({
    *  nests accounts the way QuickBooks does. Empty → flat fallback. */
   accounts?: PLAccountLite[];
   closedSource: "reclass_job_closed" | "cleanup_completed" | "calendar_default" | "monthly_close_sent";
+  /** Latest Notice to Reader + whether THIS user has acknowledged the current
+   *  version. Server-resolved (no fetch flash); null = none / pre-migration. */
+  notice?: { view: StatementNoticeView; acked: boolean } | null;
+  impersonating?: boolean;
 }) {
   const [activeRange, setActiveRange] = useState<RangeKey>("lastMonth");
+  // Notice to Reader: auto-open until acknowledged — every page open, by
+  // design; server-side receipts make it stick across devices. After acking,
+  // the header button is the way back in.
+  const [noticeAcked, setNoticeAcked] = useState(!!notice?.acked);
+  const [noticeOpen, setNoticeOpen] = useState(!!notice && !notice.acked);
   // Show accounts that net to zero for the period (off by default — QBO's
   // "collapse rows with no balance"). Toggle mirrors the internal profile P&L.
   const [showZeros, setShowZeros] = useState(false);
@@ -109,6 +121,16 @@ export function ProfitLossClient({
 
   return (
     <div className="space-y-6">
+      {notice && (
+        <NoticeModal
+          notice={notice.view}
+          initiallyAcked={noticeAcked}
+          impersonating={impersonating}
+          open={noticeOpen}
+          onClose={() => setNoticeOpen(false)}
+          onAcked={() => setNoticeAcked(true)}
+        />
+      )}
       {/* ── Header — quiet, light; no dark hero ─────────────────────── */}
       <header className="flex items-end justify-between gap-5 flex-wrap">
         <div className="min-w-0">
@@ -116,6 +138,10 @@ export function ProfitLossClient({
           <h1 className="font-brand text-3xl font-semibold text-navy leading-none mt-1.5">How you made money</h1>
           <div className="text-sm text-ink-slate mt-2">{periodLabel}</div>
         </div>
+        <div className="flex items-center gap-2 flex-wrap">
+        {notice && (
+          <NoticeButton acked={noticeAcked} onOpen={() => setNoticeOpen(true)} />
+        )}
         <div className="inline-flex gap-0.5 bg-white border border-cardline rounded-xl p-1 flex-wrap">
           {(["lastMonth", "thisMonth", "quarter", "ytd", "lastYear", "custom"] as RangeKey[]).map((k) => (
             <button
@@ -129,6 +155,7 @@ export function ProfitLossClient({
               {shortLabel(k, ranges)}
             </button>
           ))}
+        </div>
         </div>
       </header>
 
@@ -260,7 +287,7 @@ export function ProfitLossClient({
       )}
 
       <p className="text-[11.5px] text-ink-light leading-relaxed px-1">
-        <span className="font-semibold text-ink-slate">Notice to Reader:</span> Prepared on a cash basis from
+        <span className="font-semibold text-ink-slate">About these statements:</span> Prepared on a cash basis from
         your QuickBooks data; not audited or reviewed. For a true read, look at trends over at least 90 days
         rather than any single month. Tip: click any line for the underlying transactions, or{" "}
         <a href="/portal/ask-ai" className="text-teal-dark font-semibold hover:underline">ask the AI</a>.

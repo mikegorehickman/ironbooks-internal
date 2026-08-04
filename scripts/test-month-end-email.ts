@@ -16,7 +16,7 @@ async function main() {
   const { sendMonthEndEmail } = await import("../lib/month-end/email");
   const base = {
     clientName: "Thompson Painting Ltd.", recipientEmail: "d@t.ca", recipientFirstName: "Dave",
-    period: { label: "June 2026" } as any, aiSummaryExcerpt: "",
+    period: { label: "June 2026" } as any,
     portalUrl: "https://snap.ironbooks.com/portal/statements",
   };
 
@@ -47,6 +47,18 @@ async function main() {
     ok(`${label}: no remote images`, !/<img/i.test(m.html));
     ok(`${label}: preheader set`, m.html.includes("max-height:0"));
   }
+
+  // ── Notice to Reader teaser (migration 156) ──────────────────────────────
+  // One line, never the notice's content, no figures; absent when no notice.
+  await sendMonthEndEmail({ ...base, includesNotice: true });
+  await sendMonthEndEmail({ ...base });
+  const [withNotice, noNotice] = cap.slice(-2);
+  ok("teaser present when includesNotice (html)", withNotice.html.includes("Notice to Reader"));
+  ok("teaser present when includesNotice (text)", withNotice.text.includes("Notice to Reader"));
+  ok("teaser carries no figures", !/\$\d/.test(withNotice.text));
+  ok("teaser points at the portal, not inline content", /read and reply/.test(withNotice.text));
+  ok("no teaser by default (html)", !noNotice.html.includes("Notice to Reader"));
+  ok("no teaser by default (text)", !noNotice.text.includes("Notice to Reader"));
 
   // No freshness claims — the old body said "closed and reconciled".
   for (const claim of ["closed and reconciled", "up to date", "up-to-date", "fully reconciled", "all caught up"]) {

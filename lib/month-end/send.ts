@@ -146,7 +146,7 @@ export async function deliverPackage(
   packageId: string,
   sentBy: string,
   appBaseUrl: string,
-  opts?: { force?: boolean }
+  opts?: { force?: boolean; includesNotice?: boolean }
 ): Promise<SendPackageResult> {
   const claim = await claimPackageForSend(service, packageId);
   if (!claim.ok) {
@@ -213,7 +213,7 @@ export async function deliverPackage(
         recipientEmail: r.email,
         recipientFirstName: r.firstName,
         period,
-        aiSummaryExcerpt: pkg.ai_summary!,
+        includesNotice: !!opts?.includesNotice,
         portalUrl,
         balanceSheetAvailable,
       });
@@ -251,7 +251,7 @@ export async function deliverPackagesBulk(
   packageIds: string[],
   sentBy: string,
   appBaseUrl: string,
-  opts?: { force?: boolean }
+  opts?: { force?: boolean; includesNotice?: boolean }
 ): Promise<{
   sent: number;
   failed: number;

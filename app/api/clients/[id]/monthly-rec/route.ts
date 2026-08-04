@@ -107,6 +107,10 @@ export async function POST(
     question?: string;
     /** reject: manager's note on what to fix. */
     notes?: string;
+    /** send: the client-facing Notice to Reader (all sections editable in the
+     *  rec-card compose panel). Boilerplate is the required backbone — no
+     *  boilerplate means no notice this month. Migration 156. */
+    ntr?: { boilerplate?: string; ai?: string; custom?: string } | null;
   };
   try {
     body = await request.json();
@@ -874,6 +878,57 @@ export async function POST(
       `See your full financial statements in your portal.`,
     ].join("\n");
 
+    // 0. Notice to Reader — written FIRST, before anything client-visible, so
+    //    the email teaser and the portal notification can never promise a
+    //    notice that failed to persist (under-promise is the house rule —
+    //    see balanceSheetAvailable in lib/month-end/email.ts). A re-send
+    //    upserts the same (client, period) row and bumps sent_at, which
+    //    self-invalidates every stale acknowledgement (ack ⟺
+    //    receipt.acknowledged_at >= sent_at — lib/statement-notices.ts).
+    const ntrBody = body.ntr && typeof body.ntr === "object" ? body.ntr : null;
+    const ntrBoilerplate = String(ntrBody?.boilerplate || "").trim().slice(0, 8000);
+    const ntrAi = String(ntrBody?.ai || "").trim().slice(0, 8000) || null;
+    const ntrCustom = String(ntrBody?.custom || "").trim().slice(0, 8000) || null;
+    const wantsNotice = !!ntrBoilerplate; // boilerplate is the required backbone
+    let noticePersisted = false;
+    let noticeError: string | null = null;
+    if (wantsNotice) {
+      try {
+        const { data: prior } = await (service as any)
+          .from("statement_notices")
+          .select("id, resend_count")
+          .eq("client_link_id", clientLinkId)
+          .eq("period_year", y)
+          .eq("period_month", m)
+          .maybeSingle();
+        const noticeRow: any = {
+          client_link_id: clientLinkId,
+          period_year: y,
+          period_month: m,
+          monthly_rec_run_id: existing.id,
+          month_end_package_id: null, // patched after the package builds
+          boilerplate_body: ntrBoilerplate,
+          ai_body: ntrAi,
+          custom_body: ntrCustom,
+          sent_by: user.id,
+          sent_by_name: (actor as any)?.full_name || null,
+          sent_by_email: user.email || null,
+          sent_at: now,
+          resend_count: prior ? ((prior as any).resend_count || 0) + 1 : 0,
+          updated_at: now,
+        };
+        const { error: nErr } = await (service as any)
+          .from("statement_notices")
+          .upsert(noticeRow, { onConflict: "client_link_id,period_year,period_month" });
+        if (nErr) throw nErr;
+        noticePersisted = true;
+      } catch (e: any) {
+        // The send continues — but with NO teaser and NO notification line, so
+        // nothing promises what isn't there.
+        noticeError = String(e?.message || e).slice(0, 500);
+      }
+    }
+
     // 1. Portal notification — amber Bell card in their Messages, red
     //    badge + chime on their nav, visible in the snap thread too.
     let commError: string | null = null;
@@ -884,7 +939,10 @@ export async function POST(
         direction: "to_client",
         kind: "notification",
         subject: `Your ${monthLabel} financials are ready`,
-        body: summaryBody,
+        body: noticePersisted
+          ? summaryBody +
+            "\n\nIncludes a Notice to Reader from your bookkeeping team — it will appear when you open your Profit & Loss."
+          : summaryBody,
         attachments: [],
       });
     } catch (e: any) {
@@ -917,6 +975,7 @@ export async function POST(
       await bulkApproveSummaries(service as any, [packageId], user.id);
       const delivered = await deliverPackagesBulk(service as any, [packageId], user.id, origin, {
         force: true,
+        includesNotice: noticePersisted,
       });
       if (delivered.failed > 0) {
         throw new Error(delivered.results[0]?.error || "delivery failed");
@@ -939,6 +998,19 @@ export async function POST(
         ctaLabel: "Log in to view your financial statements",
         portalPath: "/portal",
       });
+    }
+
+    // 2c. Link the notice to the package it shipped with — best-effort; the
+    //     notice already stands on its own (client + period).
+    if (noticePersisted && packageId) {
+      try {
+        await (service as any)
+          .from("statement_notices")
+          .update({ month_end_package_id: packageId, updated_at: new Date().toISOString() })
+          .eq("client_link_id", clientLinkId)
+          .eq("period_year", y)
+          .eq("period_month", m);
+      } catch { /* best-effort */ }
     }
 
     // 2b. Close the books in QuickBooks — set the company closing date to
@@ -991,6 +1063,26 @@ export async function POST(
         .single());
     }
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // The notice's full body is snapshotted to the audit log — re-sends
+    //    overwrite the row, so this is where history lives.
+    if (noticePersisted) {
+      try {
+        await (service as any).from("audit_log").insert({
+          event_type: "statement_notice_sent",
+          user_id: user.id,
+          request_payload: {
+            client_link_id: clientLinkId,
+            client_name: clientName,
+            period,
+            boilerplate_body: ntrBoilerplate,
+            ai_body: ntrAi,
+            custom_body: ntrCustom,
+            sent_by_name: (actor as any)?.full_name || null,
+          },
+        });
+      } catch { /* best-effort */ }
+    }
 
     // A below-threshold send is a real event — audit it so the Approvals
     // overrides widget and any later review can see who/why.
@@ -1066,6 +1158,10 @@ export async function POST(
       month_end_package_id: packageId,
       package_error: packageError,
       qbo_close_error: qboCloseError,
+      // NULL when no notice was requested; a message means the month closed but
+      // the Notice to Reader did NOT persist (and nothing promised it).
+      notice_error: noticeError,
+      notice_sent: noticePersisted,
     });
   }
 
