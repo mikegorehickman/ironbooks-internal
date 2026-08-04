@@ -43,6 +43,18 @@ export interface PLHierRow {
   hasChildren: boolean;
   /** true = the "Total <parent>" summary row under a parent with children. */
   isTotalRow: boolean;
+  /**
+   * This row's `total` as a percentage of total income — the "% of income"
+   * column on both P&L views.
+   *
+   * Computed here, once, so the client portal and the bookkeeper view can never
+   * disagree about a number the client is reading off their own statement.
+   * SIGNED on purpose: a contra line (a discount, a refund) reads as a negative
+   * share rather than being flipped positive by an abs(), which would quietly
+   * misrepresent it. NULL when there's no income to divide by — an undefined
+   * ratio must render as "—", never as 0%.
+   */
+  pctOfIncome: number | null;
 }
 
 export interface PLHierSection {
@@ -213,12 +225,14 @@ export function buildPLHierarchy(
     out.push({
       accountId: n.accountId, name: n.name, depth,
       own: n.own, total: n.total, hasChildren, isTotalRow: false,
+      pctOfIncome: null, // filled below, once total income is known
     });
     for (const c of kids) emit(c, depth + 1, out);
     if (hasChildren) {
       out.push({
         accountId: n.accountId, name: `Total ${n.name}`, depth,
         own: 0, total: n.total, hasChildren: false, isTotalRow: true,
+        pctOfIncome: null,
       });
     }
   };
@@ -241,6 +255,14 @@ export function buildPLHierarchy(
   const grossProfit = sectionByKey.get("income")!.total - totalCogs;
   const netProfit = totalIncome - totalCogs - totalExpenses - totalOtherExp;
 
+  // Percentage of income for every row. A second pass because total income
+  // isn't known until the sections above are rolled up.
+  for (const s of sections) {
+    for (const row of s.rows) {
+      row.pctOfIncome = totalIncome > 0 ? (row.total / totalIncome) * 100 : null;
+    }
+  }
+
   return {
     sections: sections.filter((s) => s.rows.length > 0),
     totalIncome,
@@ -249,4 +271,19 @@ export function buildPLHierarchy(
     grossProfit,
     netProfit,
   };
+}
+
+/**
+ * Render a "% of income" cell. One formatter for both P&L views so the client
+ * and their bookkeeper never see the same line rounded two different ways.
+ *
+ * A tiny-but-real share shows as "<0.1%" rather than "0.0%" (which reads as
+ * nothing) or "—" (which reads as unknown). Only a genuinely undefined ratio —
+ * no income to divide by — gets the dash.
+ */
+export function formatPctOfIncome(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(pct)) return "—";
+  if (pct === 0) return "0%";
+  if (Math.abs(pct) < 0.05) return pct < 0 ? ">-0.1%" : "<0.1%";
+  return `${pct.toFixed(1)}%`;
 }

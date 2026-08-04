@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import type { ProfitLossData } from "@/lib/qbo-reports";
 import { classifyProfitLoss, marginVerdict, netMarginVerdict, type PortalPl } from "@/lib/portal-pl";
-import { buildPLHierarchy, type PLHierSection, type PLHierRow, type PLAccountLite } from "@/lib/pl-hierarchy";
+import { buildPLHierarchy, type PLHierSection, type PLHierRow, type PLAccountLite, formatPctOfIncome } from "@/lib/pl-hierarchy";
 import { AskAboutButton } from "../ask-about";
 
 /** The five ranges the server pre-fetches. */
@@ -513,7 +513,10 @@ function HierSection({
     const isParentHeader = r.hasChildren && !r.isTotalRow;
     const drillable = !r.isTotalRow && !r.hasChildren && !!r.accountId;
     const pad = { paddingLeft: r.depth * 18 };
-    const rowPct = income > 0 ? (Math.abs(r.total) / income) * 100 : 0;
+    // Shared with the bookkeeper view (lib/pl-hierarchy) so the client and their
+    // bookkeeper can't see the same line rounded two different ways. Signed, so a
+    // discount or refund reads as a negative share instead of being flipped.
+    const rowPct = r.pctOfIncome;
 
     // Parent header — name only; its amount lives on the "Total …" row (QBO).
     if (isParentHeader) {
@@ -531,8 +534,8 @@ function HierSection({
           <span className="text-sm font-semibold text-ink-slate truncate">{r.name}</span>
           <div className="flex items-center gap-4 flex-shrink-0">
             <span className="font-mono text-sm font-semibold text-navy w-24 text-right">{fmtMoney(r.total)}</span>
-            <span className="text-xs text-teal w-10 text-right font-mono hidden sm:block">
-              {rowPct >= 0.5 ? `${rowPct.toFixed(1)}%` : "—"}
+            <span className="text-xs text-teal w-14 text-right font-mono hidden sm:block" title="Share of total income">
+              {formatPctOfIncome(rowPct)}
             </span>
             <span className="w-[26px]" aria-hidden />
             <span className="w-[21px] hidden sm:block" aria-hidden />
@@ -557,15 +560,15 @@ function HierSection({
         </button>
         <div className="flex items-center gap-4 flex-shrink-0">
           <span className="font-mono text-sm text-navy w-24 text-right">{fmtMoney(r.total)}</span>
-          <span className="text-xs text-teal w-10 text-right font-mono hidden sm:block">
-            {rowPct >= 0.5 ? `${rowPct.toFixed(1)}%` : "—"}
+          <span className="text-xs text-teal w-14 text-right font-mono hidden sm:block" title="Share of total income">
+            {formatPctOfIncome(rowPct)}
           </span>
           <AskAboutButton
             kind="pl_line"
             label={r.name}
             amount={r.total}
             period={periodLabel}
-            context={{ section: section.title, account_id: r.accountId, pct_of_income: Math.round(rowPct * 10) / 10 }}
+            context={{ section: section.title, account_id: r.accountId, pct_of_income: rowPct == null ? null : Math.round(rowPct * 10) / 10 }}
             variant="icon"
           />
           {drillable && (

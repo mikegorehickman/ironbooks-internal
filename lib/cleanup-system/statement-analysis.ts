@@ -120,8 +120,13 @@ export function reconCandidates(accounts: QBOAccount[]) {
 const EXTRACTION_SCHEMA = `Return ONLY valid JSON, no prose, shaped exactly:
 {
   "statements": [
+    // ONE ENTRY PER ACCOUNT, not per PDF. Combined/package statements
+    // (one PDF covering e.g. Business Checking AND Business Savings, or a
+    // card program with several cards) MUST produce one entry per account,
+    // all sharing that PDF's index. A single-account PDF produces one entry.
     {
-      "index": <number, matches the order the PDFs were given, 0-based>,
+      "index": <number, which PDF this account came from, 0-based, in the
+                order the PDFs were attached>,
       "institution": <string|null>,
       "account_label": <string|null, e.g. "Business Checking ...1234">,
       "last4": <string|null, last 4 digits of the account number>,
@@ -180,7 +185,7 @@ You have been given ${statements.length} statement PDF(s), indexed 0..${statemen
 Candidate QuickBooks accounts to match each statement to:
 ${candidateList || "(none provided)"}
 
-For EACH statement, extract the ending balance and match it to the single best candidate account. Sign convention: bank balances positive; credit-card and loan balances OWED are negative (QBO carries liabilities that way). If you cannot confidently match a statement to a candidate, set matched_qbo_account_id to null and match_confidence to "none".
+For EACH ACCOUNT found in the PDFs, extract the ending balance and match it to the single best candidate account. A PDF may contain MORE THAN ONE account (combined "business package" statements, multi-card programs): emit a separate entry for every account, each with its own ending balance, dates, and transaction lines — never merge two accounts into one entry, and never keep only the first. Sign convention: bank balances positive; credit-card and loan balances OWED are negative (QBO carries liabilities that way). If you cannot confidently match an account to a candidate, set matched_qbo_account_id to null and match_confidence to "none". Never match two entries to the same candidate account — if two seem to fit, keep the better match and mark the other "none".
 
 ${EXTRACTION_SCHEMA}`;
 
@@ -190,8 +195,24 @@ ${EXTRACTION_SCHEMA}`;
   const parsed = JSON.parse(jsonMatch[0]);
   const rows: any[] = Array.isArray(parsed.statements) ? parsed.statements : [];
 
-  return statements.map((s, i) => {
-    const r = rows.find((x) => x.index === i) || rows[i] || {};
+  // ONE ROW PER ACCOUNT — a combined PDF legitimately yields several rows
+  // sharing an index. The old mapping was statements.map(one row per file),
+  // which silently DROPPED every account after the first on package
+  // statements (and the `|| rows[i]` fallback could mis-associate files).
+  const usable = rows.filter((r) => r && typeof r === "object");
+  const perFileCounts = new Map<number, number>();
+  const out: ExtractedStatement[] = [];
+
+  for (const r of usable) {
+    // Resolve which PDF the row came from. With a single PDF the index is
+    // unambiguous regardless of what the model wrote.
+    let idx = typeof r.index === "number" && statements[r.index] ? r.index : -1;
+    if (idx === -1 && statements.length === 1) idx = 0;
+    if (idx === -1) continue; // multi-PDF + unattributable row → drop, never guess
+
+    const nth = (perFileCounts.get(idx) || 0) + 1;
+    perFileCounts.set(idx, nth);
+
     const lines: StatementLine[] = (Array.isArray(r.lines) ? r.lines : [])
       .filter((l: any) => typeof l?.amount === "number" && Math.abs(l.amount) > 0.005)
       .slice(0, 300)
@@ -200,8 +221,9 @@ ${EXTRACTION_SCHEMA}`;
         description: l.description ? String(l.description).slice(0, 160) : null,
         amount: Number(l.amount),
       }));
-    return {
-      filename: s.filename,
+
+    out.push({
+      filename: statements[idx].filename,
       institution: r.institution ?? null,
       account_label: r.account_label ?? null,
       last4: r.last4 ? String(r.last4).slice(-4) : null,
@@ -213,8 +235,55 @@ ${EXTRACTION_SCHEMA}`;
       match_confidence: ["high", "medium", "low", "none"].includes(r.match_confidence) ? r.match_confidence : "none",
       notes: r.notes ?? null,
       lines,
-    };
+    });
+  }
+
+  // The model returned nothing usable for a file → keep a visible "no
+  // balance" placeholder instead of the file vanishing from the results.
+  statements.forEach((s, i) => {
+    if (!perFileCounts.has(i)) {
+      out.push({
+        filename: s.filename,
+        institution: null, account_label: null, last4: null,
+        statement_start_date: null, statement_end_date: null,
+        ending_balance: null, account_kind: "unknown",
+        matched_qbo_account_id: null, match_confidence: "none",
+        notes: "Nothing extractable found in this PDF.",
+        lines: [],
+      });
+    }
   });
+
+  // Disambiguate the display name when one PDF produced several accounts, so
+  // the results table doesn't show three identical filenames.
+  for (const ex of out) {
+    const total = usable.filter(
+      (r) => statements[typeof r.index === "number" ? r.index : -1]?.filename === ex.filename
+    ).length;
+    if (total > 1) {
+      const tag = ex.account_label || (ex.last4 ? `…${ex.last4}` : ex.account_kind);
+      if (tag && tag !== "unknown") ex.filename = `${ex.filename} — ${tag}`;
+    }
+  }
+
+  // Never let two entries claim the same QBO account: keep the higher
+  // confidence, demote the rest to unmatched for a human to place.
+  const RANK: Record<string, number> = { high: 3, medium: 2, low: 1, none: 0 };
+  const best = new Map<string, ExtractedStatement>();
+  for (const ex of out) {
+    if (!ex.matched_qbo_account_id) continue;
+    const cur = best.get(ex.matched_qbo_account_id);
+    if (!cur || RANK[ex.match_confidence] > RANK[cur.match_confidence]) {
+      if (cur) { cur.matched_qbo_account_id = null; cur.match_confidence = "none"; cur.notes = "Another statement matched this QBO account more confidently — assign manually."; }
+      best.set(ex.matched_qbo_account_id, ex);
+    } else {
+      ex.matched_qbo_account_id = null;
+      ex.match_confidence = "none";
+      ex.notes = "Another statement matched this QBO account more confidently — assign manually.";
+    }
+  }
+
+  return out;
 }
 
 // ─── Line-level clearing ────────────────────────────────────────────────────
