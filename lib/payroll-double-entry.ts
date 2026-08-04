@@ -65,9 +65,43 @@ const RECATEGORIZABLE_TXN_TYPES = new Set([
  * clients (Wages, Salaries, Direct Labor, Officer Comp, Crew Pay,
  * Production Wages, ...). False positives here just mean the detector
  * scans an extra account; false negatives mean we miss the bug.
+ *
+ * WHY `subcontract` AND `labour` ARE HERE (2026-07-31, RocketPainter Kingston).
+ * A painting contractor's crew cost lands on whatever the bookkeeper called it,
+ * and the two biggest labor lines on that client's P&L were "Direct Field Labor
+ * – Painting" ($69K) and "Subcontractors – Painting" ($75K). Only the first
+ * matched, so /api/admin/payroll-inspect — the diagnostic built specifically to
+ * find double-booked labor — skipped the larger of the two accounts entirely.
+ * A crew paid partly on payroll and partly as subcontractors is the normal case
+ * in this trade, not an edge case, so "subcontractor" is a payroll-ish account
+ * name for the purpose of LOOKING.
+ *
+ * `labour` for the Canadian spelling: 31 of the fleet's active clients are CA,
+ * and `labor` does not match "Direct Field Labour".
+ *
+ * WHY THE STEMS CARRY `\w*` / `s?` NOW. The previous form was
+ *
+ *     /\b(wage|salar|payroll|labor|...|production\s*wage|...)\b/i
+ *
+ * and the TRAILING `\b` silently required each stem to be the whole word. So
+ * "Wage" matched and "Wages" did not. Nor did "Salary", "Salaries", "Officer
+ * Compensation" or "Production Wages" — i.e. most of the account names this
+ * regex names in its own comment. Only the exact singulars "Wage", "Payroll",
+ * "Labor" and "Crew Pay" ever matched, which is why /admin/payroll-inspect and
+ * the per-client scan have been quietly skipping wage accounts on clients that
+ * pluralise. Verified against the pre-change regex, 2026-07-31.
+ *
+ * Suffixes are bounded rather than open where an open `\w*` would overreach:
+ * `labou?rs?` matches labor/labour/labors/labours but NOT "Laboratory", and the
+ * leading `\b` keeps "Collaboration" out.
+ *
+ * Widening this only widens what gets INSPECTED — every use is an inclusive
+ * account filter. Nothing is declared a duplicate on the strength of its account
+ * name; detectLaborDuplication still requires the payee to match the paycheque
+ * roster or a payroll-provider signature.
  */
 export const PAYROLL_ACCOUNT_NAME_REGEX =
-  /\b(wage|salar|payroll|labor|crew\s*pay|officer\s*comp|production\s*wage|direct\s*labor|field\s*labor)\b/i;
+  /\b(wages?|salar\w*|payroll\w*|labou?rs?|crew\s*pay\w*|officer\s*comp\w*|subcontract\w*|contractors?)\b/i;
 
 /** One detected duplicate pair. */
 export interface PayrollDoubleEntry {
