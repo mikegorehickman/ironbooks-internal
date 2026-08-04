@@ -10,6 +10,7 @@ import {
 } from "@/lib/qbo-reclass";
 import { reclassifyDepositLines, reclassifyJournalEntryLines } from "@/lib/qbo-deposit-reclass";
 import { bankRuleVendorPattern } from "@/lib/vendor-knowledge";
+import { isUncategorizedAccount } from "@/lib/uncategorized-accounts";
 
 /**
  * POST /api/clients/[id]/bulk-reclass
@@ -214,6 +215,9 @@ export async function POST(
     failures: [] as Array<{ id: string; type: string; blocked: string | null; message: string }>,
     remaining: [] as Array<{ id: string; type: string }>,
     rules_created: 0,
+    // Set when the rule was deliberately NOT learned because the target is a
+    // holding account — reported so "0 rules created" isn't a mystery.
+    rules_skipped_holding_target: false,
     rules_updated: 0,
     target: { id: target.Id, name: target.Name },
   };
@@ -354,7 +358,14 @@ export async function POST(
   // upsert on (client_link_id, vendor_pattern) — re-running just refreshes the
   // target. Stored in the exact normalized form both categorization engines
   // match on (see bankRuleVendorPattern).
-  if (createRules && movedVendors.size > 0) {
+  // A bank rule whose TARGET is an uncategorized/holding account is a rule that
+  // says "I don't know" and then applies itself to every future match. 45 such
+  // rules existed fleet-wide on 2026-08-04, six active and auto-approving.
+  // Refused here so a bookkeeper moving something INTO Uncategorized doesn't
+  // teach SNAP to keep doing it.
+  const targetIsHolding = isUncategorizedAccount(target.Name);
+  if (createRules && targetIsHolding) summary.rules_skipped_holding_target = true;
+  if (createRules && !targetIsHolding && movedVendors.size > 0) {
     const patterns = new Map<string, string>(); // pattern → display vendor
     for (const v of movedVendors) {
       const p = bankRuleVendorPattern(v);

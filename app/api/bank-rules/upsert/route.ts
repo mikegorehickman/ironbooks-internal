@@ -1,4 +1,5 @@
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { isUncategorizedAccount } from "@/lib/uncategorized-accounts";
 import { NextResponse } from "next/server";
 
 /**
@@ -29,6 +30,21 @@ export async function POST(request: Request) {
   if (!client_link_id || !vendor_pattern || !target_account_name) {
     return NextResponse.json(
       { error: "client_link_id, vendor_pattern, and target_account_name are all required" },
+      { status: 400 }
+    );
+  }
+
+// A bank rule whose TARGET is an uncategorized/holding account is a rule that
+// says "I don't know" and then applies itself to every future match. 45 such
+// rules existed fleet-wide on 2026-08-04, six of them active and auto-approving.
+// Refused at creation so the population cannot grow again.
+  if (isUncategorizedAccount(String(target_account_name))) {
+    return NextResponse.json(
+      {
+        error:
+          `Refusing to create a rule targeting "${target_account_name}" — that is a holding ` +
+          `account, not a categorization. Pick a real account, or leave the vendor for review.`,
+      },
       { status: 400 }
     );
   }

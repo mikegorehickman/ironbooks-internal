@@ -29,6 +29,7 @@ import { normalizeAccountName } from "@/lib/account-name";
 import { classifyMoneyMovement, isNamelessETransfer, type BsAccount } from "@/lib/transfer-detection";
 import { getClientEndCloses, type DoubleEndCloseSummary } from "@/lib/double";
 import { isUncategorizedAccount } from "@/lib/uncategorized-accounts";
+import { taxAuthorityFor, taxRemittanceQuestion } from "@/lib/tax-remittance-payees";
 import {
   buildParentAccountIds,
   buildParentAccountNames,
@@ -1037,6 +1038,31 @@ async function runFullCategorization(
     if (cachedAccountName) {
       const account = accountByName.get(normalizeAccountName(cachedAccountName));
       if (account) {
+        // A learned rule whose TARGET is an uncategorized/holding account is a
+        // rule that says "I don't know" — auto-approving it launders a prior
+        // unanswered question into a confident answer. Measured on RocketPainter
+        // 2026-08-04: five GOVERNMENT CANADA payments ($23,419) were
+        // auto-approved to Uncategorized Expense at 100% confidence with the
+        // reasoning "Matched existing bank rule from prior categorization".
+        // Fleet-wide there are 45 rules pointing at an uncategorized account.
+        //
+        // Same failure as the KB fallback: the number that looks most certain is
+        // the one carrying the least information.
+        if (isUncategorizedAccount(account.account_name)) {
+          preMatched.set(refId, {
+            ref_id: refId,
+            target_account_id: account.qbo_account_id,
+            target_account_name: account.account_name,
+            confidence: 0,
+            reasoning:
+              `A prior categorization put this vendor in "${account.account_name}", which is a ` +
+              `holding account, not an answer. Pick a real account — or ask the client if the ` +
+              `bank description isn't enough to decide.`,
+            decision: "needs_review",
+          });
+          cacheHits++;
+          continue;
+        }
         preMatched.set(refId, {
           ref_id: refId,
           target_account_id: account.qbo_account_id,
@@ -1046,6 +1072,40 @@ async function runFullCategorization(
           decision: "auto_approve",
         });
         cacheHits++;
+        continue;
+      }
+    }
+
+    // ── GUARD 2: tax authority payments are never decided by the payee name ──
+    // "GOVERNMENT CANADA" covers payroll source deductions (clears a liability),
+    // a GST/HST remittance (clears a liability, never a P&L expense), a corporate
+    // instalment, and refunds — at amounts from $4.09 to $16,862.06 with an
+    // identical description. Guessing gets both sides of the entry wrong, so this
+    // runs BEFORE the AI and goes straight to the client with the question
+    // written out.
+    {
+      const payeeBlob = movementBlob(line);
+      const authority = taxAuthorityFor(line.vendor_name, payeeBlob);
+      if (authority) {
+        preMatched.set(refId, {
+          ref_id: refId,
+          target_account_id: uncategorizedAccount?.qbo_account_id ?? null,
+          target_account_name: uncategorizedAccount?.account_name ?? null,
+          confidence: 0,
+          // The ask-client email reads `ai_reasoning` (see
+          // /api/clients/[id]/ask-client-email), so the CLIENT-facing question
+          // goes here rather than in a `client_question` field — there is no such
+          // column on `reclassifications`, and it would have been silently
+          // dropped on insert. The question reads correctly for the bookkeeper
+          // too, which is why one field can serve both.
+          reasoning: taxRemittanceQuestion({
+            authority,
+            amount: Number(line.transaction_amount) || 0,
+            date: line.transaction_date ?? null,
+            payee: line.vendor_name ?? payeeBlob,
+          }),
+          decision: "ask_client",
+        });
         continue;
       }
     }
