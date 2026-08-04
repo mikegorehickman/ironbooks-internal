@@ -68,13 +68,31 @@ export default async function ReclassReviewPage({
     redirect(`/reclass/${id}/execute`);
   }
 
-  // Load all reclassifications
-  const { data: reclassifications } = await service
-    .from("reclassifications")
-    .select("*")
-    .eq("reclass_job_id", id)
-    .order("ai_confidence", { ascending: false })
-    .order("vendor_name");
+  // Load ALL reclassifications, paged.
+  //
+  // A bare .select() is capped by PostgREST at 1000 rows (Supabase db.max_rows).
+  // RocketPainter Kingston had 1652 rows: the page silently received the first
+  // 1000 and, because the order is ai_confidence DESC, those were the
+  // high-confidence auto_approve + skip rows. Every needs_review (346) and
+  // flagged (34) row sat in the truncated tail — the review tabs showed 0 and 0,
+  // so the bookkeeper was never shown the transactions that actually needed
+  // them, and the tab counts (which are derived from this array) summed to
+  // exactly 1000. Page until the job's rows are exhausted.
+  const PAGE = 1000;
+  const reclassifications: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: chunk, error: chunkErr } = await service
+      .from("reclassifications")
+      .select("*")
+      .eq("reclass_job_id", id)
+      .order("ai_confidence", { ascending: false })
+      .order("vendor_name")
+      .range(from, from + PAGE - 1);
+    if (chunkErr) break;
+    const rows = (chunk as any[]) || [];
+    reclassifications.push(...rows);
+    if (rows.length < PAGE) break;
+  }
 
   // Check if user can use admin overrides
   const { data: userProfile } = await service
