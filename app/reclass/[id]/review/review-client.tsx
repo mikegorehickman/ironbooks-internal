@@ -22,6 +22,7 @@ import {
   RefreshCw,
   SkipForward,
 } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { PayrollDoubleCard } from "@/components/PayrollDoubleCard";
 
 interface ReclassJob {
@@ -113,6 +114,10 @@ export function ReclassReview({
   );
   // Source-account filter (JP workflow: clear one bank/card at a time).
   const [accountFilter, setAccountFilter] = useState<string>("");
+  // Two ways to look at the same rows. "queue" is the working view: vendor
+  // cards for what needs a human, everything else collapsed. "rows" is the
+  // original per-row tabs, kept for audit + anything the cards can't express.
+  const [viewMode, setViewMode] = useState<"queue" | "rows">("queue");
   const [activeTab, setActiveTab] = useState<Tab>(
     initialRows.some((r) => r.decision === "needs_review") ? "review" : "auto"
   );
@@ -181,6 +186,15 @@ export function ReclassReview({
 
     return { auto, review, flagged, ask, skipped };
   }, [rows, originalDecisions, accountFilter]);
+
+  // Account-filtered source the queue groups over (same filter the tabs use).
+  const filteredRows = useMemo(
+    () =>
+      accountFilter
+        ? rows.filter((r) => (r.bank_account_name || "") === accountFilter)
+        : rows,
+    [rows, accountFilter]
+  );
 
   const totalApproved = partitioned.auto.length;
   const stillNeedsAction = partitioned.review.length + partitioned.flagged.length;
@@ -691,6 +705,40 @@ export function ReclassReview({
         );
       })()}
 
+      {/* ── VIEW SWITCH ── */}
+      <div className="flex items-center gap-2">
+        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+          {([["queue", "Work queue"], ["rows", "All rows"]] as const).map(([m, label]) => (
+            <button
+              key={m}
+              onClick={() => setViewMode(m)}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                viewMode === m ? "bg-teal text-white" : "text-ink-slate hover:text-navy"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="text-[11px] text-ink-light">
+          {viewMode === "queue"
+            ? "Grouped by vendor — one decision covers every transaction from that vendor."
+            : "Every row, by original AI decision."}
+        </span>
+      </div>
+
+      {viewMode === "queue" && (
+        <VendorQueue
+          rows={filteredRows}
+          masterAccounts={masterAccounts}
+          onTargetChange={setTarget}
+          onAskClient={moveToAskClient}
+          onApprove={bulkApprove}
+        />
+      )}
+
+      {viewMode === "rows" && (
+      <>
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
         <TabButton
@@ -868,6 +916,8 @@ export function ReclassReview({
           </>
         )}
       </div>
+      </>
+      )}
 
       {/* Attestation + Execute */}
       <div className="bg-white rounded-2xl border-2 border-teal/20 p-6">
@@ -1997,6 +2047,312 @@ function ClientEmailModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── VENDOR QUEUE ───────────────────────────────────────────────────────────
+// The working view. Two sections, sorted by who has to act:
+//
+//   NEEDS YOU  — needs_review + flagged, grouped by vendor, biggest dollars
+//                first. One decision per vendor covers every transaction from
+//                it (setTarget already cascades by sender). Ask-client is an
+//                ACTION on a card, not a separate pile to visit.
+//   HANDLED    — auto-matched / already-correct / waiting-on-client, collapsed
+//                to one line. Expandable and adjustable: pick a different
+//                account on any vendor and it re-enters the execute set.
+//
+// The old five tabs are still one click away ("All rows") — this replaces the
+// default, not the capability.
+
+interface VendorGroup {
+  key: string;
+  vendor: string;
+  rows: Reclassification[];
+  total: number;
+  target: string | null;
+  confidence: number | null;
+  flagged: boolean;
+  reasoning: string | null;
+}
+
+// Senders that identify nothing. Rows landing on one of these must NOT be
+// grouped: on RocketPainter 375 needs-review rows collapsed to 5 cards because
+// most carried "unknown vendor" — and a single "Approve 375" on that card would
+// have pushed hundreds of unrelated transactions to one account. Each gets its
+// own card instead, so an unidentifiable transaction still costs one decision.
+const UNGROUPABLE = /^(unknown|unknown vendor|no vendor|n\/?a|misc|miscellaneous|none|null|\(no vendor\))$/i;
+
+function groupByVendor(rows: Reclassification[]): VendorGroup[] {
+  const map = new Map<string, VendorGroup>();
+  for (const r of rows) {
+    const sender = extractSender(r.vendor_name, r.description, (r as any).original_memo);
+    const normalized = normalizeSender(sender);
+    const key =
+      !normalized || UNGROUPABLE.test(normalized.trim()) ? `__row_${r.id}` : normalized;
+    const target = r.bookkeeper_override_target_name || r.to_account_name || null;
+    const g = map.get(key);
+    if (g) {
+      g.rows.push(r);
+      g.total += Math.abs(r.transaction_amount || 0);
+      g.flagged = g.flagged || r.decision === "flagged";
+      if (!g.target && target) g.target = target;
+    } else {
+      map.set(key, {
+        key,
+        vendor: sender || r.vendor_name || "(no vendor)",
+        rows: [r],
+        total: Math.abs(r.transaction_amount || 0),
+        target,
+        confidence: r.ai_confidence,
+        flagged: r.decision === "flagged",
+        reasoning: r.ai_reasoning,
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => b.total - a.total);
+}
+
+const money = (n: number) =>
+  "$" + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function VendorQueue({
+  rows,
+  masterAccounts,
+  onTargetChange,
+  onAskClient,
+  onApprove,
+}: {
+  rows: Reclassification[];
+  masterAccounts: MasterAccount[];
+  onTargetChange: (rowId: string, accountName: string) => void;
+  onAskClient: (rowIds: string[]) => void;
+  onApprove: (rowIds: string[]) => void;
+}) {
+  const [openHandled, setOpenHandled] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const needsYou = rows.filter((r) => r.decision === "needs_review" || r.decision === "flagged");
+  const askClient = rows.filter((r) => r.decision === "ask_client");
+  const autoRows = rows.filter((r) => r.decision === "auto_approve" || r.decision === "approved");
+  const skipRows = rows.filter((r) => r.decision === "skip" || r.decision === "rejected");
+
+  const queue = useMemo(() => groupByVendor(needsYou), [needsYou]);
+  const handled = useMemo(
+    () => groupByVendor([...autoRows, ...askClient, ...skipRows]),
+    [autoRows, askClient, skipRows]
+  );
+
+  function toggle(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* ── NEEDS YOU ── */}
+      <div className="bg-white rounded-2xl border-2 border-amber-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-amber-100 bg-amber-50/60 flex items-center gap-2 flex-wrap">
+          <h3 className="font-bold text-navy">Needs you</h3>
+          <span className="text-xs font-bold text-amber-800 bg-white border border-amber-200 rounded-full px-2 py-0.5">
+            {queue.length} vendor{queue.length === 1 ? "" : "s"} · {needsYou.length} txns
+          </span>
+          <span className="ml-auto text-[11px] text-ink-slate">
+            One decision per vendor — it applies to every transaction from them.
+          </span>
+        </div>
+
+        {queue.length === 0 ? (
+          <div className="px-5 py-8 text-center">
+            <CheckCircle2 size={22} className="mx-auto text-emerald-600 mb-1.5" />
+            <div className="text-sm font-semibold text-navy">Queue clear</div>
+            <p className="text-xs text-ink-slate mt-0.5">
+              Nothing left needing a decision — review the summary below, then execute.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {queue.map((g) => (
+              <VendorCard
+                key={g.key}
+                group={g}
+                masterAccounts={masterAccounts}
+                expanded={expanded.has(g.key)}
+                onToggle={() => toggle(g.key)}
+                onTargetChange={onTargetChange}
+                onAskClient={onAskClient}
+                onApprove={onApprove}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── HANDLED ── */}
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <button
+          onClick={() => setOpenHandled((o) => !o)}
+          className="w-full px-5 py-3 flex items-center gap-2 text-left hover:bg-gray-50 transition-colors"
+        >
+          <ChevronRight
+            size={15}
+            className={`text-ink-light transition-transform ${openHandled ? "rotate-90" : ""}`}
+          />
+          <span className="font-bold text-navy text-sm">Handled</span>
+          <span className="text-xs text-ink-slate">
+            {autoRows.length + skipRows.length + askClient.length} txns —{" "}
+            <strong className="text-navy">{autoRows.length}</strong> auto-matched ·{" "}
+            <strong className="text-navy">{skipRows.length}</strong> already correct
+            {askClient.length > 0 && (
+              <>
+                {" "}· <strong className="text-navy">{askClient.length}</strong> waiting on client
+              </>
+            )}
+          </span>
+          <span className="ml-auto text-[11px] font-semibold text-teal">
+            {openHandled ? "Hide" : "Review & adjust"}
+          </span>
+        </button>
+        {openHandled && (
+          <div className="border-t border-gray-100">
+            <div className="px-5 py-2 bg-gray-50 text-[11px] text-ink-slate">
+              Every vendor we handled without you. Change any account here and those
+              transactions re-enter the execute set.
+            </div>
+            <div className="divide-y divide-gray-50 max-h-[32rem] overflow-y-auto">
+              {handled.map((g) => (
+                <VendorCard
+                  key={g.key}
+                  group={g}
+                  masterAccounts={masterAccounts}
+                  expanded={expanded.has(g.key)}
+                  onToggle={() => toggle(g.key)}
+                  onTargetChange={onTargetChange}
+                  onAskClient={onAskClient}
+                  onApprove={onApprove}
+                  handled
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VendorCard({
+  group,
+  masterAccounts,
+  expanded,
+  onToggle,
+  onTargetChange,
+  onAskClient,
+  onApprove,
+  handled = false,
+}: {
+  group: VendorGroup;
+  masterAccounts: MasterAccount[];
+  expanded: boolean;
+  onToggle: () => void;
+  onTargetChange: (rowId: string, accountName: string) => void;
+  onAskClient: (rowIds: string[]) => void;
+  onApprove: (rowIds: string[]) => void;
+  handled?: boolean;
+}) {
+  const ids = group.rows.map((r) => r.id);
+  const askable = group.rows.filter((r) => r.decision !== "ask_client").map((r) => r.id);
+  const waiting = group.rows.every((r) => r.decision === "ask_client");
+
+  return (
+    <div className={`px-5 py-3 ${group.flagged ? "bg-red-50/40" : ""}`}>
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-navy">{group.vendor}</span>
+            {group.flagged && (
+              <span className="text-[10px] font-bold uppercase tracking-wide text-red-700 bg-red-100 border border-red-200 rounded px-1.5 py-0.5">
+                Flagged
+              </span>
+            )}
+            {waiting && (
+              <span className="text-[10px] font-bold uppercase tracking-wide text-ink-slate bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">
+                Waiting on client
+              </span>
+            )}
+            <span className="text-xs text-ink-slate tabular-nums">
+              {group.rows.length} txn{group.rows.length === 1 ? "" : "s"} · {money(group.total)}
+            </span>
+            {group.confidence != null && !handled && <ConfidenceBadge value={group.confidence} />}
+          </div>
+          {group.reasoning && !handled && (
+            <p className="text-[11px] text-ink-light mt-0.5 line-clamp-2">{group.reasoning}</p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <MasterAccountSelect
+            value={group.target || ""}
+            masterAccounts={masterAccounts}
+            onChange={(val) => {
+              // setTarget cascades by sender, so one row carries the group.
+              onTargetChange(group.rows[0].id, val);
+            }}
+          />
+          {!handled && (
+            <>
+              <button
+                onClick={() => onApprove(ids)}
+                disabled={!group.target}
+                title={group.target ? "Approve every transaction from this vendor" : "Pick an account first"}
+                className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-teal text-white hover:bg-teal-dark disabled:opacity-40"
+              >
+                Approve {group.rows.length}
+              </button>
+              {askable.length > 0 && (
+                <button
+                  onClick={() => onAskClient(askable)}
+                  className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 text-ink-slate hover:border-teal hover:text-teal"
+                >
+                  Ask client
+                </button>
+              )}
+            </>
+          )}
+          <button
+            onClick={onToggle}
+            className="text-[11px] font-semibold text-ink-light hover:text-navy px-1.5"
+          >
+            {expanded ? "Hide" : `${group.rows.length} txn${group.rows.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="mt-2 rounded-lg border border-gray-100 divide-y divide-gray-50">
+          {group.rows.map((r) => (
+            <div key={r.id} className="px-3 py-1.5 flex items-center gap-3 text-[11px]">
+              <span className="text-ink-light tabular-nums w-20 shrink-0">{r.transaction_date}</span>
+              <span className="flex-1 min-w-0 truncate text-ink-slate">
+                {r.description || r.vendor_name}
+              </span>
+              <span className="tabular-nums font-semibold text-navy shrink-0">
+                {money(r.transaction_amount || 0)}
+              </span>
+              <span className="w-56 shrink-0">
+                <MasterAccountSelect
+                  value={r.bookkeeper_override_target_name || r.to_account_name || ""}
+                  masterAccounts={masterAccounts}
+                  onChange={(val) => onTargetChange(r.id, val)}
+                />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
