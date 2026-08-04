@@ -7,7 +7,7 @@ import { AdminSearch } from "./admin-search";
 import {
   Users, AlertTriangle, ArrowRight, Clock, Mail, CreditCard, RefreshCw, Repeat,
   Landmark, ReceiptText, CheckCheck, ListChecks, Copy, TrendingUp, Unplug, Flag,
-  XCircle, Timer, CalendarCheck, Hourglass, ScrollText,
+  XCircle, Timer, CalendarCheck, Hourglass, ScrollText, Wallet,
 } from "lucide-react";
 import { queryAuditLog } from "@/lib/audit-query";
 
@@ -289,6 +289,7 @@ export default async function AdminOverviewPage() {
         {/* Admin tools — everything that used to have its own sidebar row. */}
         <div className="space-y-2">
           {[
+            { href: "/admin/uf-eradication", icon: Wallet, title: "Undeposited Funds — fleet", desc: "Every client's UF balance + orphaned $ · a clearing account, so the target is $0 · worst first, links into the fix" },
             { href: "/admin/audit", icon: ScrollText, title: "Audit log", desc: "Every action on every client — who, when, and what changed in QuickBooks · filter by user, client, date or event · CSV export" },
             { href: "/admin/close-coverage", icon: CalendarCheck, title: "Close coverage", desc: "Every client × month — the date they received their completed books · gaps flagged" },
             { href: "/time-report", icon: Hourglass, title: "Time report", desc: "Tracked bookkeeper time per client vs its monthly budget · who spent it · why anything ran over" },

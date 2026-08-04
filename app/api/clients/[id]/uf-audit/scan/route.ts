@@ -186,6 +186,14 @@ export async function POST(
       payments_total: result.payments_total,
       orphan_count: result.orphan_count,
       total_orphan_amount: result.total_orphan_amount,
+      // Returned so a caller doesn't need a second round-trip for the number
+      // that actually matters. UF is a clearing account: the balance IS the
+      // finding, and orphaned $ is the part that won't resolve on its own.
+      total_uf_balance: result.total_uf_balance,
+      matched_count: result.matched_count,
+      probable_deposited_count: result.probable_deposited_count,
+      probable_deposited_amount: result.probable_deposited_amount,
+      uf_account_name: result.uf_account_name,
     });
   } catch (err: any) {
     await service
