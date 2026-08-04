@@ -1,7 +1,13 @@
 /** Tests for lib/uf-fleet.ts — the UF worklist: match + recommended action.
  *  Run: npx tsx scripts/test-uf-fleet.ts
  */
-import { recommendForItem, buildUfWorklists, sumByAction, type UfItemRow } from "../lib/uf-fleet";
+import {
+  recommendForItem,
+  buildUfWorklists,
+  sumByAction,
+  recommendForGroup,
+  type UfItemRow,
+} from "../lib/uf-fleet";
 
 let pass = 0, fail = 0;
 function ok(name: string, cond: boolean) { cond ? pass++ : (fail++, console.error(`  ✗ ${name}`)); }
@@ -128,5 +134,61 @@ eq("void_duplicate is resolved", recommendForItem(item({ resolution: "void_dupli
   eq("empty totals are zero", t.create_deposit.amount, 0);
 }
 
-console.log(`\nuf fleet worklist: ${pass} passed, ${fail} failed`);
+// ══ recommendForGroup — the per-client tool's pre-selected resolution ═══════
+{
+  const g = (o: any = {}) => ({ payment_amount: 1000, ...o });
+
+  // All matched → pre-select create_deposit. This is the RocketPainter case that
+  // was being presented as an empty dropdown.
+  {
+    const r = recommendForGroup([
+      g({ probable_deposit_id: "D1", probable_deposit_date: "2025-08-28", probable_deposit_amount: 2847.6,
+          probable_deposit_bank: "Business Chequing", probable_match_confidence: 0.95 }),
+    ]);
+    eq("single matched → create_deposit", r.value, "create_deposit");
+    eq("confidence surfaced", r.confidence, 0.95);
+    ok("names the bank", r.why.includes("Business Chequing"));
+    ok("says the money landed", /money landed/i.test(r.why));
+  }
+  // Several matched → still create_deposit, worst-case confidence.
+  {
+    const r = recommendForGroup([
+      g({ probable_deposit_id: "D1", probable_match_confidence: 0.95, probable_deposit_bank: "Chequing", probable_deposit_date: "2025-08-28" }),
+      g({ probable_deposit_id: "D2", probable_match_confidence: 0.7 }),
+    ]);
+    eq("all matched → create_deposit", r.value, "create_deposit");
+    eq("takes the LOWEST confidence", r.confidence, 0.7);
+    ok("counts the payments", r.why.includes("2 payments"));
+  }
+  // All duplicates → void, and it beats a deposit tie.
+  {
+    const r = recommendForGroup([g({ suspected_duplicate: true, probable_deposit_id: "D1", probable_match_confidence: 0.99 })]);
+    eq("duplicate wins", r.value, "void_duplicate");
+    ok("warns it must not be deposited", /without touching the bank/i.test(r.why));
+  }
+  // Nothing matched → ask the client.
+  {
+    const r = recommendForGroup([g(), g()]);
+    eq("no match → ask_client", r.value, "ask_client");
+    ok("says only the client knows", /only the client/i.test(r.why));
+  }
+  // MIXED → no default. A confidently-wrong pre-selection is worse than a blank.
+  {
+    const r = recommendForGroup([g({ probable_deposit_id: "D1" }), g()]);
+    eq("mixed → no default", r.value, "");
+    ok("tells them to resolve individually", /individually/i.test(r.why));
+    ok("states the split", r.why.includes("1 of 2"));
+  }
+  {
+    const r = recommendForGroup([g({ suspected_duplicate: true }), g({ probable_deposit_id: "D1" })]);
+    eq("dup + matched is mixed, not either", r.value, "");
+  }
+  {
+    const r = recommendForGroup([]);
+    eq("empty group is safe", r.value, "");
+    eq("and claims nothing", r.why, "");
+  }
+}
+
+console.log(`\nuf fleet worklist (incl. group recommendations): ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

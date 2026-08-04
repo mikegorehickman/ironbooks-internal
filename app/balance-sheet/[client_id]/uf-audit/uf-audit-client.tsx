@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { recommendForGroup } from "@/lib/uf-fleet";
 import Link from "next/link";
 import { playSound } from "@/lib/sounds";
 import {
@@ -476,7 +477,15 @@ export function UfAuditClient({
           </div>
         </div>
         <div className="grid grid-cols-4 gap-3 mt-4 text-sm">
-          <SummaryStat label="UF balance" value={`$${formatMoney(scan.total_uf_balance)}`} />
+          {/* `total_uf_balance` is the sum of every payment the scan looked at, NOT
+              the balance. On RocketPainter that read $16,934.78 against a true UF
+              balance of $10,696.75 — the 5 already-matched payments were being
+              added back in. `uf_account_current_balance` is the account balance.
+              Reported by Mike 2026-08-04: "it went to 16,934.78. It changed." */}
+          <SummaryStat
+            label="UF balance"
+            value={`$${formatMoney(scan.uf_account_current_balance ?? scan.total_orphan_amount)}`}
+          />
           <SummaryStat label="Total payments" value={scan.uf_payments_total} />
           <SummaryStat label="Matched" value={scan.matched_count} tone="emerald" />
           <SummaryStat label="Orphan" value={scan.orphan_count} tone="red" />
@@ -920,7 +929,12 @@ function CustomerOrphanGroup({
   const [expanded, setExpanded] = useState(false);
   const [targetAccountId, setTargetAccountId] = useState<string>("");
   const [bankAccountId, setBankAccountId] = useState<string>("");
-  const [pickedResolution, setPickedResolution] = useState<string>("");
+  // Pre-select from the match the scanner already made, instead of opening on an
+  // empty "— pick a resolution —" and asking the bookkeeper to reason from
+  // scratch about a payment SNAP has already tied to a real bank deposit at 95%
+  // confidence. A mixed group deliberately gets no default.
+  const recommendation = recommendForGroup(group.items);
+  const [pickedResolution, setPickedResolution] = useState<string>(recommendation.value);
   // Bookkeeper-chosen deposit date. Defaults to today (the bank statement
   // date the bookkeeper is reconciling against), not the payment date —
   // that's the whole reason this exists.
@@ -1063,6 +1077,30 @@ function CustomerOrphanGroup({
         )}
       </div>
 
+      {/* Why the resolution above is pre-selected. A default the bookkeeper
+          can't see the reasoning for is just a guess wearing a uniform. */}
+      {recommendation.why && !scanFinalized && (
+        <div
+          className={`px-3 py-2 text-[11px] leading-relaxed border-t ${
+            recommendation.value === "create_deposit"
+              ? "bg-teal-lighter/30 border-teal/20 text-teal-dark"
+              : recommendation.value === "void_duplicate"
+              ? "bg-red-50 border-red-100 text-red-800"
+              : recommendation.value === ""
+              ? "bg-amber-50 border-amber-100 text-amber-800"
+              : "bg-orange-50 border-orange-100 text-orange-800"
+          }`}
+        >
+          <strong>
+            {recommendation.value === "" ? "Needs a closer look" : "SNAP recommends"}
+            {recommendation.confidence != null &&
+              ` (${Math.round(recommendation.confidence * 100)}% confident)`}
+            :
+          </strong>{" "}
+          {recommendation.why}
+        </div>
+      )}
+
       {expanded && (
         <div className="border-t border-gray-100 bg-gray-50/30">
           {/* Per-payment table */}
@@ -1113,7 +1151,11 @@ function CustomerOrphanGroup({
           <select
             value={pickedResolution}
             onChange={(e) => setPickedResolution(e.target.value)}
-            className="px-2 py-1 rounded border border-gray-200 text-xs"
+            className={`px-2 py-1 rounded text-xs border ${
+              recommendation.value && pickedResolution === recommendation.value
+                ? "border-teal bg-teal-lighter/40 font-semibold text-navy"
+                : "border-gray-200"
+            }`}
           >
             <option value="">— pick a resolution —</option>
             <option value="void_pair">Void pair — payment + invoice (UF & A/R down, no bank)</option>

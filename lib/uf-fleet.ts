@@ -206,3 +206,94 @@ export function sumByAction(worklists: Iterable<UfClientWork>) {
 function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
+
+
+// ── Pre-selecting the resolution in the per-client tool ──────────────────────
+/**
+ * The per-client UF Audit presented an empty "— pick a resolution —" dropdown on
+ * every group, even where the scanner had already matched the payment to a real
+ * bank deposit at 95% confidence. Mike, 2026-08-04: "what it's doing is asking me
+ * to specifically select what is happening ... rather than actually just matching
+ * it and applying it. This tool needs to be way more handholding."
+ *
+ * So: derive the dropdown's default from the match the scanner already made, and
+ * hand back the sentence explaining it. The bookkeeper confirms rather than
+ * reasons from scratch. Values are the per-client tool's own resolution vocabulary
+ * (`create_deposit`, `void_duplicate`, `ask_client`), NOT the fleet UfAction enum,
+ * so the two surfaces stay independently correct.
+ *
+ * Returns "" when the group is genuinely ambiguous — mixed signals must NOT get a
+ * confident default, because a pre-selected wrong answer is worse than a blank.
+ */
+export interface GroupItemLike {
+  payment_amount: number;
+  suspected_duplicate?: boolean | null;
+  probable_deposit_id?: string | null;
+  probable_deposit_date?: string | null;
+  probable_deposit_amount?: number | null;
+  probable_deposit_bank?: string | null;
+  probable_match_confidence?: number | null;
+  applied_invoice_ids?: string[] | null;
+}
+
+export interface GroupRecommendation {
+  /** Default for the resolution <select>. "" = leave it blank on purpose. */
+  value: "" | "create_deposit" | "void_duplicate" | "ask_client";
+  /** One sentence for the bookkeeper. Empty when there is nothing to claim. */
+  why: string;
+  /** Lowest confidence across the matched items, for display. */
+  confidence: number | null;
+}
+
+export function recommendForGroup(items: GroupItemLike[]): GroupRecommendation {
+  const list = items || [];
+  if (list.length === 0) return { value: "", why: "", confidence: null };
+
+  const money = (n: number) =>
+    `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const dupes = list.filter((i) => i.suspected_duplicate);
+  const matched = list.filter((i) => !!i.probable_deposit_id);
+
+  // All duplicates → void. Checked first: a duplicate can also tie to a deposit
+  // by amount, and depositing it would bank the same money twice.
+  if (dupes.length === list.length) {
+    return {
+      value: "void_duplicate",
+      why: `All ${list.length} payment${list.length === 1 ? "" : "s"} in this group look like duplicates of payments already recorded. Voiding removes the double-count without touching the bank.`,
+      confidence: null,
+    };
+  }
+
+  // All matched to a real deposit → create the deposit. This is the case that was
+  // being asked about blind.
+  if (matched.length === list.length && dupes.length === 0) {
+    const first = matched[0];
+    const conf = Math.min(...matched.map((i) => i.probable_match_confidence ?? 1));
+    const total = list.reduce((s, i) => s + Math.abs(i.payment_amount || 0), 0);
+    return {
+      value: "create_deposit",
+      why:
+        list.length === 1
+          ? `The money landed: ${money(Number(first.probable_deposit_amount) || 0)} on ${first.probable_deposit_date || "?"}${first.probable_deposit_bank ? ` into ${first.probable_deposit_bank}` : ""}. Recording the Bank Deposit clears it out of UF.`
+          : `All ${list.length} payments (${money(total)}) tie to real bank deposits${first.probable_deposit_bank ? `, e.g. ${first.probable_deposit_bank} on ${first.probable_deposit_date}` : ""}. Recording the Bank Deposits clears them out of UF.`,
+      confidence: Number.isFinite(conf) ? conf : null,
+    };
+  }
+
+  // Nothing matched anywhere → the client is the only source of truth.
+  if (matched.length === 0 && dupes.length === 0) {
+    return {
+      value: "ask_client",
+      why: `No bank deposit found for any payment in this group. Only the client can say whether the money was deposited elsewhere, refunded, or entered in error.`,
+      confidence: null,
+    };
+  }
+
+  // Mixed. Deliberately no default — expand the group and resolve per payment.
+  return {
+    value: "",
+    why: `Mixed signals: ${matched.length} of ${list.length} tie to a bank deposit${dupes.length ? `, ${dupes.length} look like duplicates` : ""}. Expand and resolve these individually rather than as a group.`,
+    confidence: null,
+  };
+}
