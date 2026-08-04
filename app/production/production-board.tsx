@@ -34,6 +34,24 @@ import { type AttentionState } from "@/lib/client-attention-state";
  * shown as a purple chip in Waiting on Client.
  */
 
+// Why a month is blocked — the major recurring causes (Lisa, 2026-08-04),
+// picked from a dropdown when a card moves to Blocked; "Other" opens text.
+// Stored in status_note (already on the card + API) — no schema change.
+const BLOCKED_REASONS = [
+  "Duplicate payroll",
+  "COA issue",
+  "Undeposited funds",
+  "Duplicate revenue",
+  "Incorrect beginning balances",
+  "Missing accounts",
+  "Retained earnings issues",
+  "Payroll mapping — no employee specifics",
+  "AR issue",
+  "AP issues",
+  "SH / Owner Draw issues",
+  "Other",
+] as const;
+
 const WAITING_REASONS = [
   { id: "waiting_reply", label: "Waiting for reply" },
   { id: "waiting_statements", label: "Waiting for statements" },
@@ -443,6 +461,9 @@ function BoardCard({
   const run = client.run;
   const isPending = run?.status === "pending_review";
   const [editing, setEditing] = useState(false);
+  const [blockedEditing, setBlockedEditing] = useState(false);
+  const [blockedReason, setBlockedReason] = useState<string>("");
+  const [blockedOther, setBlockedOther] = useState("");
   const [saving, setSaving] = useState(false);
   const [reasons, setReasons] = useState<string[]>(run?.waiting_reasons || []);
   const [note, setNote] = useState(run?.status_note || "");
@@ -676,6 +697,8 @@ function BoardCard({
               reopenTo(v);
             } else if (v === "waiting_client") {
               setEditing(true);
+            } else if (v === "stuck") {
+              setBlockedEditing(true);
             } else {
               saveBoard(v, { waiting_reasons: [] });
             }
@@ -737,6 +760,52 @@ function BoardCard({
             ))}
           </select>
           {assigning && <Loader2 size={12} className="animate-spin text-ink-light flex-shrink-0" />}
+        </div>
+      )}
+
+      {/* Blocked reason editor — a status without a why is just a red card. */}
+      {blockedEditing && (
+        <div className="mt-2 p-2 rounded-lg bg-red-50/60 border border-red-200 space-y-1.5">
+          <select
+            value={blockedReason}
+            onChange={(e) => setBlockedReason(e.target.value)}
+            className="w-full text-[11px] px-1.5 py-1 rounded border border-red-200 bg-white text-navy"
+          >
+            <option value="">Why is this month blocked?</option>
+            {BLOCKED_REASONS.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+          {blockedReason === "Other" && (
+            <input
+              value={blockedOther}
+              onChange={(e) => setBlockedOther(e.target.value)}
+              placeholder="What's blocking it?"
+              maxLength={300}
+              className="w-full text-[11px] px-2 py-1 rounded border border-red-200 bg-white"
+            />
+          )}
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => {
+                const note =
+                  blockedReason === "Other" ? blockedOther.trim() : blockedReason;
+                if (!note) return;
+                setBlockedEditing(false);
+                saveBoard("stuck", { waiting_reasons: [], status_note: note });
+              }}
+              disabled={saving || !blockedReason || (blockedReason === "Other" && !blockedOther.trim())}
+              className="text-[11px] font-bold px-2.5 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => setBlockedEditing(false)}
+              className="text-[11px] font-semibold px-2 py-1 rounded text-ink-slate hover:text-navy"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
