@@ -4,6 +4,7 @@ import { buildPackagesBulk } from "@/lib/month-end/package-builder";
 import { generateSummariesBatch } from "@/lib/month-end/generate-summaries";
 import { bulkApproveSummaries } from "@/lib/month-end/bulk-approve";
 import { deliverPackagesBulk } from "@/lib/month-end/send";
+import { ensureNoticeForPeriod } from "@/lib/statement-notices-server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const service = createServiceSupabase();
-  const { data: actor } = await service.from("users").select("role").eq("id", user.id).single();
+  const { data: actor } = await service.from("users").select("role, full_name").eq("id", user.id).single();
   if (!["admin", "lead"].includes((actor as any)?.role || "")) {
     return NextResponse.json({ error: "Forbidden — admin or lead only" }, { status: 403 });
   }
@@ -90,25 +91,42 @@ export async function POST(request: Request) {
       period,
       candidate_count: candidates.length,
       candidates,
-      note: "Nothing published or emailed. Re-send with dry_run:false (optionally client_ids) to publish + email these.",
+      note: "Nothing published or emailed. Re-send with dry_run:false (optionally client_ids) to publish + email these. Any client without a Notice to Reader for the period gets the standard wording filed under you before their statements publish.",
     });
   }
 
   // ── EXECUTE — publish the package + email, one client at a time ──
   const origin = new URL(request.url).origin;
-  const results: Array<{ client_link_id: string; client_name: string; ok: boolean; error?: string; package_id?: string }> = [];
+  const results: Array<{ client_link_id: string; client_name: string; ok: boolean; error?: string; package_id?: string; notice_created?: boolean }> = [];
   for (const c of candidates) {
     const id = c.client_link_id;
     try {
+      // No statements reach a client without a Notice to Reader (Mike
+      // 2026-08-04). This path has no compose step, so file the standard
+      // wording under the acting admin — and if that write fails, publish
+      // nothing for this client. An existing notice is left untouched (its
+      // sent_at must not move, or acks the client already gave go stale).
+      const notice = await ensureNoticeForPeriod(service as any, {
+        clientLinkId: id,
+        clientName: c.client_name,
+        periodYear: py,
+        periodMonth: pm,
+        actingUserId: user.id,
+        actingUserName: (actor as any)?.full_name || null,
+        actingUserEmail: user.email || null,
+      });
       const built = await buildPackagesBulk(service as any, [id], periodRef, user.id, { skipGateCheck: true });
       if (!built[0]?.ok || !built[0].packageId) throw new Error(built[0]?.error || "package build failed");
       const packageId = built[0].packageId;
       const gen = await generateSummariesBatch(service as any, [packageId]);
       if (gen.failed > 0) throw new Error(gen.errors.join("; ") || "summary generation failed");
       await bulkApproveSummaries(service as any, [packageId], user.id);
-      const delivered = await deliverPackagesBulk(service as any, [packageId], user.id, origin, { force: true });
+      const delivered = await deliverPackagesBulk(service as any, [packageId], user.id, origin, {
+        force: true,
+        includesNotice: true,
+      });
       if (delivered.failed > 0) throw new Error(delivered.results?.[0]?.error || "delivery failed");
-      results.push({ client_link_id: id, client_name: c.client_name, ok: true, package_id: packageId });
+      results.push({ client_link_id: id, client_name: c.client_name, ok: true, package_id: packageId, notice_created: notice.created });
     } catch (e: any) {
       results.push({ client_link_id: id, client_name: c.client_name, ok: false, error: String(e?.message || e).slice(0, 400) });
     }

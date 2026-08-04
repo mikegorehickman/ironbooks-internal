@@ -36,6 +36,24 @@ console.log("boilerplate compliance");
   ok("mentions the reply affordance", /reply/i.test(b));
 }
 {
+  // MANDATORY-NOTICE guard (Mike 2026-08-04): the send route substitutes this
+  // text whenever a caller supplies none (the board's mark_complete), and the
+  // backfill files it for closes that never had a compose step. An empty or
+  // assurance-claiming return would silently defeat "no statements without a
+  // notice", so degenerate inputs must still yield a compliant letter.
+  for (const [name, args] of [
+    ["empty client name", ["", "July 2026"]],
+    ["empty period label", ["Test Painting Co", ""]],
+    ["both empty", ["", ""]],
+    ["punctuation-only name", ["   ", "—"]],
+  ] as Array<[string, [string, string]]>) {
+    const b = DEFAULT_BOILERPLATE(args[0], args[1]);
+    ok(`fallback non-empty — ${name}`, b.trim().length > 100);
+    ok(`fallback still disclaims — ${name}`, /not been audited or reviewed/i.test(b) && /no assurance/i.test(b));
+    eq(`fallback claims nothing — ${name}`, assuranceProblems(b).length, 0);
+  }
+}
+{
   ok("catches 'we have audited'", assuranceProblems("We have audited these statements").length > 0);
   ok("catches 'in our opinion'", assuranceProblems("In our opinion the statements present fairly").length >= 2);
   ok("clean text passes", assuranceProblems("These are management-use statements.").length === 0);

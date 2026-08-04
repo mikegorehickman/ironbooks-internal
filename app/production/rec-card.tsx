@@ -179,10 +179,9 @@ export function ClientRecCard({
   const [redFlags, setRedFlags] = useState<any[] | null>(null);
   // Notice to Reader — the client-visible letter that rides the close
   //  (migration 156): boilerplate + AI-suggested section + custom, all edited
-  //  here. Boilerplate is the backbone — panel closed or boilerplate empty
-  //  means no notice this month.
-  const [ntrOpen, setNtrOpen] = useState(false);
-  const [ntrTouched, setNtrTouched] = useState(false);
+  //  here. MANDATORY (Mike 2026-08-04): every client gets one and no statements
+  //  go out without it, so there's no on/off toggle — the standard wording is
+  //  prefilled and the server refuses a send whose notice didn't persist.
   const [ntrBoilerplate, setNtrBoilerplate] = useState("");
   const [ntrAi, setNtrAi] = useState("");
   const [ntrCustom, setNtrCustom] = useState("");
@@ -198,17 +197,12 @@ export function ClientRecCard({
     setConcerns(client.run?.concerns || "");
   }, [client.run]);
 
-  // Entering the review step: prefill the notice boilerplate, and default the
-  // panel OPEN when the month has something worth telling the client about
-  // (failing checks or internal concerns) — closed otherwise so a clean month's
-  // send isn't lengthened.
+  // Entering the review step: prefill the notice with the standard wording. The
+  // notice is mandatory, so this is a prefill the sender edits — never an empty
+  // box they have to opt into.
   useEffect(() => {
     if (!reviewing) return;
     setNtrBoilerplate((cur) => cur || DEFAULT_BOILERPLATE(client.client_name, periodLabel(period)));
-    if (!ntrTouched) {
-      const flagged = !!(concerns.trim() || (localRun?.checks?.overall && localRun.checks.overall !== "pass"));
-      if (flagged) setNtrOpen(true);
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewing]);
 
@@ -315,6 +309,12 @@ export function ClientRecCard({
   }
 
   async function sendToClient(overrideReason?: string, managerOverrideReason?: string) {
+    // The notice is mandatory — catch a blanked box here so the manager fixes it
+    // in place instead of bouncing off the server's 400 after the attestation.
+    if (!ntrBoilerplate.trim()) {
+      setError("The Notice to Reader can't be blank — restore the standard wording above, then send.");
+      return;
+    }
     setCompleting(true);
     setError("");
     try {
@@ -327,11 +327,10 @@ export function ClientRecCard({
           attested: true,
           attest_scope: attestScope,
           concerns,
-          // Notice to Reader rides the close; null = none this month.
-          ntr:
-            ntrOpen && ntrBoilerplate.trim()
-              ? { boilerplate: ntrBoilerplate, ai: ntrAi, custom: ntrCustom }
-              : null,
+          // Notice to Reader rides every close — mandatory, never null. (If it
+          // somehow arrives empty the server substitutes the standard wording
+          // rather than letting statements out without a notice.)
+          ntr: { boilerplate: ntrBoilerplate, ai: ntrAi, custom: ntrCustom },
           ...(overrideReason ? { override_reason: overrideReason } : {}),
           ...(managerOverrideReason ? { manager_override_reason: managerOverrideReason } : {}),
         }),
@@ -370,13 +369,9 @@ export function ClientRecCard({
         }
         throw new Error(json.error || `HTTP ${res.status}`);
       }
-      if (json.notice_error) {
-        setSendWarning(
-          "Month closed and statements sent — but the Notice to Reader did NOT save (" +
-            json.notice_error +
-            "). Nothing promised it to the client; re-send the month to attach it."
-        );
-      }
+      // No notice_error branch here on purpose: the notice is mandatory and the
+      // server aborts the send (before anything client-visible) if it can't be
+      // recorded, so a 200 always means the client has one.
       if (json.email_delivery && !json.email_delivery.sent) {
         setSendWarning(
           json.email_delivery.reason === "no_portal_user" || json.email_delivery.reason === "no_active_email"
@@ -770,22 +765,27 @@ export function ClientRecCard({
                   is part of reviewing the month — attesting is the last
                   gesture before send. */}
               <div className="bg-white border border-gray-200 rounded-xl px-3 py-3 space-y-2">
-                <button
-                  type="button"
-                  onClick={() => { setNtrOpen((v) => !v); setNtrTouched(true); }}
-                  className="w-full flex items-center gap-1.5 text-left"
-                >
-                  <span className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${ntrOpen ? "bg-teal text-white" : "bg-gray-200 text-ink-slate"}`}>
-                    {ntrOpen ? "✓" : "+"}
-                  </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold bg-teal text-white">✓</span>
                   <span className="text-xs font-bold text-navy">
-                    {ntrOpen ? "Notice to Reader — going to the client with this close" : "Add a Notice to Reader (client-visible)"}
+                    Notice to Reader — going to the client with this close
                   </span>
-                </button>
-                {ntrOpen && (
-                  <div className="space-y-2.5 pt-1">
+                  <span className="text-[10px] font-bold text-teal-dark bg-teal/10 rounded px-1.5 py-0.5">Required</span>
+                </div>
+                <div className="space-y-2.5 pt-1">
                     <div>
-                      <div className="text-[11px] font-semibold text-ink-slate mb-1">Standard notice (edit as needed)</div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-semibold text-ink-slate">Standard notice (edit as needed)</span>
+                        {ntrBoilerplate.trim() !== DEFAULT_BOILERPLATE(client.client_name, periodLabel(period)).trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setNtrBoilerplate(DEFAULT_BOILERPLATE(client.client_name, periodLabel(period)))}
+                            className="text-[11px] font-bold text-teal hover:underline"
+                          >
+                            Restore standard wording
+                          </button>
+                        )}
+                      </div>
                       <textarea
                         value={ntrBoilerplate}
                         onChange={(e) => setNtrBoilerplate(e.target.value)}
@@ -842,11 +842,16 @@ export function ClientRecCard({
                         </div>
                       ) : null;
                     })()}
+                    {!ntrBoilerplate.trim() && (
+                      <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">
+                        Every client&apos;s statements go out with a Notice to Reader — the standard wording can&apos;t be left blank.
+                        Use <strong>Restore standard wording</strong> above.
+                      </div>
+                    )}
                     <div className="text-[11px] text-ink-light">
                       The client sees this when they open their P&amp;L — every visit until they acknowledge it — and can reply to you from it.
                     </div>
-                  </div>
-                )}
+                </div>
               </div>
 
               {/* Attest the scope that's actually accurate. When a Balance

@@ -8,6 +8,7 @@ import {
   buildNoticeDraftPrompt,
   noticePeriodLabel,
   toRunPeriod,
+  DEFAULT_BOILERPLATE,
   type ReceiptLike,
 } from "./statement-notices";
 
@@ -176,4 +177,57 @@ export async function fetchReceipt(
     if (noticeTablesMissing(err)) return null;
     throw err;
   }
+}
+
+/**
+ * Guarantee a Notice to Reader exists for a period before statements are
+ * published — the "no P&L goes out without a notice" rule (Mike 2026-08-04)
+ * applied to paths that publish a package WITHOUT the rec-card compose step
+ * (the admin portal-package backfill). If a notice is already on file it is
+ * left completely alone: the manager's wording wins, and sent_at is NOT bumped
+ * (bumping would silently invalidate acknowledgements the client already gave).
+ * Otherwise the standard boilerplate is filed under the acting admin.
+ *
+ * Throws on failure — callers must treat that as "don't publish".
+ */
+export async function ensureNoticeForPeriod(
+  service: any,
+  opts: {
+    clientLinkId: string;
+    clientName: string;
+    periodYear: number;
+    periodMonth: number;
+    actingUserId: string;
+    actingUserName?: string | null;
+    actingUserEmail?: string | null;
+  }
+): Promise<{ created: boolean; noticeId: string | null }> {
+  const existing = await fetchNoticeForPeriod(
+    service,
+    opts.clientLinkId,
+    opts.periodYear,
+    opts.periodMonth
+  );
+  if (existing) return { created: false, noticeId: existing.id };
+
+  const label = noticePeriodLabel(opts.periodYear, opts.periodMonth);
+  const now = new Date().toISOString();
+  const { data, error } = await (service as any)
+    .from("statement_notices")
+    .insert({
+      client_link_id: opts.clientLinkId,
+      period_year: opts.periodYear,
+      period_month: opts.periodMonth,
+      boilerplate_body: DEFAULT_BOILERPLATE(opts.clientName, label),
+      sent_by: opts.actingUserId,
+      sent_by_name: opts.actingUserName || null,
+      sent_by_email: opts.actingUserEmail || null,
+      sent_at: now,
+      resend_count: 0,
+      updated_at: now,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return { created: true, noticeId: (data as any)?.id ?? null };
 }

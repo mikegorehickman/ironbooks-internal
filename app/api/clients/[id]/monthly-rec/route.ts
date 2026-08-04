@@ -8,6 +8,7 @@ import {
   runMonthlyRecChecks,
 } from "@/lib/monthly-rec";
 import { emailPortalUsersAboutMessage } from "@/lib/client-comms";
+import { DEFAULT_BOILERPLATE } from "@/lib/statement-notices";
 import {
   runBooksVerification,
   recomputeStoredVerification,
@@ -552,7 +553,12 @@ export async function POST(
       `Your DRAFT ${monthLabel} numbers so far:`,
       ...glance.slice(1),
       ``,
-      `These are draft figures — we'll finalize and send your official statements once we hear back. Just reply to this message.`,
+      // The formal Notice to Reader rides the CLOSE (senior-gated, ack-tracked);
+      // a draft send is a junior asking a question over provisional numbers, so
+      // it can't require one — but no figures leave SNAP without the disclaimer,
+      // so it's stated inline here.
+      `These are DRAFT figures compiled from your QuickBooks records — not final, and not audited or reviewed. ` +
+        `We'll finalize and send your official statements, with a Notice to Reader, once we hear back. Just reply to this message.`,
     ].join("\n");
     const draftSubject = `DRAFT ${monthLabel} financials — quick question`;
 
@@ -878,55 +884,72 @@ export async function POST(
       `See your full financial statements in your portal.`,
     ].join("\n");
 
-    // 0. Notice to Reader — written FIRST, before anything client-visible, so
-    //    the email teaser and the portal notification can never promise a
-    //    notice that failed to persist (under-promise is the house rule —
-    //    see balanceSheetAvailable in lib/month-end/email.ts). A re-send
-    //    upserts the same (client, period) row and bumps sent_at, which
-    //    self-invalidates every stale acknowledgement (ack ⟺
+    // 0. Notice to Reader — MANDATORY on every close (Mike 2026-08-04: "all
+    //    clients need the NTR by default, and no P&L should be able to go out
+    //    without it"). Written FIRST, before anything client-visible, and it is
+    //    a HARD GATE: if it can't be recorded we abort here, having written
+    //    nothing — no portal notification, no package, no email. That's the
+    //    only ordering that can honour "no statements without a notice"; the
+    //    old behaviour (continue without a teaser) is exactly what mandatory
+    //    rules out.
+    //
+    //    A re-send upserts the same (client, period) row and bumps sent_at,
+    //    which self-invalidates every stale acknowledgement (ack ⟺
     //    receipt.acknowledged_at >= sent_at — lib/statement-notices.ts).
+    //
+    //    The board's mark_complete carries no composed notice, so the standard
+    //    wording is substituted server-side rather than blocking the close —
+    //    mandatory means "always present", not "always hand-written".
     const ntrBody = body.ntr && typeof body.ntr === "object" ? body.ntr : null;
-    const ntrBoilerplate = String(ntrBody?.boilerplate || "").trim().slice(0, 8000);
+    const ntrBoilerplate =
+      String(ntrBody?.boilerplate || "").trim().slice(0, 8000) ||
+      DEFAULT_BOILERPLATE(clientName, monthLabel);
     const ntrAi = String(ntrBody?.ai || "").trim().slice(0, 8000) || null;
     const ntrCustom = String(ntrBody?.custom || "").trim().slice(0, 8000) || null;
-    const wantsNotice = !!ntrBoilerplate; // boilerplate is the required backbone
     let noticePersisted = false;
-    let noticeError: string | null = null;
-    if (wantsNotice) {
-      try {
-        const { data: prior } = await (service as any)
-          .from("statement_notices")
-          .select("id, resend_count")
-          .eq("client_link_id", clientLinkId)
-          .eq("period_year", y)
-          .eq("period_month", m)
-          .maybeSingle();
-        const noticeRow: any = {
-          client_link_id: clientLinkId,
-          period_year: y,
-          period_month: m,
-          monthly_rec_run_id: existing.id,
-          month_end_package_id: null, // patched after the package builds
-          boilerplate_body: ntrBoilerplate,
-          ai_body: ntrAi,
-          custom_body: ntrCustom,
-          sent_by: user.id,
-          sent_by_name: (actor as any)?.full_name || null,
-          sent_by_email: user.email || null,
-          sent_at: now,
-          resend_count: prior ? ((prior as any).resend_count || 0) + 1 : 0,
-          updated_at: now,
-        };
-        const { error: nErr } = await (service as any)
-          .from("statement_notices")
-          .upsert(noticeRow, { onConflict: "client_link_id,period_year,period_month" });
-        if (nErr) throw nErr;
-        noticePersisted = true;
-      } catch (e: any) {
-        // The send continues — but with NO teaser and NO notification line, so
-        // nothing promises what isn't there.
-        noticeError = String(e?.message || e).slice(0, 500);
-      }
+    try {
+      const { data: prior } = await (service as any)
+        .from("statement_notices")
+        .select("id, resend_count")
+        .eq("client_link_id", clientLinkId)
+        .eq("period_year", y)
+        .eq("period_month", m)
+        .maybeSingle();
+      const noticeRow: any = {
+        client_link_id: clientLinkId,
+        period_year: y,
+        period_month: m,
+        monthly_rec_run_id: existing.id,
+        month_end_package_id: null, // patched after the package builds
+        boilerplate_body: ntrBoilerplate,
+        ai_body: ntrAi,
+        custom_body: ntrCustom,
+        sent_by: user.id,
+        sent_by_name: (actor as any)?.full_name || null,
+        sent_by_email: user.email || null,
+        sent_at: now,
+        resend_count: prior ? ((prior as any).resend_count || 0) + 1 : 0,
+        updated_at: now,
+      };
+      const { error: nErr } = await (service as any)
+        .from("statement_notices")
+        .upsert(noticeRow, { onConflict: "client_link_id,period_year,period_month" });
+      if (nErr) throw nErr;
+      noticePersisted = true;
+    } catch (e: any) {
+      const detail = String(e?.message || e).slice(0, 300);
+      return NextResponse.json(
+        {
+          error:
+            "Statements were NOT sent — the Notice to Reader couldn't be saved, and no client statements go out without one. " +
+            `Nothing was published or emailed. (${detail})` +
+            (/statement_notices|does not exist|schema cache/i.test(detail)
+              ? " Migration 156 may not be applied on this environment."
+              : ""),
+          notice_error: detail,
+        },
+        { status: 500 }
+      );
     }
 
     // 1. Portal notification — amber Bell card in their Messages, red
@@ -939,10 +962,11 @@ export async function POST(
         direction: "to_client",
         kind: "notification",
         subject: `Your ${monthLabel} financials are ready`,
-        body: noticePersisted
-          ? summaryBody +
-            "\n\nIncludes a Notice to Reader from your bookkeeping team — it will appear when you open your Profit & Loss."
-          : summaryBody,
+        // The notice is guaranteed by the gate above, so this line is always
+        // true when the notification exists.
+        body:
+          summaryBody +
+          "\n\nIncludes a Notice to Reader from your bookkeeping team — it will appear when you open your Profit & Loss.",
         attachments: [],
       });
     } catch (e: any) {
@@ -1002,7 +1026,7 @@ export async function POST(
 
     // 2c. Link the notice to the package it shipped with — best-effort; the
     //     notice already stands on its own (client + period).
-    if (noticePersisted && packageId) {
+    if (packageId) {
       try {
         await (service as any)
           .from("statement_notices")
@@ -1066,23 +1090,22 @@ export async function POST(
 
     // The notice's full body is snapshotted to the audit log — re-sends
     //    overwrite the row, so this is where history lives.
-    if (noticePersisted) {
-      try {
-        await (service as any).from("audit_log").insert({
-          event_type: "statement_notice_sent",
-          user_id: user.id,
-          request_payload: {
-            client_link_id: clientLinkId,
-            client_name: clientName,
-            period,
-            boilerplate_body: ntrBoilerplate,
-            ai_body: ntrAi,
-            custom_body: ntrCustom,
-            sent_by_name: (actor as any)?.full_name || null,
-          },
-        });
-      } catch { /* best-effort */ }
-    }
+    try {
+      await (service as any).from("audit_log").insert({
+        event_type: "statement_notice_sent",
+        user_id: user.id,
+        request_payload: {
+          client_link_id: clientLinkId,
+          client_name: clientName,
+          period,
+          boilerplate_body: ntrBoilerplate,
+          ai_body: ntrAi,
+          custom_body: ntrCustom,
+          sent_by_name: (actor as any)?.full_name || null,
+          composed: !!String(ntrBody?.boilerplate || "").trim(), // false = standard wording substituted
+        },
+      });
+    } catch { /* best-effort */ }
 
     // A below-threshold send is a real event — audit it so the Approvals
     // overrides widget and any later review can see who/why.
@@ -1158,9 +1181,8 @@ export async function POST(
       month_end_package_id: packageId,
       package_error: packageError,
       qbo_close_error: qboCloseError,
-      // NULL when no notice was requested; a message means the month closed but
-      // the Notice to Reader did NOT persist (and nothing promised it).
-      notice_error: noticeError,
+      // Always true here — a notice that can't be saved aborts the send above,
+      // so reaching this response means the client has one.
       notice_sent: noticePersisted,
     });
   }
