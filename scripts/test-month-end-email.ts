@@ -5,6 +5,7 @@
  *  tagged "owed BS" (client_links.bs_enabled === false) have no balance sheet
  *  behind the portal tab, so the email must not mention one.
  */
+export {}; // module scope — keeps `pass`/`fail` from colliding with other global test scripts
 const cap: any[] = [];
 (globalThis as any).fetch = async (_u: string, i: any) => { cap.push(JSON.parse(i.body)); return { ok: true, json: async () => ({ id: "x" }) } as any; };
 process.env.RESEND_API_KEY = "k";

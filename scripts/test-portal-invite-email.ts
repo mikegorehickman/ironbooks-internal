@@ -5,6 +5,7 @@
  *  client are a malformed From header, an unescaped client name, a template
  *  literal that didn't interpolate, or a link the button doesn't carry.
  */
+export {}; // module scope — keeps `pass`/`fail` from colliding with other global test scripts
 const captured: any[] = [];
 (globalThis as any).fetch = async (_u: string, init: any) => {
   captured.push(JSON.parse(init.body));
