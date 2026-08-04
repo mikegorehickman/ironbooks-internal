@@ -34,6 +34,24 @@ import { type AttentionState } from "@/lib/client-attention-state";
  * shown as a purple chip in Waiting on Client.
  */
 
+// Why a month is blocked — the major recurring causes (Lisa, 2026-08-04),
+// picked from a dropdown when a card moves to Blocked; "Other" opens text.
+// Stored in status_note (already on the card + API) — no schema change.
+const BLOCKED_REASONS = [
+  "Duplicate payroll",
+  "COA issue",
+  "Undeposited funds",
+  "Duplicate revenue",
+  "Incorrect beginning balances",
+  "Missing accounts",
+  "Retained earnings issues",
+  "Payroll mapping — no employee specifics",
+  "AR issue",
+  "AP issues",
+  "SH / Owner Draw issues",
+  "Other",
+] as const;
+
 const WAITING_REASONS = [
   { id: "waiting_reply", label: "Waiting for reply" },
   { id: "waiting_statements", label: "Waiting for statements" },
@@ -443,6 +461,9 @@ function BoardCard({
   const run = client.run;
   const isPending = run?.status === "pending_review";
   const [editing, setEditing] = useState(false);
+  const [blockedEditing, setBlockedEditing] = useState(false);
+  const [blockedReason, setBlockedReason] = useState<string>("");
+  const [blockedOther, setBlockedOther] = useState("");
   const [saving, setSaving] = useState(false);
   const [reasons, setReasons] = useState<string[]>(run?.waiting_reasons || []);
   const [note, setNote] = useState(run?.status_note || "");
@@ -676,6 +697,8 @@ function BoardCard({
               reopenTo(v);
             } else if (v === "waiting_client") {
               setEditing(true);
+            } else if (v === "stuck") {
+              setBlockedEditing(true);
             } else {
               saveBoard(v, { waiting_reasons: [] });
             }
@@ -694,6 +717,9 @@ function BoardCard({
               <option value="stuck">Blocked (this month)</option>
               <option value="waiting_client">Waiting on client</option>
               <option value="ready_for_review">Ready for manager review</option>
+              {isSenior && !isComplete && (
+                <option value="failed_review">⤺ Failed Review — send back</option>
+              )}
               <option value="completed">✓ Completed</option>
             </>
           )}
@@ -734,6 +760,52 @@ function BoardCard({
             ))}
           </select>
           {assigning && <Loader2 size={12} className="animate-spin text-ink-light flex-shrink-0" />}
+        </div>
+      )}
+
+      {/* Blocked reason editor — a status without a why is just a red card. */}
+      {blockedEditing && (
+        <div className="mt-2 p-2 rounded-lg bg-red-50/60 border border-red-200 space-y-1.5">
+          <select
+            value={blockedReason}
+            onChange={(e) => setBlockedReason(e.target.value)}
+            className="w-full text-[11px] px-1.5 py-1 rounded border border-red-200 bg-white text-navy"
+          >
+            <option value="">Why is this month blocked?</option>
+            {BLOCKED_REASONS.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+          {blockedReason === "Other" && (
+            <input
+              value={blockedOther}
+              onChange={(e) => setBlockedOther(e.target.value)}
+              placeholder="What's blocking it?"
+              maxLength={300}
+              className="w-full text-[11px] px-2 py-1 rounded border border-red-200 bg-white"
+            />
+          )}
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => {
+                const note =
+                  blockedReason === "Other" ? blockedOther.trim() : blockedReason;
+                if (!note) return;
+                setBlockedEditing(false);
+                saveBoard("stuck", { waiting_reasons: [], status_note: note });
+              }}
+              disabled={saving || !blockedReason || (blockedReason === "Other" && !blockedOther.trim())}
+              className="text-[11px] font-bold px-2.5 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => setBlockedEditing(false)}
+              className="text-[11px] font-semibold px-2 py-1 rounded text-ink-slate hover:text-navy"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -799,6 +871,15 @@ function BoardCard({
         </div>
       )}
 
+      {run?.status === "failed_review" && (
+        <FailedReviewPanel
+          clientId={client.id}
+          period={period}
+          notes={(run as any)?.review_notes || ""}
+          onResent={onChanged}
+        />
+      )}
+
       {isPending && run?.has_concerns && (
         <div className="mt-1.5 flex items-center gap-1 text-[10px] text-amber-800">
           <AlertCircle size={10} />
@@ -806,6 +887,110 @@ function BoardCard({
         </div>
       )}
 
+    </div>
+  );
+}
+
+// ─── Failed Review: fix-list + resend ───────────────────────────────────────
+// The manager's reject note becomes a checklist the bookkeeper ticks off as
+// they fix each item; "Resend for review" unlocks only when everything is
+// ticked, and re-submits the month (pending_review) with a re-attestation
+// confirm. Tick state is per-browser working state — the checklist's job ends
+// at resubmission, when the reject itself is cleared.
+function FailedReviewPanel({
+  clientId,
+  period,
+  notes,
+  onResent,
+}: {
+  clientId: string;
+  period: string;
+  notes: string;
+  onResent: () => void;
+}) {
+  // One checklist item per line of the note (bullets/dashes stripped).
+  const items = notes
+    .split(/\n+|;\s+/)
+    .map((l) => l.replace(/^[-•*\d.)\s]+/, "").trim())
+    .filter((l) => l.length > 2);
+  const storageKey = `failed-review-${clientId}-${period}`;
+  const [done, setDone] = useState<boolean[]>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const arr = raw ? JSON.parse(raw) : [];
+      return items.map((_, i) => arr[i] === true);
+    } catch {
+      return items.map(() => false);
+    }
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function toggle(i: number) {
+    setDone((prev) => {
+      const next = prev.map((v, j) => (j === i ? !v : v));
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  const allDone = items.length === 0 || done.every(Boolean);
+
+  async function resend() {
+    if (
+      !confirm(
+        "Resend this month for manager review?\n\nYou're confirming the flagged items are fixed and re-attesting the statements."
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/clients/${clientId}/monthly-rec`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "submit", period, attested: true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      try { localStorage.removeItem(storageKey); } catch {}
+      onResent();
+    } catch (e: any) {
+      setError(e?.message || "Couldn't resend");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 p-2 rounded-lg bg-red-50/60 border border-red-200 space-y-1.5">
+      <div className="text-[10px] font-bold uppercase tracking-wide text-red-800">
+        Fix these, tick each off, then resend
+      </div>
+      {items.length === 0 ? (
+        <p className="text-[11px] text-ink-slate">No note was left — check with the manager.</p>
+      ) : (
+        items.map((item, i) => (
+          <label key={i} className="flex items-start gap-2 text-[11px] text-navy cursor-pointer">
+            <input
+              type="checkbox"
+              checked={done[i] || false}
+              onChange={() => toggle(i)}
+              className="mt-0.5 w-3.5 h-3.5 rounded border-gray-300 text-teal-dark"
+            />
+            <span className={done[i] ? "line-through text-ink-light" : ""}>{item}</span>
+          </label>
+        ))
+      )}
+      <button
+        onClick={resend}
+        disabled={busy || !allDone}
+        title={allDone ? "Re-submit for manager review" : "Tick every item first"}
+        className="w-full text-[11px] font-bold px-2.5 py-1.5 rounded bg-teal text-white hover:bg-teal-dark disabled:opacity-40"
+      >
+        {busy ? "Resending…" : "Resend for review →"}
+      </button>
+      {error && <div className="text-[11px] text-red-700">{error}</div>}
     </div>
   );
 }
