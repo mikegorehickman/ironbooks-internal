@@ -47,7 +47,7 @@ import type {
   ProgressStage,
 } from "@/lib/internal-client-profile";
 import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
-import { buildPLHierarchy, type PLHierSection as PLHierSectionData } from "@/lib/pl-hierarchy";
+import { buildPLHierarchy, formatPctOfIncome, type PLHierSection as PLHierSectionData } from "@/lib/pl-hierarchy";
 import { ClientDetailsCard } from "./client-details-card";
 import { ResendLoginLink } from "./resend-login-link";
 import { PortalUsersCard } from "./portal-users-card";
@@ -1557,7 +1557,7 @@ function PLTab({
               end. Amounts come from the report; structure from the COA. */}
           {hier.sections.map((s) => (
             <div key={s.key}>
-              <PLHierSection section={s} income={pl.totalIncome} onDrill={onDrill} />
+              <PLHierSection section={s} onDrill={onDrill} />
               {s.key === "cogs" && (
                 <div className="mt-2">
                   <PLResultBand label="Gross Profit" amount={grossProfit} pct={grossMarginPct} />
@@ -1616,14 +1616,18 @@ function PLHierSection({
   onDrill,
 }: {
   section: PLHierSectionData;
-  income: number;
   onDrill: (accountId: string, accountName: string) => void;
 }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
         <span className="text-sm font-bold text-navy">{section.title}</span>
-        <span className="text-sm font-mono font-semibold text-navy">{formatCurrency(section.total)}</span>
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-mono font-semibold text-navy">{formatCurrency(section.total)}</span>
+          <span className="text-[10px] uppercase tracking-wider font-semibold text-ink-slate w-14 text-right hidden sm:block">
+            % of income
+          </span>
+        </div>
       </div>
       <div className="divide-y divide-gray-50">
         {section.rows.map((r, i) => {
@@ -1650,11 +1654,20 @@ function PLHierSection({
                   {r.name}
                 </span>
               )}
-              {/* Parent header carries no amount (it's on the Total row). */}
+              {/* Parent header carries no amount (it's on the Total row), so it
+                  carries no percentage either — same QBO convention. */}
               {!isParentHeader && (
-                <span className={`text-sm font-mono whitespace-nowrap ${r.isTotalRow ? "font-semibold text-navy" : r.total < 0 ? "text-red-600" : "text-navy"}`}>
-                  {formatCurrency(r.total)}
-                </span>
+                <div className="flex items-center gap-4">
+                  <span className={`text-sm font-mono whitespace-nowrap ${r.isTotalRow ? "font-semibold text-navy" : r.total < 0 ? "text-red-600" : "text-navy"}`}>
+                    {formatCurrency(r.total)}
+                  </span>
+                  <span
+                    className={`text-xs font-mono w-14 text-right hidden sm:block ${r.isTotalRow ? "font-semibold text-teal-dark" : "text-teal-dark"}`}
+                    title="Share of total income"
+                  >
+                    {formatPctOfIncome(r.pctOfIncome)}
+                  </span>
+                </div>
               )}
             </div>
           );
