@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { recommendForGroup } from "@/lib/uf-fleet";
+import { AutoApplyMatchesButton } from "./auto-apply-button";
 import Link from "next/link";
 import { playSound } from "@/lib/sounds";
 import {
@@ -474,6 +475,9 @@ export function UfAuditClient({
               <RefreshCw size={11} />
               Re-scan
             </button>
+            {scan.status !== "finalized" && (
+              <AutoApplyMatchesButton clientLinkId={clientLinkId} scanId={scan.id} />
+            )}
           </div>
         </div>
         <div className="grid grid-cols-4 gap-3 mt-4 text-sm">
