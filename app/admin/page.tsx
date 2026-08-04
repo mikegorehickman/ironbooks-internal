@@ -299,6 +299,7 @@ export default async function AdminOverviewPage() {
             { href: "/admin/bulk-email", icon: Mail, title: "Bulk email", desc: "Email some or all clients · rich text · unsubscribe-aware" },
             { href: "/admin/resync-logins", icon: RefreshCw, title: "Re-sync portal logins", desc: "Repoint client login emails that drifted from their contact email" },
             { href: "/admin/bank-rules", icon: ListChecks, title: "Bank rules — fleet", desc: "Which clients have / haven't had their rules applied · one-click .xls per client" },
+            { href: "/admin/book-health", icon: CheckCheck, title: "Book health — the defect ledger", desc: "Every known accuracy defect, per client · how many books we can stand behind · start here, then use the scanners below" },
             { href: "/admin/revenue-integrity", icon: Landmark, title: "Revenue integrity", desc: "Deposits posted straight into revenue — the invoice+deposit double-count · fleet report" },
             { href: "/admin/crm-invoice-revenue", icon: ReceiptText, title: "CRM invoice revenue", desc: "CRM-pushed invoices double-counting deposit revenue · review pairs + deposits-only per client" },
             { href: "/coa-audit", icon: ListChecks, title: "COA audit", desc: "Chart conformance vs the master COA · cleanup stage · stranded $ · open to all bookkeeping staff" },
