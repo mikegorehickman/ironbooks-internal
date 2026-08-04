@@ -395,6 +395,78 @@ export function isClientShapedPath(path: string): boolean {
   return resolvePathContext(path) !== null;
 }
 
+// ── Page-dwell attribution (migration 155) ──────────────────────────────────
+// Recorded ONLY while a timer is running, so a session can be broken down by
+// page. Shared by the widget (which writes) and the report (which rolls up), so
+// both agree on what counts as "the same page".
+
+/** Ping cadence for the open page view. Matches HEARTBEAT_MS — the widget
+ *  piggybacks on the same tick, and it's what caps an abandoned tab. */
+export const PAGE_PING_MS = HEARTBEAT_MS;
+
+/**
+ * Collapse a pathname to an aggregatable route: uuids → ":id", trailing
+ * numeric ids → ":n". Query strings are dropped by the caller and never
+ * stored — tokens and client params don't belong in telemetry.
+ *
+ *   /clients/68f5.../messages  →  /clients/:id/messages
+ */
+export function normalizeRoute(path: string): string {
+  const qIdx = path.indexOf("?");
+  const pathname = (qIdx >= 0 ? path.slice(0, qIdx) : path).replace(/\/+$/, "") || "/";
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts.length === 0) return "/";
+  return (
+    "/" +
+    parts
+      .map((p) => (UUID_RE.test(p) ? ":id" : /^\d+$/.test(p) ? ":n" : p))
+      .join("/")
+  );
+}
+
+/**
+ * Human label for a normalized route, for the audit UI. Longest prefix wins,
+ * so /clients/:id/messages beats /clients/:id. Unknown routes fall back to the
+ * route itself — better an honest path than a wrong guess.
+ */
+const ROUTE_LABELS: Record<string, string> = {
+  "/today": "Home — daily review",
+  "/today/:id": "Daily review — one client",
+  "/inbox": "Client inbox",
+  "/tasks": "Tasks",
+  "/clients": "Client list",
+  "/clients/:id": "Client overview",
+  "/clients/:id/messages": "Client messages",
+  "/clients/:id/cpa": "CPA round-trip",
+  "/reclass/:id": "Reclass review",
+  "/reclass/new": "Reclass — setup",
+  "/jobs/:id": "COA cleanup job",
+  "/jobs/new": "COA cleanup — setup",
+  "/rules/:id": "Bank-rule discovery",
+  "/balance-sheet": "Balance sheet cleanup",
+  "/balance-sheet/:id": "Balance sheet cleanup",
+  "/balance-sheet/uf-ar/:id": "Unapplied A/R",
+  "/monthly-close": "Monthly close board",
+  "/production": "Production board",
+  "/approvals": "Approvals",
+  "/statements": "Statements",
+  "/revenue-check/:id": "Revenue check",
+  "/tax-audit/:id": "Tax audit",
+  "/stripe-recon/:id": "Stripe reconciliation",
+  "/time-report": "Time report",
+  "/handbook": "Handbook",
+};
+
+export function describeRoute(route: string): string {
+  if (ROUTE_LABELS[route]) return ROUTE_LABELS[route];
+  // Longest matching prefix, so unlisted leaf pages inherit their section.
+  let best = "";
+  for (const key of Object.keys(ROUTE_LABELS)) {
+    if (route.startsWith(key + "/") && key.length > best.length) best = key;
+  }
+  return best ? `${ROUTE_LABELS[best]} — ${route.slice(best.length + 1)}` : route;
+}
+
 // ── Formatting ──────────────────────────────────────────────────────────────
 
 /** Ticking clock: "12:34" under an hour, "1:04:09" over. */

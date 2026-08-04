@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, ChevronDown, ChevronRight, Clock, Download, Layers, Loader2, MessageSquare,
-  Pencil, Search, SlidersHorizontal, Trash2, Users,
+  MousePointerClick, Pencil, Search, SlidersHorizontal, Trash2, Users,
 } from "lucide-react";
 import { formatDuration } from "@/lib/time-tracking";
 
@@ -256,6 +256,9 @@ export function TimeReportClient({ initialMonth }: { initialMonth: string }) {
           {/* By bookkeeper — first, because "how is each person's month
               shaped" is the question this page gets opened for. */}
           <StaffSection staff={data.staff} monthDays={data.monthDays} month={month} onTargetsChanged={() => void load(month)} />
+
+          {/* Where the tracked hours were actually spent, page by page. */}
+          <PagesSection month={month} />
 
           {/* Forgotten timers */}
           {data.zombies.length > 0 && (
@@ -1015,6 +1018,7 @@ function EntryLine({ entry, onChanged }: { entry: EntryRow; onChanged: () => voi
   const [mins, setMins] = useState(String(Math.round(entry.seconds / 60)));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showPages, setShowPages] = useState(false);
 
   const save = async () => {
     setBusy(true); setErr(null);
@@ -1053,10 +1057,18 @@ function EntryLine({ entry, onChanged }: { entry: EntryRow; onChanged: () => voi
   };
 
   return (
+    <div>
     <div className="group flex items-center gap-2 text-xs text-ink-slate">
       <span className="w-[86px] shrink-0">
         {entry.endedAt ? new Date(entry.endedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}
       </span>
+      <button
+        onClick={() => setShowPages((v) => !v)}
+        title="Break this session down by page"
+        className="shrink-0 text-ink-light hover:text-teal"
+      >
+        {showPages ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+      </button>
       <span className="flex-1 truncate">{entry.userName}</span>
       {err && <span className="text-red-600 shrink-0 max-w-[160px] truncate" title={err}>{err}</span>}
       {editing ? (
@@ -1086,6 +1098,219 @@ function EntryLine({ entry, onChanged }: { entry: EntryRow; onChanged: () => voi
             </button>
           </span>
         </>
+      )}
+    </div>
+    {showPages && <SessionPages entryId={entry.id} sessionSeconds={entry.seconds} />}
+    </div>
+  );
+}
+
+/**
+ * One session, page by page. This is the question the whole feature exists to
+ * answer: "the 2h14m on Tidy Casa — where did it go?"
+ */
+function SessionPages({ entryId, sessionSeconds }: { entryId: string; sessionSeconds: number }) {
+  const [rows, setRows] = useState<{ route: string; label: string; seconds: number; visits: number }[] | null>(null);
+  const [attributed, setAttributed] = useState(0);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/time-tracking/pages?entryId=${encodeURIComponent(entryId)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load"))))
+      .then((d) => {
+        if (cancelled) return;
+        setRows(d.routes || []);
+        setAttributed(d.attributedSeconds || 0);
+      })
+      .catch((e) => { if (!cancelled) setErr(e?.message || "Failed"); });
+    return () => { cancelled = true; };
+  }, [entryId]);
+
+  const outside = Math.max(0, sessionSeconds - attributed);
+
+  return (
+    <div className="ml-[104px] mt-1 mb-2 pl-3 border-l-2 border-gray-100">
+      {err && <div className="text-[11px] text-red-600">{err}</div>}
+      {!rows && !err && <div className="text-[11px] text-ink-light">Loading pages…</div>}
+      {rows && rows.length === 0 && (
+        <div className="text-[11px] text-ink-light">
+          No page data — the session predates page tracking, or was worked entirely outside SNAP.
+        </div>
+      )}
+      {rows && rows.length > 0 && (
+        <ul className="space-y-0.5">
+          {rows.map((r) => (
+            <li key={r.route} className="flex items-center gap-2 text-[11px]">
+              <span className="flex-1 truncate text-ink-slate" title={r.route}>{r.label}</span>
+              <span className="text-ink-light hidden sm:inline">{r.visits}×</span>
+              <span className="font-mono text-navy w-14 text-right">{formatDuration(r.seconds)}</span>
+            </li>
+          ))}
+          {outside > 0 && (
+            <li
+              className="flex items-center gap-2 text-[11px] text-ink-light italic"
+              title="On the clock but not on a SNAP page — QuickBooks, spreadsheets, a call."
+            >
+              <span className="flex-1 truncate">Outside SNAP</span>
+              <span className="font-mono w-14 text-right">{formatDuration(outside)}</span>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ── Where the time went (migration 155) ─────────────────────────────────────
+
+interface PageRoute { route: string; label: string; seconds: number; visits: number; people: number; clients: number }
+interface PageStaff {
+  userId: string; name: string; seconds: number;
+  topRoutes: { route: string; label: string; seconds: number }[];
+}
+interface PagesData {
+  month: string;
+  trackedSeconds: number;
+  attributedSeconds: number;
+  unattributedSeconds: number;
+  routes: PageRoute[];
+  staff: PageStaff[];
+  setup_pending?: boolean;
+  /** Hit the row ceiling — the numbers below are a floor, not a total. */
+  truncated?: boolean;
+}
+
+/**
+ * Page-dwell breakdown. Collapsed by default — it answers "why did this take so
+ * long", which is a follow-up question, not the one the page opens on. Fetched
+ * lazily for the same reason.
+ *
+ * The unattributed line is shown deliberately rather than hidden: dwell is only
+ * captured inside SNAP, so time in QuickBooks, spreadsheets or on a call lands
+ * there. A big remainder means "works outside SNAP", not "did nothing".
+ */
+function PagesSection({ month }: { month: string }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<PagesData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [who, setWho] = useState<string>("");
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    const qs = new URLSearchParams({ month });
+    if (who) qs.set("userId", who);
+    fetch(`/api/time-tracking/pages?${qs.toString()}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load"))))
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setErr(e?.message || "Failed to load"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, month, who]);
+
+  const max = data?.routes[0]?.seconds || 1;
+
+  return (
+    <div className="rounded-xl border border-cardline bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 text-left hover:bg-gray-50/60"
+      >
+        {open ? <ChevronDown size={14} className="text-ink-slate" /> : <ChevronRight size={14} className="text-ink-slate" />}
+        <MousePointerClick size={14} className="text-teal" />
+        <h2 className="text-sm font-bold text-navy">Where the time went</h2>
+        <span className="text-[11px] text-ink-light">pages worked, while a timer was running</span>
+      </button>
+
+      {open && (
+        <div className="px-4 py-3">
+          {loading && <div className="text-sm text-ink-slate py-4"><Loader2 size={14} className="animate-spin inline mr-2" />Loading…</div>}
+          {err && <div className="text-sm text-red-600 py-2">{err}</div>}
+          {data?.setup_pending && (
+            <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Page tracking isn&apos;t set up yet — migration 155 is pending.
+            </div>
+          )}
+
+          {data && !data.setup_pending && !loading && (
+            <>
+              <div className="flex items-center gap-3 flex-wrap mb-3">
+                <select
+                  value={who}
+                  onChange={(e) => setWho(e.target.value)}
+                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-navy"
+                >
+                  <option value="">Everyone</option>
+                  {data.staff.map((s) => (
+                    <option key={s.userId} value={s.userId}>{s.name}</option>
+                  ))}
+                </select>
+                <span className="text-xs text-ink-slate">
+                  <span className="font-bold text-navy">{formatDuration(data.attributedSeconds)}</span> attributed
+                  {data.trackedSeconds > 0 && (
+                    <> of {formatDuration(data.trackedSeconds)} tracked</>
+                  )}
+                </span>
+                {data.unattributedSeconds > 0 && (
+                  <span
+                    className="text-xs text-ink-light"
+                    title="Time on the clock but not on a SNAP page — QuickBooks, spreadsheets, calls. Not idle time."
+                  >
+                    · {formatDuration(data.unattributedSeconds)} outside SNAP
+                  </span>
+                )}
+              </div>
+
+              {data.truncated && (
+                <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2">
+                  This month exceeded the row ceiling — the figures below are a floor, not a total.
+                  Filter to one person for exact numbers.
+                </div>
+              )}
+
+              {data.routes.length === 0 ? (
+                <div className="text-sm text-ink-slate py-4">
+                  No page activity recorded this month.
+                </div>
+              ) : (
+                <ul className="space-y-1">
+                  {data.routes.slice(0, 25).map((r) => (
+                    <li key={r.route} className="flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-navy truncate">{r.label}</span>
+                          <span className="text-[10px] text-ink-light font-mono truncate hidden sm:inline">{r.route}</span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                          <div
+                            className="h-full bg-teal rounded-full"
+                            style={{ width: `${Math.max(2, Math.round((r.seconds / max) * 100))}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono text-navy w-16 text-right shrink-0">
+                        {formatDuration(r.seconds)}
+                      </span>
+                      <span className="text-[10px] text-ink-light w-20 text-right shrink-0 hidden md:block">
+                        {r.visits} visit{r.visits === 1 ? "" : "s"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <p className="text-[11px] text-ink-light mt-3 leading-relaxed">
+                Recorded only while a timer is running — never when it&apos;s off or paused. Dwell is a
+                proxy: reading one long statement looks quiet, tab-flipping looks busy. Good for
+                &ldquo;why did this client take 3× the budget&rdquo;, bad for ranking people.
+              </p>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

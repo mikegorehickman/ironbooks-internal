@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { HEARTBEAT_MS, isClientShapedPath } from "@/lib/time-tracking";
+import { HEARTBEAT_MS, PAGE_PING_MS, isClientShapedPath } from "@/lib/time-tracking";
 import { TimeTrackerWidget } from "./TimeTrackerWidget";
 
 /**
@@ -280,6 +280,78 @@ export function TimeTrackerProvider() {
     const id = setInterval(tick, HEARTBEAT_MS);
     return () => clearInterval(id);
   }, [enabled, running]);
+
+  // ── Page dwell (migration 155) ──────────────────────────────────────────
+  // Which page the timer was pointed at, so a session can be broken down by
+  // route later. Writes ONLY while a timer is actually running — never when
+  // it's off or paused, which is what keeps this an attribution tool for
+  // billed time rather than general monitoring.
+  //
+  // One endpoint serves enter / ping / exit: it closes whatever view is open
+  // and opens one for the current path, so a dropped call self-heals on the
+  // next tick instead of leaving a row open forever.
+  const runningPageId = running?.status === "running" ? running.id : null;
+
+  const sendPageView = useCallback(
+    (entryId: string, path: string, close: boolean) => {
+      const payload = JSON.stringify({ entryId, path, close });
+      // Unload can't await a fetch; sendBeacon survives the teardown.
+      if (close && typeof navigator !== "undefined" && navigator.sendBeacon) {
+        try {
+          navigator.sendBeacon(
+            "/api/time-tracking/page-view",
+            new Blob([payload], { type: "application/json" })
+          );
+          return;
+        } catch { /* fall through to fetch */ }
+      }
+      fetch("/api/time-tracking/page-view", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        keepalive: close,
+      }).catch(() => { /* telemetry — never surface, never retry */ });
+    },
+    []
+  );
+
+  // Open a view for the current path, ping it on the heartbeat cadence, bank it
+  // when the path changes or the timer stops.
+  //
+  // Hidden tabs keep accruing, deliberately — same reasoning as the heartbeat:
+  // bookkeepers sit in QuickBooks with SNAP behind it, and the SNAP page they
+  // worked from is the right attribution for that stretch. Background throttling
+  // just means fewer pings, and since each increment is capped server-side, the
+  // effect is to UNDER-count and show the remainder as unattributed.
+  //
+  // Idle is the exception: no keyboard or mouse for 10 minutes is the one signal
+  // that nobody is working, so bank the page and stop pinging until they answer
+  // the widget's "still working?" prompt.
+  useEffect(() => {
+    if (!enabled || !runningPageId) return;
+    const entryId = runningPageId;
+    const path = pathname;
+    if (idlePrompt) {
+      sendPageView(entryId, path, true);
+      return;
+    }
+    sendPageView(entryId, path, false);
+    const id = setInterval(() => sendPageView(entryId, path, false), PAGE_PING_MS);
+    return () => {
+      clearInterval(id);
+      sendPageView(entryId, path, true);
+    };
+  }, [enabled, runningPageId, pathname, idlePrompt, sendPageView]);
+
+  // Real teardown — tab closed, or navigated off the app. pagehide fires where
+  // unload doesn't (bfcache, mobile Safari); the effect cleanup above can't run
+  // once the page is gone.
+  useEffect(() => {
+    if (!enabled || !runningPageId) return;
+    const bank = () => sendPageView(runningPageId, pathname, true);
+    window.addEventListener("pagehide", bank);
+    return () => window.removeEventListener("pagehide", bank);
+  }, [enabled, runningPageId, pathname, sendPageView]);
 
   // ── Actions ──
   const act = useCallback(
