@@ -64,7 +64,7 @@ export default async function UfEradicationPage() {
     service
       .from("uf_audit_scans" as any)
       .select(
-        "id, client_link_id, created_at, status, uf_account_name, total_uf_balance, " +
+        "id, client_link_id, created_at, status, uf_account_name, uf_account_current_balance, " +
           "uf_payments_total, matched_count, orphan_count, total_orphan_amount, " +
           "probable_deposited_count, probable_deposited_amount, finalized_at, error_message"
       )
@@ -135,21 +135,28 @@ export default async function UfEradicationPage() {
   const failed = rows.filter((r) => r.scan?.status === "failed");
 
   // ── Fleet totals ─────────────────────────────────────────────────────────
-  // Orphaned $ is the headline alongside the balance: an orphan is a payment
-  // sitting in UF with no deposit behind it, which is the part that will NOT
-  // resolve itself. The raw balance includes payments already tied to a deposit
-  // and merely awaiting the Bank Deposit entry.
-  const totalUf = scanned.reduce((s, r) => s + Math.abs(Number(r.scan.total_uf_balance) || 0), 0);
+  // ORPHANS ARE UF. A matched payment has a deposit behind it and has already
+  // cleared the account, so the orphan total IS the balance — verified against
+  // production: Neighborhood $42,532/$42,532, Dominion $51,012/$51,012, Clean
+  // Cut $338,226/$338,386.
+  //
+  // Use `uf_account_current_balance` — the account's real balance. NOT
+  // `total_uf_balance`, which is the sum of every payment the scan looked at:
+  // for Clean Your Carpets that is 4,266 payments totalling $1,816,826 against a
+  // true balance of $62,979. The first cut of this page used it as a balance and
+  // read 29x high. A throughput figure and a balance are not interchangeable.
+  const bal = (r: any) => Math.abs(Number(r.scan?.uf_account_current_balance) || 0);
+  const totalUf = scanned.reduce((s, r) => s + bal(r), 0);
   const totalOrphan = scanned.reduce((s, r) => s + Math.abs(Number(r.scan.total_orphan_amount) || 0), 0);
   const orphanCount = scanned.reduce((s, r) => s + (Number(r.scan.orphan_count) || 0), 0);
-  const clientsAtZero = scanned.filter((r) => Math.abs(Number(r.scan.total_uf_balance) || 0) < 1).length;
+  const clientsAtZero = scanned.filter((r) => bal(r) < 1).length;
   const clientsWithUf = scanned.length - clientsAtZero;
 
   // Worst first — that is the work order.
   const sorted = [...scanned].sort(
     (a, b) =>
       Math.abs(Number(b.scan.total_orphan_amount) || 0) - Math.abs(Number(a.scan.total_orphan_amount) || 0) ||
-      Math.abs(Number(b.scan.total_uf_balance) || 0) - Math.abs(Number(a.scan.total_uf_balance) || 0)
+      bal(b) - bal(a)
   );
 
   return (
@@ -183,12 +190,21 @@ export default async function UfEradicationPage() {
         </div>
         <div className="rounded-lg bg-white border border-cardline shadow-card px-5 py-4">
           <div className="text-[11px] font-bold uppercase tracking-wider text-ink-slate">
-            Total in UF
+            UF account balance
           </div>
           <div className="text-3xl font-extrabold text-navy mt-1 tabular-nums">{fmt(totalUf)}</div>
           <div className="text-[11px] text-ink-slate mt-1">
-            across {clientsWithUf} client{clientsWithUf === 1 ? "" : "s"} · {clientsAtZero} already
-            at zero
+            {/* Orphans ARE the balance, so these two should agree. A divergence
+                means something is in UF the payment scan cannot see. */}
+            across {clientsWithUf} client{clientsWithUf === 1 ? "" : "s"} · {clientsAtZero} at zero
+            {Math.abs(totalUf - totalOrphan) > 2000 ? (
+              <span className="block text-[#8A6D2F] font-semibold mt-0.5">
+                {fmt(Math.abs(totalUf - totalOrphan))} apart from the orphan total — something is in
+                UF that the payment scan can&apos;t see
+              </span>
+            ) : (
+              <span className="block text-teal-dark mt-0.5">ties to the orphan total ✓</span>
+            )}
           </div>
         </div>
         <div className="rounded-lg bg-white border border-cardline shadow-card px-5 py-4">
@@ -261,9 +277,9 @@ export default async function UfEradicationPage() {
           const s2 = r.scan;
           const work = worklists.get(r.id);
           const open = (work?.items || []).filter((i) => !i.done);
-          const bal = Math.abs(Number(s2.total_uf_balance) || 0);
+          const clientBal = bal(r);
           const age = daysAgo(s2.created_at);
-          if (bal < 1 && open.length === 0) return null; // already at zero — nothing to show
+          if (clientBal < 1 && open.length === 0) return null; // already at zero — nothing to show
           return (
             <div key={r.id} className="rounded-xl bg-white border border-cardline shadow-card overflow-hidden">
               <div className="px-5 py-3 border-b border-rule flex items-center justify-between gap-4 flex-wrap">
@@ -274,7 +290,19 @@ export default async function UfEradicationPage() {
                   <div className="text-[11px] text-ink-slate mt-0.5 flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-[#954E44]">{fmt(work?.openAmount ?? 0)} orphaned</span>
                     <span className="text-ink-light">·</span>
-                    <span>{fmt(bal)} total in {s2.uf_account_name || "UF"}</span>
+                    <span>
+                      {fmt(clientBal)} balance in {s2.uf_account_name || "UF"}
+                      {/* Orphans ARE the balance. A gap means something is in UF
+                          that the payment scan cannot see — a JE line hitting UF
+                          is the known case (still an open scanner gap). */}
+                      {Math.abs(clientBal - (work?.openAmount ?? 0)) > 500 && (
+                        <span className="text-[#8A6D2F] font-semibold">
+                          {" "}
+                          · {fmt(Math.abs(clientBal - (work?.openAmount ?? 0)))} not explained by
+                          payments
+                        </span>
+                      )}
+                    </span>
                     <span className="text-ink-light">·</span>
                     <span className="inline-flex items-center gap-1">
                       <Clock size={10} className="text-ink-light" />
