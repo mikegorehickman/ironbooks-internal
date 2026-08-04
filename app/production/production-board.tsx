@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle, CalendarCheck, CheckCircle2, ChevronLeft, ChevronRight, CircleDashed,
-  Loader2, MailQuestion, OctagonAlert, PlayCircle, Send, Sparkles, X,
+  Eye, Loader2, MailQuestion, OctagonAlert, PlayCircle, Send, Sparkles, X,
 } from "lucide-react";
 import {
   ClientRecCard, EligibleRow, periodLabel, shiftPeriod,
@@ -661,6 +661,41 @@ function BoardCard({
         )}
       </button>
 
+      {/* Manager review — an explicit action, not a hidden dropdown option.
+          The chip above announces "Ready for manager review" but announcing a
+          state isn't an affordance: the only way to act used to be opening a
+          status <select> whose default option was the state you're already in,
+          which is why a manager couldn't find the review at all. Seniors now get
+          a real button; bookkeepers get a plain "waiting on the manager" note so
+          they know it's not their move. */}
+      {isPending && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          {isSenior ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={onCloseIntent}
+                title="Open the rec card to run checks, review the statements, attest and send"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 text-[11px] font-bold px-2 py-1.5 rounded bg-teal text-white hover:bg-teal-dark"
+              >
+                <Eye size={11} /> Review
+              </button>
+              <button
+                onClick={rejectFromBoard}
+                disabled={saving}
+                title="Send back to the bookkeeper with a note"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1.5 rounded border border-gray-200 text-ink-slate hover:border-rust hover:text-rust disabled:opacity-50"
+              >
+                ⤺ Send back
+              </button>
+            </div>
+          ) : (
+            <div className="text-[11px] text-ink-slate">
+              Submitted — waiting on the manager.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Board controls */}
       <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-1.5">
         <select
@@ -672,7 +707,7 @@ function BoardCard({
           title={
             isPending
               ? isSenior
-                ? "Approve & complete, or send back to Failed Review"
+                ? "Or move it elsewhere — Review above is the sign-off path"
                 : "Submitted — waiting on the manager"
               : isComplete
               ? "Completed — pick another status to reopen"
