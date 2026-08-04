@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MatchPairsButton } from "./match-pairs-button";
 import Link from "next/link";
 import {
   Loader2, Search, ArrowRight, CheckCircle2, AlertTriangle, Banknote, CalendarRange,
@@ -211,18 +212,36 @@ export function RevenueCheckClient({
               </div>
               {s.flagged && (
                 <div className="mt-2 text-xs bg-white/60 border border-amber-200 rounded-lg px-2.5 py-1.5 text-amber-900">
-                  <strong>Scope of the fix:</strong> cash-deposits-only excludes <strong>every</strong> invoice —
-                  all {fmt(s.invoice_income_total)} of CRM invoice income ({s.invoice_txn_count} invoices), not just
-                  the {s.pair_count} pairs below. The pairs are proof of the duplication; the deposits stay as the real revenue.
+                  <strong>The fix is to match, not to exclude.</strong> Linking each deposit to its
+                  invoice&apos;s payment fixes the duplication in QuickBooks: revenue counted once, A/R
+                  intact, deposit totals unchanged so the bank rec still ties.
+                  <div className="mt-1 text-[11px]">
+                    Cash-deposits-only is a reporting switch, not a fix — it excludes{" "}
+                    <strong>every</strong> invoice ({fmt(s.invoice_income_total)} across{" "}
+                    {s.invoice_txn_count}), including the {Math.max(s.invoice_txn_count - s.pair_count, 0)} with
+                    no duplicate, and leaves the duplication in QuickBooks untouched.
+                  </div>
                 </div>
+              )}
+              {/* The actual fix, at the step where the problem is found. */}
+              {s.flagged && (
+                <MatchPairsButton
+                  clientLinkId={clientLinkId}
+                  pairs={(data?.pairs || []) as any[]}
+                  start={range.start}
+                  end={range.end}
+                  isSenior={isSenior}
+                  onDone={run}
+                />
               )}
             </div>
           </div>
 
-          {/* Mode control — the fix for the statements side. */}
+          {/* Reporting mode — a LAST RESORT, below the real fix. It changes what
+              the statements show; it does not correct QuickBooks. */}
           <div className="mt-3 pt-3 border-t border-black/5 flex items-center justify-between gap-3 flex-wrap">
             <div className="text-xs">
-              Revenue mode:{" "}
+              <span className="text-ink-light">Last resort · </span>Revenue mode:{" "}
               <span className={`font-bold uppercase ${mode === "deposits_only" ? "text-teal-dark" : "text-ink-slate"}`}>
                 {mode === "deposits_only" ? "cash deposits only" : "standard"}
               </span>
