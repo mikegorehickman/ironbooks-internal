@@ -2,6 +2,7 @@ import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
 import { fetchAllAccounts, getValidToken, qboErrorResponse } from "@/lib/qbo";
 import { auditClient } from "@/lib/audit";
+import { resolveBankByName } from "@/lib/uf-fleet";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -35,33 +36,6 @@ export const maxDuration = 120;
  */
 
 const DEFAULT_MIN_CONFIDENCE = 0.9;
-
-/** Match a stored bank name to a QBO account. Exact first, then a normalised
- *  compare — QBO report names and account names differ by punctuation and case
- *  ("Business Chequing" vs "Business Chequing (1234)"). Ambiguity returns null
- *  rather than guessing, because the wrong bank is a real reconciliation problem. */
-function resolveBankAccount(
-  bankName: string | null,
-  accounts: Array<{ Id: string; Name?: string; AccountType?: string; Active?: boolean }>
-): { id: string; name: string } | null {
-  if (!bankName) return null;
-  const banks = accounts.filter(
-    (a) => a.Active !== false && /bank|other current asset/i.test(String(a.AccountType || ""))
-  );
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const target = norm(bankName);
-
-  const exact = banks.filter((a) => norm(String(a.Name || "")) === target);
-  if (exact.length === 1) return { id: String(exact[0].Id), name: String(exact[0].Name) };
-
-  const partial = banks.filter((a) => {
-    const n = norm(String(a.Name || ""));
-    return n.includes(target) || target.includes(n);
-  });
-  if (partial.length === 1) return { id: String(partial[0].Id), name: String(partial[0].Name) };
-
-  return null; // none, or ambiguous — the bookkeeper picks
-}
 
 export async function POST(
   request: Request,
@@ -167,7 +141,8 @@ export async function POST(
   const willApply: any[] = [];
   const unresolvedBank: any[] = [];
   for (const i of candidates) {
-    const bank = resolveBankAccount(i.probable_deposit_bank, accounts as any);
+    const hit = resolveBankByName(i.probable_deposit_bank, accounts as any);
+    const bank = hit ? { id: String((hit as any).Id), name: String((hit as any).Name) } : null;
     if (!bank) {
       // finalize would reject this anyway; say so here instead of letting it fail
       // halfway through a batch.

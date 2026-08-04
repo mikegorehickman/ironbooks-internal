@@ -297,3 +297,86 @@ export function recommendForGroup(items: GroupItemLike[]): GroupRecommendation {
     confidence: null,
   };
 }
+
+
+// ── Resolving the matched deposit's bank name to a QBO account ───────────────
+/**
+ * The scan stores the matched deposit's bank as a NAME (`probable_deposit_bank`),
+ * because that is what the deposit report gives it. Both the UI form and the
+ * auto-apply endpoint need an account ID — the form to pre-select the picker, the
+ * endpoint because `finalize` rejects a create_deposit item without one. Shared so
+ * they cannot resolve the same name to different accounts.
+ *
+ * Exact match first, then a normalised contains-compare, because QBO report names
+ * and account names differ by punctuation and suffixes ("Business Chequing" vs
+ * "Business Chequing (1234)").
+ *
+ * Returns null when there is no match OR more than one. Ambiguity must never be
+ * resolved by picking the first — the wrong bank is a reconciliation problem that
+ * outlives the click that caused it.
+ */
+export function resolveBankByName<T extends { id?: string; Id?: string; name?: string; Name?: string; accountType?: string; AccountType?: string; Active?: boolean }>(
+  bankName: string | null | undefined,
+  accounts: T[]
+): T | null {
+  if (!bankName) return null;
+  const nameOf = (a: T) => String(a.name ?? a.Name ?? "");
+  const typeOf = (a: T) => String(a.accountType ?? a.AccountType ?? "");
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const target = norm(bankName);
+  if (!target) return null;
+
+  const banks = (accounts || []).filter((a) => a.Active !== false && /bank/i.test(typeOf(a)));
+  const pool = banks.length ? banks : (accounts || []);
+
+  const exact = pool.filter((a) => norm(nameOf(a)) === target);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return null;
+
+  // The two containment directions are NOT equivalent and must not be pooled.
+  //
+  // (a) the account name sits INSIDE the deposit's name — the deposit name is the
+  //     more specific string ("Business Chequing (1234)" contains both "Business
+  //     Chequing" and "Chequing"). The LONGEST such account name is the answer:
+  //     it is the most specific account that fits. Treating this as ambiguous
+  //     would decline every QBO name carrying an account-number suffix.
+  //
+  // (b) the deposit's name sits inside the account name — now the deposit name is
+  //     the vague one ("Cheq" is inside three of them). There is no principled
+  //     winner, so decline.
+  const inTarget = pool
+    .map((a) => ({ a, n: norm(nameOf(a)) }))
+    .filter(({ n }) => !!n && target.includes(n))
+    .sort((x, y) => y.n.length - x.n.length);
+  if (inTarget.length) {
+    // A tie at the longest length is a real ambiguity.
+    if (inTarget.length > 1 && inTarget[0].n.length === inTarget[1].n.length) return null;
+    return inTarget[0].a;
+  }
+
+  const containsTarget = pool.filter((a) => {
+    const n = norm(nameOf(a));
+    return !!n && n.includes(target);
+  });
+  return containsTarget.length === 1 ? containsTarget[0] : null;
+}
+
+/**
+ * The deposit date to pre-fill. Only when every matched payment in the group
+ * shares ONE deposit date — a bundled group spanning two deposits has no single
+ * right answer, and defaulting to one of them would silently mis-date the other.
+ */
+export function commonDepositDate(items: Array<{ probable_deposit_date?: string | null }>): string | null {
+  const dates = Array.from(
+    new Set((items || []).map((i) => i.probable_deposit_date).filter((d): d is string => !!d))
+  );
+  return dates.length === 1 ? dates[0] : null;
+}
+
+/** The bank name shared by every matched payment in the group, if there is one. */
+export function commonDepositBank(items: Array<{ probable_deposit_bank?: string | null }>): string | null {
+  const banks = Array.from(
+    new Set((items || []).map((i) => i.probable_deposit_bank).filter((b): b is string => !!b))
+  );
+  return banks.length === 1 ? banks[0] : null;
+}

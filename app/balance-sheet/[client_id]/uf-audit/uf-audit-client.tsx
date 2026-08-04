@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { recommendForGroup } from "@/lib/uf-fleet";
+import {
+  recommendForGroup,
+  resolveBankByName,
+  commonDepositDate,
+  commonDepositBank,
+} from "@/lib/uf-fleet";
 import { AutoApplyMatchesButton } from "./auto-apply-button";
 import Link from "next/link";
 import { playSound } from "@/lib/sounds";
@@ -932,20 +937,32 @@ function CustomerOrphanGroup({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [targetAccountId, setTargetAccountId] = useState<string>("");
-  const [bankAccountId, setBankAccountId] = useState<string>("");
-  // Pre-select from the match the scanner already made, instead of opening on an
-  // empty "— pick a resolution —" and asking the bookkeeper to reason from
-  // scratch about a payment SNAP has already tied to a real bank deposit at 95%
-  // confidence. A mixed group deliberately gets no default.
+  // Pre-select the resolution, the bank AND the date from the deposit SNAP
+  // matched. Mike, 2026-08-04: "we need the system to see what the deposit date
+  // was and auto-fill that, as well as to which account it went. that needs to be
+  // pulled and not manually put in."
+  //
+  // Each only pre-fills when the group agrees on ONE deposit. A bundled group
+  // spanning two deposits has no single right answer, so it stays blank rather
+  // than quietly mis-dating half of it — and a wrong date or bank silently breaks
+  // the bank reconciliation this exists to serve.
   const recommendation = recommendForGroup(group.items);
+  const matchedBankName = commonDepositBank(group.items);
+  const matchedBank = resolveBankByName(matchedBankName, accounts);
+  const matchedDepositDate = commonDepositDate(group.items);
+
   const [pickedResolution, setPickedResolution] = useState<string>(recommendation.value);
-  // Bookkeeper-chosen deposit date. Defaults to today (the bank statement
-  // date the bookkeeper is reconciling against), not the payment date —
-  // that's the whole reason this exists.
-  const [depositDate, setDepositDate] = useState<string>(() => {
-    const existing = group.items.find((i) => i.deposit_date)?.deposit_date;
-    return existing || new Date().toISOString().slice(0, 10);
-  });
+  // A bookkeeper-set date already on the item wins — they overrode it before.
+  const [bankAccountId, setBankAccountId] = useState<string>(
+    group.items.find((i) => i.deposit_bank_account_id)?.deposit_bank_account_id ||
+      matchedBank?.id ||
+      ""
+  );
+  const [depositDate, setDepositDate] = useState<string>(
+    group.items.find((i) => i.deposit_date)?.deposit_date ||
+      matchedDepositDate ||
+      new Date().toISOString().slice(0, 10)
+  );
   const [askingClient, setAskingClient] = useState(false);
   const total = group.items.reduce((s, i) => s + i.payment_amount, 0);
   const dupCount = group.items.filter((i) => i.suspected_duplicate).length;

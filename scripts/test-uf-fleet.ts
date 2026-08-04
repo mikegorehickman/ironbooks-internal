@@ -6,6 +6,9 @@ import {
   buildUfWorklists,
   sumByAction,
   recommendForGroup,
+  resolveBankByName,
+  commonDepositDate,
+  commonDepositBank,
   type UfItemRow,
 } from "../lib/uf-fleet";
 
@@ -190,5 +193,54 @@ eq("void_duplicate is resolved", recommendForItem(item({ resolution: "void_dupli
   }
 }
 
-console.log(`\nuf fleet worklist (incl. group recommendations): ${pass} passed, ${fail} failed`);
+// ══ resolveBankByName / commonDepositDate / commonDepositBank ══════════════
+// These pre-fill the bank picker and the date, so a wrong answer silently
+// mis-posts a Deposit. Ambiguity must resolve to null, never to a guess.
+{
+  const acct = (id: string, name: string, accountType = "Bank") => ({ id, name, accountType });
+  const banks = [
+    acct("1", "Business Chequing"),
+    acct("2", "Chequing"),
+    acct("3", "Savings"),
+    acct("4", "Personal Chequeing"),
+    acct("5", "Clearing Account", "Other Current Asset"),
+  ];
+
+  eq("exact name → that account", resolveBankByName("Business Chequing", banks)?.id, "1");
+  eq("case + punctuation insensitive", resolveBankByName("business  chequing", banks)?.id, "1");
+  eq("QBO suffix still matches", resolveBankByName("Business Chequing (1234)", banks)?.id, "1");
+  ok("unknown name → null", resolveBankByName("Nonexistent Bank", banks) === null);
+  ok("empty → null", resolveBankByName(null, banks) === null);
+  ok("empty account list → null", resolveBankByName("Chequing", []) === null);
+
+  // "Chequing" is a substring of three of these. Guessing would post to the
+  // wrong bank, so it must decline.
+  ok("ambiguous partial → null, not the first hit", resolveBankByName("Cheq", banks) === null);
+
+  // Non-bank types are only considered when there are no bank accounts at all.
+  ok("a Bank type is preferred", resolveBankByName("Clearing Account", banks) === null);
+  eq(
+    "falls back to any account when no banks exist",
+    resolveBankByName("Clearing Account", [acct("5", "Clearing Account", "Other Current Asset")])?.id,
+    "5"
+  );
+
+  // ── the date + bank only pre-fill on agreement ──
+  eq("one shared date pre-fills", commonDepositDate([
+    { probable_deposit_date: "2025-08-28" }, { probable_deposit_date: "2025-08-28" },
+  ]), "2025-08-28");
+  ok("two different dates → null (a bundled group must not be mis-dated)",
+    commonDepositDate([{ probable_deposit_date: "2025-08-28" }, { probable_deposit_date: "2025-09-02" }]) === null);
+  ok("no dates → null", commonDepositDate([{ probable_deposit_date: null }]) === null);
+  ok("empty → null", commonDepositDate([]) === null);
+
+  eq("one shared bank pre-fills", commonDepositBank([
+    { probable_deposit_bank: "Business Chequing" }, { probable_deposit_bank: "Business Chequing" },
+  ]), "Business Chequing");
+  ok("two banks → null", commonDepositBank([
+    { probable_deposit_bank: "Business Chequing" }, { probable_deposit_bank: "Savings" },
+  ]) === null);
+}
+
+console.log(`\nuf fleet (worklist + group recs + bank/date resolution): ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
