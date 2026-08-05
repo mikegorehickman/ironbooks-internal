@@ -6,7 +6,7 @@ import { sinceLastCloseWindow } from "@/lib/since-last-close";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Loader2, AlertCircle, Sparkles, GitMerge, ChevronRight, Layers,
-  Calendar, DollarSign, Scale,
+  Calendar, DollarSign, Scale, ArrowRight,
 } from "lucide-react";
 import { monthBounds } from "@/lib/client-months";
 
@@ -780,14 +780,31 @@ export function NewReclassForm({ clientLinks }: { clientLinks: ClientLink[] }) {
               <span>{submitError}</span>
             </div>
             {blockingJobId && (
-              <button
-                onClick={cancelBlockingJob}
-                disabled={cancelling}
-                className="mt-3 flex items-center gap-2 px-4 py-2 rounded-lg bg-red-700 hover:bg-red-800 text-white text-xs font-bold disabled:opacity-60 transition-colors"
-              >
-                {cancelling && <Loader2 size={12} className="animate-spin" />}
-                {cancelling ? "Cancelling…" : "Cancel stuck job & retry"}
-              </button>
+              // An existing job is USUALLY work in progress, not a stuck job —
+              // most often the same bookkeeper arriving back at the monthly
+              // close's reclass step. Cancelling throws away the AI
+              // categorization (1,652 transactions on RocketPainter) and
+              // re-runs discovery, so resuming leads and is styled as the
+              // primary action; cancel stays for genuinely stuck jobs.
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => router.push(`/reclass/${blockingJobId}/review`)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-teal hover:bg-teal-dark text-white text-xs font-bold transition-colors"
+                >
+                  Open the job already running <ArrowRight size={12} />
+                </button>
+                <button
+                  onClick={cancelBlockingJob}
+                  disabled={cancelling}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-300 text-red-800 hover:bg-red-50 text-xs font-bold disabled:opacity-60 transition-colors"
+                >
+                  {cancelling && <Loader2 size={12} className="animate-spin" />}
+                  {cancelling ? "Cancelling…" : "It's stuck — cancel & retry"}
+                </button>
+                <span className="text-[11px] text-red-900/70 basis-full">
+                  Cancelling discards this month&apos;s categorization and starts discovery over.
+                </span>
+              </div>
             )}
           </div>
         )}
