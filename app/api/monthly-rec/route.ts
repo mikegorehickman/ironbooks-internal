@@ -54,7 +54,14 @@ export async function GET(request: Request) {
   );
 
   const RUN_COLS =
-    "client_link_id, period, kind, status, has_concerns, concerns, checks, checks_ran_at, completed_at, sent_to_client_at, email_delivery, ai_spot_check, submitted_by, submitted_at, board_status, waiting_reasons, status_note, verification, verification_score, verification_ran_at, verification_override, manager_reviewed_at, manager_review_override";
+    // review_notes / rejected_at were MISSING here until 2026-08-06. The reject
+    // action writes them and /today selects them explicitly, so the note was
+    // always saved — it just never reached the production board, where
+    // FailedReviewPanel reads run.review_notes to build its fix-list. Result:
+    // every sent-back card told the bookkeeper "No note was left — check with
+    // the manager", which was the exact opposite of the truth. Kedma reported
+    // it as her detailed notes not showing up.
+    "client_link_id, period, kind, status, has_concerns, concerns, checks, checks_ran_at, completed_at, sent_to_client_at, email_delivery, ai_spot_check, submitted_by, submitted_at, board_status, waiting_reasons, status_note, verification, verification_score, verification_ran_at, verification_override, manager_reviewed_at, manager_review_override, review_notes, rejected_at";
 
   // Named-column selects 400 when a column's migration hasn't been applied
   // yet — and supabase-js doesn't throw, it returns {error} with null data,

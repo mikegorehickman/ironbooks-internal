@@ -11,6 +11,7 @@ import { CleanupReviewModal } from "../clients/review-modal";
 import { ClientBadges } from "@/components/ClientBadges";
 import { EscalateMenu, EscalationStrip } from "@/components/escalations-ui";
 import { type AttentionState } from "@/lib/client-attention-state";
+import { splitReviewNote } from "@/lib/review-notes";
 
 /**
  * Four-column cleanup board. Data comes straight from the existing kanban
@@ -841,10 +842,9 @@ function CleanupReworkPanel({
   rejectedAt: string | null;
   onResent: () => void;
 }) {
-  const items = notes
-    .split(/\n+|;\s+/)
-    .map((l) => l.replace(/^[-•*\d.)\s]+/, "").trim())
-    .filter((l) => l.length > 2);
+  // One checklist item per fix — see lib/review-notes.ts for why this also
+  // splits on sentence boundaries, not just newlines and semicolons.
+  const items = splitReviewNote(notes);
   const storageKey = `cleanup-rework-${clientId}`;
   const [done, setDone] = useState<boolean[]>(() => {
     try {

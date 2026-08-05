@@ -13,14 +13,15 @@ import { CoaUpdatesBanner } from "./coa-updates-banner";
 import { ClientBadges } from "@/components/ClientBadges";
 import { EscalateMenu, EscalationStrip } from "@/components/escalations-ui";
 import { type AttentionState } from "@/lib/client-attention-state";
+import { splitReviewNote } from "@/lib/review-notes";
 
 /**
  * /production — the month-by-month board for graduated clients.
  *
- * Five columns: four working columns driven by monthly_rec_runs.board_status
- * for the selected period (Not Started / In Progress / Stuck / Waiting on
- * Client), plus a Completed column for runs with status="complete". A client
- * with no run row for the month is Not Started — which is exactly how a
+ * Columns are driven by monthly_rec_runs.board_status for the selected period
+ * (In Progress / Blocked / Waiting on Client / Ready for Manager Review /
+ * Failed Review), plus a Completed column for runs with status="complete". A
+ * client with no run row for the month is In Progress — which is exactly how a
  * finished month "resets": next month has no row yet.
  *
  * A month reaches Completed ONE way: the rec-card close flow (run checks →
@@ -29,9 +30,10 @@ import { type AttentionState } from "@/lib/client-attention-state";
  * Completed path mis-fired real statement emails), the board no longer has
  * a second close path. Picking another status on a completed card reopens it.
  *
- * "Ready for manager review" is not a stored status — submitting the
- * statement review (the rec-card flow) moves the run to pending_review,
- * shown as a purple chip in Waiting on Client.
+ * Two different things land a card in Ready for Manager Review: the rec-card
+ * flow moving the run to status='pending_review' (a real submission), or the
+ * bookkeeper picking that option in the card's status dropdown, which only sets
+ * board_status. Both are the manager's queue — see `awaitingReview` below.
  */
 
 // Why a month is blocked — the major recurring causes (Lisa, 2026-08-04),
@@ -479,6 +481,9 @@ function BoardCard({
     (run?.board_status === "ready_for_review" &&
       run?.status !== "complete" &&
       run?.status !== "failed_review");
+  const inWorkingState = run?.status !== "complete" && run?.status !== "failed_review";
+  const isWaiting = inWorkingState && run?.board_status === "waiting_client";
+  const isBlocked = inWorkingState && run?.board_status === "stuck";
   const [editing, setEditing] = useState(false);
   const [blockedEditing, setBlockedEditing] = useState(false);
   const [blockedReason, setBlockedReason] = useState<string>("");
@@ -490,6 +495,18 @@ function BoardCard({
   useEffect(() => {
     setReasons(run?.waiting_reasons || []);
     setNote(run?.status_note || "");
+    // Prefill the blocked editor from the stored note, so RE-opening it shows
+    // the reason already on the card instead of an empty dropdown. A stored
+    // note that isn't one of the canned reasons is free text — show it as
+    // "Other" with the text in the box.
+    const stored = run?.status_note || "";
+    if (stored && (BLOCKED_REASONS as readonly string[]).includes(stored)) {
+      setBlockedReason(stored);
+      setBlockedOther("");
+    } else if (stored) {
+      setBlockedReason("Other");
+      setBlockedOther(stored);
+    }
   }, [run?.waiting_reasons, run?.status_note]);
 
   async function saveBoard(board_status: string, extra?: { waiting_reasons?: string[]; status_note?: string }) {
@@ -673,12 +690,36 @@ function BoardCard({
             ) : null;
           })}
         </div>
-        {run?.status_note && (
-          <div className="text-[10px] text-ink-slate mt-1 truncate" title={run.status_note}>
-            {run.status_note}
-          </div>
-        )}
       </button>
+
+      {/* The blocked / waiting-on-client note, and the ONLY way back into its
+          editor. Both editors used to be reachable exclusively by picking their
+          option in the status <select> — but a <select> fires no onChange when
+          you re-pick the value it already has, and the handler bails on
+          `v === currentStatus` anyway. So once a card was Blocked or Waiting on
+          client, nobody could add a note, edit the reasons, or read a note
+          longer than this one truncated line. Measured 2026-08-06: 21 cards at
+          waiting_client and 5 at stuck, all of them stuck that way. */}
+      {(isWaiting || isBlocked) && (
+        <button
+          onClick={() => (isBlocked ? setBlockedEditing(true) : setEditing(true))}
+          title={run?.status_note ? "Edit the note / reasons" : "Add a note"}
+          className="w-full text-left text-[10px] text-ink-slate mt-1 hover:text-navy hover:underline"
+        >
+          {run?.status_note ? (
+            <span className="line-clamp-2">{run.status_note}</span>
+          ) : (
+            <span className="text-ink-light italic">
+              + add a note {isBlocked ? "on what's blocking it" : "on what the client owes"}
+            </span>
+          )}
+        </button>
+      )}
+      {run?.status_note && !isWaiting && !isBlocked && (
+        <div className="text-[10px] text-ink-slate mt-1 truncate" title={run.status_note}>
+          {run.status_note}
+        </div>
+      )}
 
       {/* Manager review — an explicit action, not a hidden dropdown option.
           The chip above announces "Ready for manager review" but announcing a
@@ -933,7 +974,8 @@ function BoardCard({
         <FailedReviewPanel
           clientId={client.id}
           period={period}
-          notes={(run as any)?.review_notes || ""}
+          notes={run?.review_notes || ""}
+          rejectedAt={run?.rejected_at || null}
           onResent={onChanged}
         />
       )}
@@ -959,18 +1001,18 @@ function FailedReviewPanel({
   clientId,
   period,
   notes,
+  rejectedAt,
   onResent,
 }: {
   clientId: string;
   period: string;
   notes: string;
+  rejectedAt?: string | null;
   onResent: () => void;
 }) {
-  // One checklist item per line of the note (bullets/dashes stripped).
-  const items = notes
-    .split(/\n+|;\s+/)
-    .map((l) => l.replace(/^[-•*\d.)\s]+/, "").trim())
-    .filter((l) => l.length > 2);
+  // One checklist item per fix — see lib/review-notes.ts for why this also
+  // splits on sentence boundaries, not just newlines and semicolons.
+  const items = splitReviewNote(notes);
   const storageKey = `failed-review-${clientId}-${period}`;
   const [done, setDone] = useState<boolean[]>(() => {
     try {
@@ -1024,6 +1066,7 @@ function FailedReviewPanel({
     <div className="mt-2 p-2 rounded-lg bg-red-50/60 border border-red-200 space-y-1.5">
       <div className="text-[10px] font-bold uppercase tracking-wide text-red-800">
         Fix these, tick each off, then resend
+        {rejectedAt ? ` · sent back ${rejectedAt.slice(0, 10)}` : ""}
       </div>
       {items.length === 0 ? (
         <p className="text-[11px] text-ink-slate">No note was left — check with the manager.</p>

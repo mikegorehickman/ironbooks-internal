@@ -101,6 +101,9 @@ interface Run {
     | "ready_for_review";
   waiting_reasons?: string[];
   status_note?: string | null;
+  /** Manager reject note + when — the board's Failed Review fix-list reads these. */
+  review_notes?: string | null;
+  rejected_at?: string | null;
   // Books Reliability (migration 104)
   verification?: any | null;
   verification_score?: number | null;
