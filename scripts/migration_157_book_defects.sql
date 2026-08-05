@@ -1,4 +1,4 @@
--- Migration 156: the book-defect ledger
+-- Migration 157: the book-defect ledger (renumbered from 156 — collided with 156_statement_notices, which is the one already applied)
 --
 -- THE QUESTION THIS ANSWERS: "are this client's books right, and if not, why?"
 -- Today that has no answer. The knowledge is real but scattered — some findings
@@ -113,4 +113,4 @@ COMMENT ON COLUMN book_defects.status IS
 COMMENT ON TABLE book_defect_scans IS
   'When each defect type was last swept. A client with no defects is only "clean" if something actually looked.';
 
-SELECT 'migration_156 applied' AS status;
+SELECT 'migration_157 applied' AS status;
