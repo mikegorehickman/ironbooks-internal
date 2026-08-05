@@ -23,6 +23,13 @@ import {
   SkipForward,
 } from "lucide-react";
 import { ChevronRight } from "lucide-react";
+import {
+  groupByVendorKey,
+  sortGroups,
+  type QueueRow,
+  type QueueSort,
+  type TargetState,
+} from "@/lib/vendor-queue";
 import { PayrollDoubleCard } from "@/components/PayrollDoubleCard";
 
 interface ReclassJob {
@@ -2074,43 +2081,60 @@ interface VendorGroup {
   confidence: number | null;
   flagged: boolean;
   reasoning: string | null;
+  /** "unmatched" (no target) / "holding" (parked in Uncategorized etc) / "set". */
+  targetState: TargetState;
+  /** Rows disagree on the target — a split is already in effect. */
+  mixedTargets: boolean;
+  /** False when this card is one unidentifiable transaction. */
+  groupable: boolean;
+  /** The bank-rule "contains" term, empty when ungroupable. */
+  ruleKey: string;
 }
 
-// Senders that identify nothing. Rows landing on one of these must NOT be
-// grouped: on RocketPainter 375 needs-review rows collapsed to 5 cards because
-// most carried "unknown vendor" — and a single "Approve 375" on that card would
-// have pushed hundreds of unrelated transactions to one account. Each gets its
-// own card instead, so an unidentifiable transaction still costs one decision.
-const UNGROUPABLE = /^(unknown|unknown vendor|no vendor|n\/?a|misc|miscellaneous|none|null|\(no vendor\))$/i;
+// Grouping, triage and split logic all live in lib/vendor-queue.ts so the same
+// rules back this page, the monthly recon, and the bank-rule export. Two things
+// that module guarantees and this view depends on:
+//
+//   · The group key is the SAME key the bank-rule export consolidates on
+//     (known brand → merchant stem → raw descriptor), so every phrasing of one
+//     merchant lands on ONE card — "PETRO-CANADA 30" and "PETRO-CANADA 41" are
+//     one decision — and that decision is exactly what a future "contains
+//     <key>" rule will do.
+//   · Rows whose sender identifies nothing are NEVER grouped. On RocketPainter
+//     a naive normalizer collapsed 375 needs-review rows into 5 cards, one of
+//     them $45,889 of unrelated "unknown vendor" transactions, where a single
+//     Approve would have mass-miscategorized.
+
+/** Adapt a reclassification row to the shape lib/vendor-queue reasons about. */
+function toQueueRow(r: Reclassification): QueueRow {
+  return {
+    id: r.id,
+    sender: extractSender(r.vendor_name, r.description, (r as any).original_memo),
+    descriptor: r.description || "",
+    amount: r.transaction_amount || 0,
+    target: r.bookkeeper_override_target_name || r.to_account_name || null,
+    confidence: r.ai_confidence,
+    reasoning: r.ai_reasoning,
+    flagged: r.decision === "flagged",
+  };
+}
 
 function groupByVendor(rows: Reclassification[]): VendorGroup[] {
-  const map = new Map<string, VendorGroup>();
-  for (const r of rows) {
-    const sender = extractSender(r.vendor_name, r.description, (r as any).original_memo);
-    const normalized = normalizeSender(sender);
-    const key =
-      !normalized || UNGROUPABLE.test(normalized.trim()) ? `__row_${r.id}` : normalized;
-    const target = r.bookkeeper_override_target_name || r.to_account_name || null;
-    const g = map.get(key);
-    if (g) {
-      g.rows.push(r);
-      g.total += Math.abs(r.transaction_amount || 0);
-      g.flagged = g.flagged || r.decision === "flagged";
-      if (!g.target && target) g.target = target;
-    } else {
-      map.set(key, {
-        key,
-        vendor: sender || r.vendor_name || "(no vendor)",
-        rows: [r],
-        total: Math.abs(r.transaction_amount || 0),
-        target,
-        confidence: r.ai_confidence,
-        flagged: r.decision === "flagged",
-        reasoning: r.ai_reasoning,
-      });
-    }
-  }
-  return [...map.values()].sort((a, b) => b.total - a.total);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return groupByVendorKey(rows.map(toQueueRow)).map((g) => ({
+    key: g.groupable ? `k:${g.key}` : `row:${g.rows[0]?.id}`,
+    vendor: g.display,
+    rows: g.rows.map((q) => byId.get(q.id)!).filter(Boolean),
+    total: g.total,
+    target: g.target,
+    confidence: g.confidence,
+    flagged: g.flagged,
+    reasoning: g.reasoning,
+    targetState: g.targetState,
+    mixedTargets: g.mixedTargets,
+    groupable: g.groupable,
+    ruleKey: g.key,
+  }));
 }
 
 const money = (n: number) =>
@@ -2131,13 +2155,32 @@ function VendorQueue({
 }) {
   const [openHandled, setOpenHandled] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Sweep controls. "unclassified only" answers the question a bookkeeper
+  // actually arrives with — "which vendors has nothing decided for them yet?" —
+  // which is neither the biggest-dollars order nor the AI's decision buckets.
+  const [sort, setSort] = useState<QueueSort>("impact");
+  const [unclassifiedOnly, setUnclassifiedOnly] = useState(false);
 
   const needsYou = rows.filter((r) => r.decision === "needs_review" || r.decision === "flagged");
   const askClient = rows.filter((r) => r.decision === "ask_client");
   const autoRows = rows.filter((r) => r.decision === "auto_approve" || r.decision === "approved");
   const skipRows = rows.filter((r) => r.decision === "skip" || r.decision === "rejected");
 
-  const queue = useMemo(() => groupByVendor(needsYou), [needsYou]);
+  const allQueue = useMemo(() => groupByVendor(needsYou), [needsYou]);
+  const unclassifiedCount = useMemo(
+    () => allQueue.filter((g) => g.targetState !== "set").length,
+    [allQueue]
+  );
+  const queue = useMemo(() => {
+    const base = unclassifiedOnly ? allQueue.filter((g) => g.targetState !== "set") : allQueue;
+    // sortGroups reasons over the lib's shape; ours is a superset of the fields
+    // it reads (total / targetState / confidence / count), so it sorts in place
+    // of a duplicate comparator.
+    return sortGroups(
+      base.map((g) => ({ ...g, count: g.rows.length, display: g.vendor })) as any,
+      sort
+    ) as any as VendorGroup[];
+  }, [allQueue, unclassifiedOnly, sort]);
   const handled = useMemo(
     () => groupByVendor([...autoRows, ...askClient, ...skipRows]),
     [autoRows, askClient, skipRows]
@@ -2160,10 +2203,41 @@ function VendorQueue({
           <span className="text-xs font-bold text-amber-800 bg-white border border-amber-200 rounded-full px-2 py-0.5">
             {queue.length} vendor{queue.length === 1 ? "" : "s"} · {needsYou.length} txns
           </span>
-          <span className="ml-auto text-[11px] text-ink-slate">
-            One decision per vendor — it applies to every transaction from them.
-          </span>
+          {unclassifiedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setUnclassifiedOnly((v) => !v)}
+              className={`text-[11px] font-bold rounded-full px-2.5 py-0.5 border transition-colors ${
+                unclassifiedOnly
+                  ? "bg-navy text-white border-navy"
+                  : "bg-white text-navy border-gray-300 hover:border-navy"
+              }`}
+              title="Vendors with no account picked, or parked in Uncategorized / Ask My Accountant"
+            >
+              {unclassifiedOnly ? "✓ " : ""}Unmatched &amp; unclassified ({unclassifiedCount})
+            </button>
+          )}
+          <label className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-slate">
+            Sort
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as QueueSort)}
+              className="text-[11px] border border-gray-300 rounded-md px-1.5 py-0.5 bg-white text-navy font-semibold focus:border-teal focus:outline-none"
+            >
+              <option value="impact">Biggest dollars</option>
+              <option value="unclassified_first">Needs a category first</option>
+              <option value="least_confident">Least confident first</option>
+              <option value="count">Most transactions</option>
+            </select>
+          </label>
         </div>
+        {unclassifiedOnly && (
+          <div className="px-5 py-1.5 bg-navy/5 text-[11px] text-navy border-b border-amber-100">
+            Showing only vendors with nothing decided yet — no account picked, or parked in a holding
+            account. {allQueue.length - unclassifiedCount} already-targeted vendor
+            {allQueue.length - unclassifiedCount === 1 ? " is" : "s are"} hidden.
+          </div>
+        )}
 
         {queue.length === 0 ? (
           <div className="px-5 py-8 text-center">
