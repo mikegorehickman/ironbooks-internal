@@ -89,12 +89,12 @@ export function CleanupTab({
   // Production clients don't do cleanup — they run a monthly close. Same tab,
   // stage-appropriate flow. (Checked after hooks to respect rules-of-hooks.)
   if (stage === "production") {
+    // No onNavigateTab here: the close sequence now carries a per-stage href to
+    // a client-scoped tool (lib/client-months.ts), so it navigates itself. The
+    // prop stays in use for the cleanup tools below, which do live on sibling
+    // tabs of this page.
     return (
-      <MonthCloseFlow
-        clientLinkId={clientLinkId}
-        clientName={clientName}
-        onNavigateTab={onNavigateTab}
-      />
+      <MonthCloseFlow clientLinkId={clientLinkId} clientName={clientName} />
     );
   }
 
