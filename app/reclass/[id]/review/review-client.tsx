@@ -26,9 +26,13 @@ import { ChevronRight } from "lucide-react";
 import {
   groupByVendorKey,
   sortGroups,
+  suggestSplits,
+  applySplit,
+  describeSplitRule,
   type QueueRow,
   type QueueSort,
   type TargetState,
+  type SplitRule,
 } from "@/lib/vendor-queue";
 import { PayrollDoubleCard } from "@/components/PayrollDoubleCard";
 
@@ -313,6 +317,79 @@ export function ReclassReview({
         body: JSON.stringify({
           client_link_id: clientLinkId,
           vendor_pattern: row.vendor_name,
+          target_account_name: targetAccountName,
+        }),
+      }).catch((e) => console.warn("Bank rule upsert failed:", e));
+    }
+  }
+
+  /**
+   * Set a target on an EXPLICIT set of rows — no sender re-derivation.
+   *
+   * setTarget above expands one row to its vendor by re-deriving the sender with
+   * normalizeSender, which is exact-match. The work queue now groups on the
+   * broader bank-rule key (merchant stem / known brand), so "PETRO-CANADA 30"
+   * and "PETRO-CANADA 41" share a card — and routing that card's pick through
+   * setTarget would silently miss every variant except the first row's, leaving
+   * "Approve 4" with 2 targetless rows. A card knows exactly which rows it is
+   * showing, so it passes them.
+   *
+   * This is also what makes a SPLIT possible: a bucket applies to its own rows
+   * and nothing else.
+   */
+  async function setTargetForRows(rowIds: string[], targetAccountName: string) {
+    const ids = rowIds.filter((id) => rows.some((r) => r.id === id));
+    if (ids.length === 0) return;
+    const isEscalation = targetAccountName === "Uncategorized";
+    const newDecision = isEscalation ? "flagged" : "approved";
+    const idSet = new Set(ids);
+
+    setRows((prev) =>
+      prev.map((r) =>
+        idSet.has(r.id)
+          ? {
+              ...r,
+              bookkeeper_override: true,
+              bookkeeper_override_target_name: targetAccountName,
+              to_account_name: targetAccountName,
+              decision: newDecision,
+            }
+          : r
+      )
+    );
+
+    await Promise.all(
+      ids.map((id) =>
+        fetch(`/api/reclass/decisions/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            decision: newDecision,
+            bookkeeper_override_target_name: targetAccountName,
+          }),
+        })
+      )
+    );
+
+    // One bank rule for the set, keyed on the descriptor the rows actually
+    // share. NOT written for an escalation (a "senior look at this" is not a
+    // rule), for ask-client rows, or for an unidentifiable vendor — a rule on
+    // "unknown vendor" would match everything unnamed forever.
+    const first = rows.find((r) => r.id === ids[0]);
+    if (
+      !isEscalation &&
+      clientLinkId &&
+      first &&
+      first.decision !== "ask_client" &&
+      first.vendor_name &&
+      first.vendor_name.toLowerCase() !== "unknown vendor"
+    ) {
+      fetch(`/api/bank-rules/upsert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_link_id: clientLinkId,
+          vendor_pattern: first.vendor_name,
           target_account_name: targetAccountName,
         }),
       }).catch((e) => console.warn("Bank rule upsert failed:", e));
@@ -739,6 +816,7 @@ export function ReclassReview({
           rows={filteredRows}
           masterAccounts={masterAccounts}
           onTargetChange={setTarget}
+          onTargetForRows={setTargetForRows}
           onAskClient={moveToAskClient}
           onApprove={bulkApprove}
         />
@@ -2144,12 +2222,15 @@ function VendorQueue({
   rows,
   masterAccounts,
   onTargetChange,
+  onTargetForRows,
   onAskClient,
   onApprove,
 }: {
   rows: Reclassification[];
   masterAccounts: MasterAccount[];
   onTargetChange: (rowId: string, accountName: string) => void;
+  /** Explicit-scope target set — used by cards and splits (see setTargetForRows). */
+  onTargetForRows: (rowIds: string[], accountName: string) => void;
   onAskClient: (rowIds: string[]) => void;
   onApprove: (rowIds: string[]) => void;
 }) {
@@ -2257,6 +2338,7 @@ function VendorQueue({
                 expanded={expanded.has(g.key)}
                 onToggle={() => toggle(g.key)}
                 onTargetChange={onTargetChange}
+                onTargetForRows={onTargetForRows}
                 onAskClient={onAskClient}
                 onApprove={onApprove}
               />
@@ -2305,6 +2387,7 @@ function VendorQueue({
                   expanded={expanded.has(g.key)}
                   onToggle={() => toggle(g.key)}
                   onTargetChange={onTargetChange}
+                  onTargetForRows={onTargetForRows}
                   onAskClient={onAskClient}
                   onApprove={onApprove}
                   handled
@@ -2324,6 +2407,7 @@ function VendorCard({
   expanded,
   onToggle,
   onTargetChange,
+  onTargetForRows,
   onAskClient,
   onApprove,
   handled = false,
@@ -2333,6 +2417,7 @@ function VendorCard({
   expanded: boolean;
   onToggle: () => void;
   onTargetChange: (rowId: string, accountName: string) => void;
+  onTargetForRows: (rowIds: string[], accountName: string) => void;
   onAskClient: (rowIds: string[]) => void;
   onApprove: (rowIds: string[]) => void;
   handled?: boolean;
@@ -2340,6 +2425,20 @@ function VendorCard({
   const ids = group.rows.map((r) => r.id);
   const askable = group.rows.filter((r) => r.decision !== "ask_client").map((r) => r.id);
   const waiting = group.rows.every((r) => r.decision === "ask_client");
+
+  // Splits: one vendor, more than one answer. Fuel under $25 isn't a job
+  // fill-up; "AMAZON PRIME" is a subscription while plain Amazon is materials.
+  const [splitting, setSplitting] = useState(false);
+  const [splitRules, setSplitRules] = useState<SplitRule[]>([]);
+  const suggestions = useMemo(
+    () => (splitting ? suggestSplits({ ...group, count: group.rows.length, display: group.vendor, rows: group.rows.map(toQueueRow) } as any) : []),
+    [splitting, group]
+  );
+  const buckets = useMemo(
+    () => (splitRules.length ? applySplit(group.rows.map(toQueueRow), splitRules) : []),
+    [splitRules, group.rows]
+  );
+  const canSplit = group.groupable && group.rows.length >= 2 && !handled;
 
   return (
     <div className={`px-5 py-3 ${group.flagged ? "bg-red-50/40" : ""}`}>
@@ -2369,11 +2468,15 @@ function VendorCard({
 
         <div className="flex items-center gap-1.5 flex-wrap">
           <MasterAccountSelect
-            value={group.target || ""}
+            value={group.mixedTargets ? "" : group.target || ""}
             masterAccounts={masterAccounts}
             onChange={(val) => {
-              // setTarget cascades by sender, so one row carries the group.
-              onTargetChange(group.rows[0].id, val);
+              // Explicit scope: this card's rows, all of them. The card groups
+              // on the broader bank-rule key, so re-deriving the sender would
+              // miss every descriptor variant but the first row's.
+              onTargetForRows(ids, val);
+              setSplitRules([]);
+              setSplitting(false);
             }}
           />
           {!handled && (
@@ -2386,6 +2489,19 @@ function VendorCard({
               >
                 Approve {group.rows.length}
               </button>
+              {canSplit && (
+                <button
+                  onClick={() => setSplitting((v) => !v)}
+                  title="Send some of this vendor's transactions to a different account"
+                  className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border ${
+                    splitting
+                      ? "border-navy bg-navy text-white"
+                      : "border-gray-200 text-ink-slate hover:border-teal hover:text-teal"
+                  }`}
+                >
+                  Split
+                </button>
+              )}
               {askable.length > 0 && (
                 <button
                   onClick={() => onAskClient(askable)}
@@ -2404,6 +2520,71 @@ function VendorCard({
           </button>
         </div>
       </div>
+
+      {splitting && (
+        <div className="mt-2 rounded-lg border border-navy/20 bg-navy/[0.03] p-3 space-y-2.5">
+          <div className="text-[11px] text-navy">
+            <strong>Split {group.vendor}.</strong> Add a condition, then give each side its own
+            account. Conditions apply in order — the first one a transaction matches wins.
+          </div>
+
+          {suggestions.length > 0 && splitRules.length === 0 && (
+            <div className="space-y-1">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-ink-slate">Suggested</div>
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => setSplitRules((prev) => [...prev, s.rule])}
+                  className="block w-full text-left text-[11px] px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white hover:border-teal"
+                >
+                  <span className="font-semibold text-navy">{describeSplitRule(s.rule)}</span>
+                  <span className="text-ink-slate"> — {s.why}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <SplitRuleBuilder onAdd={(rule) => setSplitRules((prev) => [...prev, rule])} />
+
+          {buckets.length > 0 && (
+            <div className="space-y-1.5">
+              {buckets.map((b, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 flex-wrap bg-white border border-gray-200 rounded-lg px-2.5 py-2"
+                >
+                  <span className="text-[11px] font-semibold text-navy">{b.label}</span>
+                  <span className="text-[11px] text-ink-slate tabular-nums">
+                    {b.rows.length} txn{b.rows.length === 1 ? "" : "s"} · {money(b.total)}
+                  </span>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <MasterAccountSelect
+                      value=""
+                      masterAccounts={masterAccounts}
+                      onChange={(val) => onTargetForRows(b.rows.map((r) => r.id), val)}
+                    />
+                    {b.rule && (
+                      <button
+                        onClick={() =>
+                          setSplitRules((prev) => prev.filter((r) => r !== b.rule))
+                        }
+                        title="Remove this condition"
+                        className="text-[11px] font-semibold text-ink-light hover:text-red-700 px-1"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div className="text-[10px] text-ink-light">
+                Picking an account applies it to that group only — the rest of this vendor is
+                untouched.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-2 rounded-lg border border-gray-100 divide-y divide-gray-50">
@@ -2427,6 +2608,58 @@ function VendorCard({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Add a split condition by hand, for when the suggestions don't cover it. Two
+ * shapes only, because these are the two QBO bank rules can express: a dollar
+ * threshold and a descriptor substring. Anything a bookkeeper builds here
+ * survives as a rule next month instead of becoming manual work again.
+ */
+function SplitRuleBuilder({ onAdd }: { onAdd: (rule: SplitRule) => void }) {
+  const [kind, setKind] = useState<SplitRule["kind"]>("amount_below");
+  const [value, setValue] = useState("");
+
+  function add() {
+    const v = value.trim();
+    if (!v) return;
+    if (kind === "text_contains") {
+      onAdd({ kind, value: v, target: null });
+    } else {
+      const n = Number(v.replace(/[^0-9.]/g, ""));
+      if (!Number.isFinite(n) || n <= 0) return;
+      onAdd({ kind, value: n, target: null });
+    }
+    setValue("");
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <select
+        value={kind}
+        onChange={(e) => setKind(e.target.value as SplitRule["kind"])}
+        className="text-[11px] border border-gray-300 rounded-md px-1.5 py-1 bg-white text-navy font-semibold focus:border-teal focus:outline-none"
+      >
+        <option value="amount_below">Amount under</option>
+        <option value="amount_atleast">Amount at least</option>
+        <option value="text_contains">Description contains</option>
+      </select>
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && add()}
+        placeholder={kind === "text_contains" ? "PRIME" : "25"}
+        className="text-[11px] border border-gray-300 rounded-md px-2 py-1 w-28 focus:border-teal focus:outline-none"
+      />
+      <button
+        onClick={add}
+        disabled={!value.trim()}
+        className="text-[11px] font-bold px-2 py-1 rounded-md border border-gray-300 text-navy hover:border-teal disabled:opacity-40"
+      >
+        Add condition
+      </button>
     </div>
   );
 }
