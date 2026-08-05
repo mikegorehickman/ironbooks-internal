@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
 import { getValidToken, voidInvoice, voidPayment, fetchAllAccounts } from "@/lib/qbo";
 import { getCompanyClosingDate } from "@/lib/qbo-reclass";
-import { buildRemediationPreview } from "../preview/route";
+import { buildRemediationPreview } from "@/lib/crm-invoice-remediation-preview";
 import { applyDepositToInvoice, findArAccount, findFeeAccount, matchDepositToInvoicePayment } from "@/lib/crm-invoice-apply";
 
 export const dynamic = "force-dynamic";
