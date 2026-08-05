@@ -337,7 +337,11 @@ export function ReclassReview({
    * This is also what makes a SPLIT possible: a bucket applies to its own rows
    * and nothing else.
    */
-  async function setTargetForRows(rowIds: string[], targetAccountName: string) {
+  async function setTargetForRows(
+    rowIds: string[],
+    targetAccountName: string,
+    opts?: { writeRule?: boolean }
+  ) {
     const ids = rowIds.filter((id) => rows.some((r) => r.id === id));
     if (ids.length === 0) return;
     const isEscalation = targetAccountName === "Uncategorized";
@@ -375,8 +379,19 @@ export function ReclassReview({
     // share. NOT written for an escalation (a "senior look at this" is not a
     // rule), for ask-client rows, or for an unidentifiable vendor — a rule on
     // "unknown vendor" would match everything unnamed forever.
+    //
+    // Also NOT written for a SPLIT bucket (writeRule: false). Two reasons, and
+    // the first is a hard one: bank_rules is UNIQUE (client_link_id,
+    // vendor_pattern) — migration 12 — so a second bucket upserting the same
+    // vendor would silently OVERWRITE the first bucket's rule, leaving one
+    // arbitrary target for a vendor the bookkeeper just said needs two. Second,
+    // even with room for both, QBO ANDs its conditions and gives us no control
+    // over rule ORDER, so "contains AMAZON → Materials" and "contains AMAZON
+    // PRIME → Software" both match a Prime charge and whichever QBO lists first
+    // wins. A split is honest about applying to these transactions only.
     const first = rows.find((r) => r.id === ids[0]);
     if (
+      opts?.writeRule !== false &&
       !isEscalation &&
       clientLinkId &&
       first &&
@@ -2230,7 +2245,7 @@ function VendorQueue({
   masterAccounts: MasterAccount[];
   onTargetChange: (rowId: string, accountName: string) => void;
   /** Explicit-scope target set — used by cards and splits (see setTargetForRows). */
-  onTargetForRows: (rowIds: string[], accountName: string) => void;
+  onTargetForRows: (rowIds: string[], accountName: string, opts?: { writeRule?: boolean }) => void;
   onAskClient: (rowIds: string[]) => void;
   onApprove: (rowIds: string[]) => void;
 }) {
@@ -2417,7 +2432,7 @@ function VendorCard({
   expanded: boolean;
   onToggle: () => void;
   onTargetChange: (rowId: string, accountName: string) => void;
-  onTargetForRows: (rowIds: string[], accountName: string) => void;
+  onTargetForRows: (rowIds: string[], accountName: string, opts?: { writeRule?: boolean }) => void;
   onAskClient: (rowIds: string[]) => void;
   onApprove: (rowIds: string[]) => void;
   handled?: boolean;
@@ -2561,7 +2576,9 @@ function VendorCard({
                     <MasterAccountSelect
                       value=""
                       masterAccounts={masterAccounts}
-                      onChange={(val) => onTargetForRows(b.rows.map((r) => r.id), val)}
+                      onChange={(val) =>
+                        onTargetForRows(b.rows.map((r) => r.id), val, { writeRule: false })
+                      }
                     />
                     {b.rule && (
                       <button
@@ -2579,7 +2596,9 @@ function VendorCard({
               ))}
               <div className="text-[10px] text-ink-light">
                 Picking an account applies it to that group only — the rest of this vendor is
-                untouched.
+                untouched. A split does <strong>not</strong> create bank rules: QBO gives no control
+                over rule order, so two overlapping rules on one vendor would apply unpredictably.
+                Set those deliberately on the bank-rules step.
               </div>
             </div>
           )}
