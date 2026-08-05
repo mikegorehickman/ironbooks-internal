@@ -707,6 +707,43 @@ export function ClientRecCard({
 
           {!isComplete && reviewing && run?.statements && (
             <div className="space-y-4">
+              {/* If this client is on deposits-only revenue, the figures below
+                  have already had invoice-recognized income REMOVED. The
+                  attestation says "I have reviewed these and they're accurate",
+                  so the adjustment has to be on screen — monthly-rec has been
+                  writing statements.pl.revenueRecognition for exactly this
+                  purpose since migration 126 and nothing ever rendered it. */}
+              {(() => {
+                const rr = (run.statements as any)?.pl?.revenueRecognition;
+                if (!rr || rr.mode !== "deposits_only") return null;
+                const excluded = Number(rr.excludedInvoiceRevenue) || 0;
+                return (
+                  <div className="rounded-xl border border-teal/30 bg-teal/5 px-3 py-2.5 text-xs text-navy">
+                    <strong>Revenue basis: deposits only.</strong>{" "}
+                    {excluded > 0 ? (
+                      <>
+                        These figures EXCLUDE{" "}
+                        <strong>
+                          $
+                          {excluded.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </strong>{" "}
+                        of invoice-recognized income for this period, on the basis that it
+                        duplicates the bank deposits.
+                      </>
+                    ) : (
+                      <>No invoice-recognized income to exclude this period.</>
+                    )}{" "}
+                    <span className="text-ink-slate">
+                      Change it on the client&apos;s profile. Note the portal P&amp;L and the
+                      published package are not adjusted yet, so they will read higher.
+                    </span>
+                  </div>
+                );
+              })()}
+
               <StatementsReview statements={run.statements} monthLabel={periodLabel(period)} clientLinkId={client.id} period={period} />
 
               <SpotCheckPanel spot={run.ai_spot_check || null} loading={spotChecking} />
