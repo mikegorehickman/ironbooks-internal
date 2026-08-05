@@ -131,10 +131,17 @@ export default async function ReclassReviewPage({
     try {
       const { data: findingRows } = await service
         .from("audit_log")
-        .select("created_at, request_payload")
+        // audit_log's timestamp column is `occurred_at`, NOT created_at.
+        // Selecting/ordering by a column that doesn't exist errors the query,
+        // supabase-js returns that in `error` instead of throwing, so `data`
+        // came back null, `finding` was undefined, and this banner NEVER
+        // rendered — the catch below never even fired. The same bug was found
+        // and fixed on /admin/crm-invoice-revenue and /admin/revenue-integrity;
+        // this third copy was missed.
+        .select("occurred_at, request_payload")
         .eq("event_type", "crm_invoice_revenue_finding")
         .filter("request_payload->>client_link_id", "eq", (job as any).client_link_id)
-        .order("created_at", { ascending: false })
+        .order("occurred_at", { ascending: false })
         .limit(1);
       const finding: any = (findingRows as any[])?.[0]?.request_payload;
       if (finding?.flagged) {

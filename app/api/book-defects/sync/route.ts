@@ -182,14 +182,27 @@ export async function POST() {
 
   await run("revenue_double_count", () =>
     fromAuditLog("revenue_integrity_finding", "revenue_double_count", (p) => {
-      const cents = CENTS(p?.deposit_no_name_total ?? p?.deposit_total ?? 0);
+      // Exposure is the WHOLE deposit-into-income total. deposit_no_name_total
+      // is a subset (the ones with no customer attached) and the sweep always
+      // writes it as a number, so `??` never fell through — a real double-count
+      // whose deposits all carry a customer name computed 0 cents, returned
+      // null, and never reached the ledger. /admin/book-health then read
+      // "clean" for a flagged client.
+      const cents = CENTS(p?.deposit_total ?? p?.deposit_no_name_total ?? 0);
       return cents > 0 ? { cents, n: Number(p?.deposit_count) || 0 } : null;
     })
   );
 
   await run("crm_invoice_double_count", () =>
     fromAuditLog("crm_invoice_revenue_finding", "crm_invoice_double_count", (p) => {
-      const cents = CENTS(p?.paired_deposit_total ?? 0);
+      // Fall back to the invoice leg when nothing paired 1:1. Pairing is
+      // "evidence, never a gate" (lib/crm-invoice-revenue.ts) — a confirmed
+      // double-count paid by batch payouts pairs NOTHING, which made this
+      // compute 0 and drop the defect entirely. The invoice total is the
+      // conservative exposure when the legs can't be matched.
+      const cents = CENTS(
+        p?.paired_deposit_total || p?.deposit_income_total || p?.invoice_income_total || 0
+      );
       return cents > 0 ? { cents, n: Number(p?.pair_count) || 0 } : null;
     })
   );
