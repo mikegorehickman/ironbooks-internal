@@ -88,8 +88,17 @@ interface Run {
   ai_spot_check?: SpotCheck | null;
   submitted_at?: string | null;
   submitted_by?: string | null;
-  // Production board state (migration 65)
-  board_status?: "not_started" | "in_progress" | "stuck" | "waiting_client";
+  // Production board state (migration 65). 'ready_for_review' was missing from
+  // this union even though the board's own status dropdown writes it and the
+  // API's VALID_BOARD accepts it — so every consumer cast it away
+  // (`run?.board_status as BoardStatus`) and nothing type-checked the value that
+  // actually drives the manager-review column.
+  board_status?:
+    | "not_started"
+    | "in_progress"
+    | "stuck"
+    | "waiting_client"
+    | "ready_for_review";
   waiting_reasons?: string[];
   status_note?: string | null;
   // Books Reliability (migration 104)

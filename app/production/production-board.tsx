@@ -460,6 +460,25 @@ function BoardCard({
   }
   const run = client.run;
   const isPending = run?.status === "pending_review";
+  // A card reaches the manager-review column two different ways, and only one
+  // of them used to expose a Review button:
+  //
+  //   run.status = 'pending_review'          — the bookkeeper went through the
+  //                                            whole rec-card flow and SUBMITTED
+  //   run.board_status = 'ready_for_review'  — the bookkeeper just moved the card
+  //                                            with the status dropdown
+  //
+  // The column accepts either (see byColumn above). The button only honoured the
+  // first, and in practice nobody uses the submit flow: measured 2026-08-05,
+  // 6 live cards sat in "Ready for Manager Review" via board_status and ZERO via
+  // pending_review — so the manager's Review button rendered nowhere, ever.
+  // Kedma reported it as "the start review button is missing." It wasn't a role
+  // gate (she's admin, so isSenior is true); the state it keyed off never existed.
+  const awaitingReview =
+    isPending ||
+    (run?.board_status === "ready_for_review" &&
+      run?.status !== "complete" &&
+      run?.status !== "failed_review");
   const [editing, setEditing] = useState(false);
   const [blockedEditing, setBlockedEditing] = useState(false);
   const [blockedReason, setBlockedReason] = useState<string>("");
@@ -668,16 +687,20 @@ function BoardCard({
           which is why a manager couldn't find the review at all. Seniors now get
           a real button; bookkeepers get a plain "waiting on the manager" note so
           they know it's not their move. */}
-      {isPending && (
+      {awaitingReview && (
         <div className="mt-2 pt-2 border-t border-gray-100">
           {isSenior ? (
             <div className="flex items-center gap-1.5">
               <button
                 onClick={onCloseIntent}
-                title="Open the rec card to run checks, review the statements, attest and send"
+                title={
+                  isPending
+                    ? "Submitted through the checks — open the rec card to review the statements, attest and send"
+                    : "Flagged ready by the bookkeeper (not submitted through the checks) — open the rec card to run them, review and send"
+                }
                 className="flex-1 inline-flex items-center justify-center gap-1.5 text-[11px] font-bold px-2 py-1.5 rounded bg-teal text-white hover:bg-teal-dark"
               >
-                <Eye size={11} /> Review
+                <Eye size={11} /> {isPending ? "Review" : "Start review"}
               </button>
               <button
                 onClick={rejectFromBoard}
@@ -690,7 +713,7 @@ function BoardCard({
             </div>
           ) : (
             <div className="text-[11px] text-ink-slate">
-              Submitted — waiting on the manager.
+              {isPending ? "Submitted" : "Flagged ready"} — waiting on the manager.
             </div>
           )}
         </div>

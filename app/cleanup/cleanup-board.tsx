@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowUpRight, CheckCircle2, Circle, ClipboardList,
+  ArrowUpRight, CheckCircle2, Circle, ClipboardList, Eye,
   Loader2, MinusCircle, PlayCircle, Plus, Sparkles, X, XCircle,
 } from "lucide-react";
 import { ClientRecCard, type ProdClient } from "../production/rec-card";
+import { CleanupReviewModal } from "../clients/review-modal";
 import { ClientBadges } from "@/components/ClientBadges";
 import { EscalateMenu, EscalationStrip } from "@/components/escalations-ui";
 import { type AttentionState } from "@/lib/client-attention-state";
@@ -41,6 +42,10 @@ interface KanbanCard {
   latest_reclass_job: { id: string; status: string } | null;
   bank_rule_count: number;
   has_complete_reclass: boolean;
+  cleanup_review_submitted_at?: string | null;
+  cleanup_review_submitted_by_name?: string | null;
+  cleanup_range_start?: string | null;
+  cleanup_range_end?: string | null;
 }
 
 /* ── Next-step chips ──────────────────────────────────────────────────
@@ -184,6 +189,10 @@ export function CleanupBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedSignoff, setSelectedSignoff] = useState<string | null>(null);
+  // The senior cleanup sign-off review, opened straight from the board's
+  // "Awaiting Mgr Review" column. Same modal the In-Review table on /clients
+  // uses — that used to be the ONLY place it could be opened.
+  const [reviewing, setReviewing] = useState<KanbanCard | null>(null);
 
   // Attention states (escalated / BS owed / disconnected / stuck) — one feed
   // for every badge on this board.
@@ -441,6 +450,7 @@ export function CleanupBoard() {
                         onOpenSignoff={() =>
                           setSelectedSignoff(selectedSignoff === card.id ? null : card.id)
                         }
+                        onOpenReview={() => setReviewing(card)}
                       />
                     </div>
                   ))}
@@ -449,6 +459,25 @@ export function CleanupBoard() {
             );
           })}
         </div>
+      )}
+
+      {/* Senior cleanup review — PDF → branded email → Approve. Reached from the
+          "Start review" button on any card in Awaiting Mgr Review. */}
+      {reviewing && (
+        <CleanupReviewModal
+          client={{
+            id: reviewing.id,
+            client_name: reviewing.client_name,
+            cleanup_review_submitted_at: reviewing.cleanup_review_submitted_at || "",
+            cleanup_review_submitted_by_name: reviewing.cleanup_review_submitted_by_name || null,
+            cleanup_range_start: reviewing.cleanup_range_start || null,
+            cleanup_range_end: reviewing.cleanup_range_end || null,
+          }}
+          onClose={() => {
+            setReviewing(null);
+            load();
+          }}
+        />
       )}
 
       {/* Statement sign-off flow (the same review the manager sees), as a modal
@@ -498,6 +527,7 @@ function CleanupCard({
   attention,
   onChanged,
   onOpenSignoff,
+  onOpenReview,
 }: {
   card: KanbanCard;
   inReview: boolean;
@@ -507,10 +537,12 @@ function CleanupCard({
   attention?: AttentionState;
   onChanged: () => void;
   onOpenSignoff: () => void;
+  onOpenReview: () => void;
 }) {
   const steps = buildSteps(card, inReview);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [bkId, setBkId] = useState(card.bookkeeper?.id || "");
   const [due, setDue] = useState(card.due_date ? card.due_date.slice(0, 10) : "");
 
@@ -534,6 +566,34 @@ function CleanupCard({
       }
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** Manager Reject — bounce the cleanup back to the bookkeeper with a note.
+      Same endpoint the client-profile stage banner uses. */
+  async function sendBack() {
+    const note = window.prompt(
+      "Send back to the bookkeeper — what does the cleanup need before sign-off?\n(They'll see this note on their Today.)"
+    );
+    if (note === null) return;
+    if (!note.trim()) {
+      alert("A note is required to send a cleanup back.");
+      return;
+    }
+    setRejecting(true);
+    try {
+      const res = await fetch(`/api/clients/${card.id}/reject-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: note.trim() }),
+      });
+      if (res.ok) onChanged();
+      else {
+        const b = await res.json().catch(() => ({}));
+        alert(b.error || `Couldn't send back (HTTP ${res.status}).`);
+      }
+    } finally {
+      setRejecting(false);
     }
   }
 
@@ -680,6 +740,42 @@ function CleanupCard({
           </li>
         ))}
       </ul>
+
+      {/* Manager review — a real button, not a hidden state.
+          A card in "Awaiting Mgr Review" had no way to act on it from this
+          board: the only affordance was a 10px "Review sign-off" text link on
+          step 6, and that link is gated on there being an open cleanup
+          monthly_rec_run — which the one client actually sitting in the column
+          on 2026-08-05 did not have. So the manager saw the chip that says
+          "Awaiting mgr review" and nothing to click. The approve flow existed
+          all along, but only from the In-Review table on /clients. */}
+      {inReview && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          {isSenior ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={onOpenReview}
+                title="Open the report, send the client email, and approve the sign-off"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 text-[11px] font-bold px-2 py-1.5 rounded bg-teal text-white hover:bg-teal-dark"
+              >
+                <Eye size={11} /> Start review
+              </button>
+              <button
+                onClick={sendBack}
+                disabled={rejecting}
+                title="Send back to the bookkeeper with a note"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1.5 rounded border border-gray-200 text-ink-slate hover:border-rust hover:text-rust disabled:opacity-50"
+              >
+                {rejecting ? <Loader2 size={10} className="animate-spin" /> : "⤺"} Send back
+              </button>
+            </div>
+          ) : (
+            <div className="text-[11px] text-ink-slate">
+              Submitted — waiting on the manager.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

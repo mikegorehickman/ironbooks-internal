@@ -205,6 +205,15 @@ export async function GET(request: Request) {
       latest_reclass_job: reclass ? { id: reclass.id, status: reclass.status } : null,
       bank_rule_count: ruleCountMap.get(client.id) || 0,
       has_complete_reclass: hasCompleteReclass,
+      // Everything the senior cleanup-review modal needs, so the board's
+      // "Awaiting Mgr Review" column can open it in place. Before this the only
+      // way to approve a cleanup sign-off was the In-Review table on /clients —
+      // a card could sit in the review column with no way to act on it at all.
+      cleanup_review_submitted_at: (client as any).cleanup_review_submitted_at || null,
+      cleanup_review_submitted_by_name:
+        (bkById.get((client as any).cleanup_review_submitted_by) as any)?.full_name || null,
+      cleanup_range_start: rangeStart,
+      cleanup_range_end: rangeEnd,
     };
 
     // ── PRIORITY 1: senior review (submitted, awaiting admin/lead) ──
