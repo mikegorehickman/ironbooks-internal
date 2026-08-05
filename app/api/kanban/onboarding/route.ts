@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
  *   coa_in_progress     active or failed COA job
  *   reclass_in_progress active or failed reclass job (COA done)
  *   review              cleanup_review_state='in_review' (senior pending)
+ *   failed_review       cleanup_review_state='failed_review' (manager sent it back)
  *   bs_cleanup          any reclass complete (regardless of stripe state) and
  *                       no newer reclass currently active/failed. Stripe is
  *                       parallel work — once reclass + bank rules are done,
@@ -123,6 +124,7 @@ export async function GET(request: Request) {
     awaiting_stripe: [],
     bs_cleanup: [],
     review: [],
+    failed_review: [],
   };
 
   // Build a per-client "has any completed reclass" map so a later failed
@@ -214,11 +216,25 @@ export async function GET(request: Request) {
         (bkById.get((client as any).cleanup_review_submitted_by) as any)?.full_name || null,
       cleanup_range_start: rangeStart,
       cleanup_range_end: rangeEnd,
+      cleanup_review_notes: (client as any).cleanup_review_notes || null,
+      cleanup_review_rejected_at: (client as any).cleanup_review_rejected_at || null,
     };
 
     // ── PRIORITY 1: senior review (submitted, awaiting admin/lead) ──
     if ((client as any).cleanup_review_state === "in_review") {
       columns.review.push(card);
+      continue;
+    }
+
+    // ── PRIORITY 1b: manager sent it back ──
+    // This state existed in the DB (reject-review writes it) but nothing on the
+    // board looked for it, so a rejected cleanup fell through to the ordinary
+    // COA/reclass logic below and reappeared in "In Progress" — visually
+    // identical to a card nobody had reviewed. The note was only ever visible on
+    // /today. Production has had its own Failed Review column all along; this is
+    // the cleanup half of the same lifecycle.
+    if ((client as any).cleanup_review_state === "failed_review") {
+      columns.failed_review.push(card);
       continue;
     }
 
@@ -298,6 +314,7 @@ function emptyColumns() {
     "awaiting_stripe",
     "bs_cleanup",
     "review",
+    "failed_review",
   ];
   return Object.fromEntries(keys.map((k) => [k, { cards: [], total: 0 }]));
 }

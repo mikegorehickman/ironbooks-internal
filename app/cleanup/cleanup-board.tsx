@@ -13,15 +13,22 @@ import { EscalateMenu, EscalationStrip } from "@/components/escalations-ui";
 import { type AttentionState } from "@/lib/client-attention-state";
 
 /**
- * Three-column cleanup board. Data comes straight from the existing
- * kanban onboarding API (compute-on-read from live job state) — its six
- * stages collapse to three columns here, and every card shows the full
- * step checklist so a bookkeeper always knows what's next.
+ * Four-column cleanup board. Data comes straight from the existing kanban
+ * onboarding API (compute-on-read from live job state) — its stages collapse to
+ * four columns here, and every card shows the full step checklist so a
+ * bookkeeper always knows what's next.
  *
  * Columns:
  *   needs_cleanup                                  → Needs Cleanup
  *   coa/reclass in progress, awaiting stripe, bs   → In Progress
  *   review (statement sign-off submitted)          → Awaiting Mgr Review
+ *   failed_review (manager sent it back)           → Sent Back — Rework
+ *
+ * The last two are the manager-review loop, and both were unreachable from this
+ * board until 2026-08-05: "Awaiting Mgr Review" had no action on it (approving
+ * was only possible from the In-Review table on /clients), and "Sent Back" had
+ * no column at all — a rejected cleanup reappeared under In Progress with its
+ * note visible only on /today.
  */
 
 interface KanbanCard {
@@ -46,6 +53,8 @@ interface KanbanCard {
   cleanup_review_submitted_by_name?: string | null;
   cleanup_range_start?: string | null;
   cleanup_range_end?: string | null;
+  cleanup_review_notes?: string | null;
+  cleanup_review_rejected_at?: string | null;
 }
 
 /* ── Next-step chips ──────────────────────────────────────────────────
@@ -54,6 +63,7 @@ interface KanbanCard {
    giant In Progress pile. Lower rank = further along (sorted first). */
 
 type ChipKey =
+  | "sent_back"
   | "signoff_submitted"
   | "signoff_only"
   | "needs_rules"
@@ -64,6 +74,7 @@ type ChipKey =
   | "not_started";
 
 const CHIP_META: Record<ChipKey, { label: string; cls: string; rank: number }> = {
+  sent_back: { label: "Sent back — rework", cls: "bg-rust/15 text-rust", rank: -1 },
   signoff_submitted: { label: "Awaiting mgr review", cls: "bg-teal-light text-teal-dark", rank: 0 },
   signoff_only: { label: "Sign-off only", cls: "bg-emerald-100 text-emerald-700", rank: 1 },
   needs_rules: { label: "Needs bank rules", cls: "bg-teal/15 text-teal-dark", rank: 2 },
@@ -74,7 +85,8 @@ const CHIP_META: Record<ChipKey, { label: string; cls: string; rank: number }> =
   not_started: { label: "Not started", cls: "bg-gray-100 text-ink-slate", rank: 7 },
 };
 
-function classifyCard(card: KanbanCard, inReview: boolean): ChipKey {
+function classifyCard(card: KanbanCard, inReview: boolean, sentBack = false): ChipKey {
+  if (sentBack) return "sent_back";
   if (inReview) return "signoff_submitted";
   const coa = card.latest_coa_job;
   const reclass = card.latest_reclass_job;
@@ -265,21 +277,23 @@ export function CleanupBoard() {
       needs_cleanup: get("needs_cleanup"),
       in_progress: inProgress,
       review: get("review"),
+      failed_review: get("failed_review"),
     };
   }, [columns]);
 
   // Funnel counts across the whole board, for the summary strip.
   const funnel = useMemo(() => {
     const counts = new Map<ChipKey, number>();
-    const add = (cards: KanbanCard[], inReview: boolean) => {
+    const add = (cards: KanbanCard[], inReview: boolean, sentBack = false) => {
       for (const c of cards) {
-        const k = classifyCard(c, inReview);
+        const k = classifyCard(c, inReview, sentBack);
         counts.set(k, (counts.get(k) || 0) + 1);
       }
     };
     add(collapsed.needs_cleanup, false);
     add(collapsed.in_progress, false);
     add(collapsed.review, true);
+    add(collapsed.failed_review, false, true);
     return counts;
   }, [collapsed]);
 
@@ -293,8 +307,10 @@ export function CleanupBoard() {
 
   const urgentFirst = (cards: KanbanCard[]) =>
     [...cards].sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent));
-  const visible = (cards: KanbanCard[], inReview: boolean) => {
-    let out = urgentFirst(chipFilter ? cards.filter((c) => classifyCard(c, inReview) === chipFilter) : cards);
+  const visible = (cards: KanbanCard[], inReview: boolean, sentBack = false) => {
+    let out = urgentFirst(
+      chipFilter ? cards.filter((c) => classifyCard(c, inReview, sentBack) === chipFilter) : cards
+    );
     if (flaggedOnly)
       out = out.filter((c) => {
         const a = attention[c.id];
@@ -308,7 +324,13 @@ export function CleanupBoard() {
   };
 
   const boardClientIds = useMemo(
-    () => [...collapsed.needs_cleanup, ...collapsed.in_progress, ...collapsed.review].map((c) => c.id),
+    () =>
+      [
+        ...collapsed.needs_cleanup,
+        ...collapsed.in_progress,
+        ...collapsed.review,
+        ...collapsed.failed_review,
+      ].map((c) => c.id),
     [collapsed]
   );
 
@@ -323,6 +345,7 @@ export function CleanupBoard() {
     { id: "needs_cleanup", title: "Needs Cleanup", tone: "border-gray-200", hint: "New — start with COA cleanup" },
     { id: "in_progress", title: "In Progress", tone: "border-teal/40", hint: "Working the checklist" },
     { id: "review", title: "Awaiting Mgr Review", tone: "border-teal-border", hint: "Statements submitted — manager approves & sends" },
+    { id: "failed_review", title: "Sent Back — Rework", tone: "border-rust/40", hint: "Manager sent it back — fix the notes, then resend" },
   ];
 
   return (
@@ -405,9 +428,13 @@ export function CleanupBoard() {
           <Loader2 className="animate-spin text-teal mx-auto" size={28} />
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-3">
           {COLS.map((col) => {
-            const cards = visible(collapsed[col.id], col.id === "review");
+            const cards = visible(
+              collapsed[col.id],
+              col.id === "review",
+              col.id === "failed_review"
+            );
             // no overflow-hidden on the column shell — it clips the Escalate popover
             return (
               <div key={col.id} className={`bg-white rounded-2xl border-2 ${col.tone}`}>
@@ -442,6 +469,7 @@ export function CleanupBoard() {
                       <CleanupCard
                         card={card}
                         inReview={col.id === "review"}
+                        sentBack={col.id === "failed_review"}
                         hasSignoff={signoffByClient.has(card.id)}
                         isSenior={isSenior}
                         bookkeepers={bookkeepers}
@@ -521,6 +549,7 @@ export function CleanupBoard() {
 function CleanupCard({
   card,
   inReview,
+  sentBack,
   hasSignoff,
   isSenior,
   bookkeepers,
@@ -531,6 +560,7 @@ function CleanupCard({
 }: {
   card: KanbanCard;
   inReview: boolean;
+  sentBack: boolean;
   hasSignoff: boolean;
   isSenior: boolean;
   bookkeepers: { id: string; full_name: string }[];
@@ -617,9 +647,9 @@ function CleanupCard({
               </span>
             )}
             <span
-              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${CHIP_META[classifyCard(card, inReview)].cls}`}
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${CHIP_META[classifyCard(card, inReview, sentBack)].cls}`}
             >
-              {CHIP_META[classifyCard(card, inReview)].label}
+              {CHIP_META[classifyCard(card, inReview, sentBack)].label}
             </span>
           </div>
           <ClientBadges attention={attention} stage="cleanup" max={2} />
@@ -749,6 +779,15 @@ function CleanupCard({
           on 2026-08-05 did not have. So the manager saw the chip that says
           "Awaiting mgr review" and nothing to click. The approve flow existed
           all along, but only from the In-Review table on /clients. */}
+      {sentBack && (
+        <CleanupReworkPanel
+          clientId={card.id}
+          notes={card.cleanup_review_notes || ""}
+          rejectedAt={card.cleanup_review_rejected_at || null}
+          onResent={onChanged}
+        />
+      )}
+
       {inReview && (
         <div className="mt-2 pt-2 border-t border-gray-100">
           {isSenior ? (
@@ -776,6 +815,114 @@ function CleanupCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Sent back for rework: fix-list + resend ───────────────────────────────
+// The cleanup mirror of production's FailedReviewPanel. reject-review has
+// always written cleanup_review_state='failed_review' + cleanup_review_notes,
+// but the board never looked for that state, so a rejected cleanup silently
+// reappeared in "In Progress" and the note only showed on /today. Resubmitting
+// meant leaving the board for the In-Review table on /clients.
+//
+// The manager's note becomes a checklist — so write it one item per line or
+// semicolon-separated; a single paragraph collapses to one checkbox. Resend
+// unlocks only when every item is ticked. Tick state is per-browser working
+// state: its job ends at resubmission, when the reject itself is cleared.
+function CleanupReworkPanel({
+  clientId,
+  notes,
+  rejectedAt,
+  onResent,
+}: {
+  clientId: string;
+  notes: string;
+  rejectedAt: string | null;
+  onResent: () => void;
+}) {
+  const items = notes
+    .split(/\n+|;\s+/)
+    .map((l) => l.replace(/^[-•*\d.)\s]+/, "").trim())
+    .filter((l) => l.length > 2);
+  const storageKey = `cleanup-rework-${clientId}`;
+  const [done, setDone] = useState<boolean[]>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const arr = raw ? JSON.parse(raw) : [];
+      return items.map((_, i) => arr[i] === true);
+    } catch {
+      return items.map(() => false);
+    }
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function toggle(i: number) {
+    setDone((prev) => {
+      const next = prev.map((v, j) => (j === i ? !v : v));
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  const allDone = items.length === 0 || done.every(Boolean);
+
+  async function resend() {
+    if (
+      !confirm(
+        "Resubmit this cleanup for manager review?\n\nYou're confirming the items above are fixed."
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/clients/${clientId}/submit-for-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      try { localStorage.removeItem(storageKey); } catch {}
+      onResent();
+    } catch (e: any) {
+      setError(e?.message || "Couldn't resubmit");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 p-2 rounded-lg bg-red-50/60 border border-red-200 space-y-1.5">
+      <div className="text-[10px] font-bold uppercase tracking-wide text-red-800">
+        Fix these, tick each off, then resend
+        {rejectedAt ? ` · sent back ${rejectedAt.slice(0, 10)}` : ""}
+      </div>
+      {items.length === 0 ? (
+        <p className="text-[11px] text-ink-slate">No note was left — check with the manager.</p>
+      ) : (
+        items.map((item, i) => (
+          <label key={i} className="flex items-start gap-2 text-[11px] text-navy cursor-pointer">
+            <input
+              type="checkbox"
+              checked={done[i] || false}
+              onChange={() => toggle(i)}
+              className="mt-0.5 w-3.5 h-3.5 rounded border-gray-300 text-teal-dark"
+            />
+            <span className={done[i] ? "line-through text-ink-light" : ""}>{item}</span>
+          </label>
+        ))
+      )}
+      <button
+        onClick={resend}
+        disabled={busy || !allDone}
+        title={allDone ? "Resubmit for manager review" : "Tick every item first"}
+        className="w-full text-[11px] font-bold px-2.5 py-1.5 rounded bg-teal text-white hover:bg-teal-dark disabled:opacity-40"
+      >
+        {busy ? "Resending…" : "Resend for review →"}
+      </button>
+      {error && <div className="text-[11px] text-red-700">{error}</div>}
     </div>
   );
 }

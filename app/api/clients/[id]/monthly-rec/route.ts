@@ -1164,6 +1164,15 @@ export async function POST(
         .update({
           cleanup_completed_at: now,
           cleanup_completed_by: user.id,
+          // Also resolve the review state. This path completes a cleanup
+          // WITHOUT going through approve-review, and it used to leave
+          // cleanup_review_state wherever it was — so a client submitted for
+          // review and then signed off here graduated to Production still
+          // flagged 'in_review' forever. Paint & Rollers LLC has been stuck
+          // that way since 2026-07-19: invisible on the cleanup board (the
+          // kanban excludes cleanup_completed_at IS NOT NULL) yet counted as
+          // awaiting a manager. Same value approve-review writes.
+          cleanup_review_state: "complete",
         } as any)
         .eq("id", clientLinkId)
         .is("cleanup_completed_at", null);
