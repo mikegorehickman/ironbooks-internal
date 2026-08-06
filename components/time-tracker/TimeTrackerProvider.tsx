@@ -184,6 +184,20 @@ export function TimeTrackerProvider() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [idlePrompt, setIdlePrompt] = useState(false);
   const [autoTrack, setAutoTrackState] = useState(false);
+  // ── Multi-window coordination ────────────────────────────────────────────
+  // Two SNAP windows on two different clients would otherwise FIGHT: each
+  // background tab's auto-track timer still fires (throttled, but it fires),
+  // so A switches the timer to A, B switches it back to B, forever. The rule
+  // that fixes it: only the window the bookkeeper is actually looking at gets
+  // a vote. focusedNow gates auto-track; lastFocusedRef ("was I the most
+  // recently focused SNAP tab?") gates page-dwell pings, and stays true when
+  // focus moves OUTSIDE the app (QBO in front → the tab they left keeps
+  // attributing, which is the designed QBO behavior). It only flips false
+  // when ANOTHER SNAP tab claims focus over the BroadcastChannel.
+  const tabIdRef = useRef<string | null>(null);
+  if (tabIdRef.current === null) tabIdRef.current = Math.random().toString(36).slice(2);
+  const lastFocusedRef = useRef(true);
+  const [focusedNow, setFocusedNow] = useState(true);
   const [pos, setPosState] = useState<{ x: number; y: number } | null>(null);
   const [accountCheck, setAccountCheck] = useState(false);
   // Session-elapsed threshold (seconds) for the next account check, per entry.
@@ -317,14 +331,44 @@ export function TimeTrackerProvider() {
   }, [enabled, loadState]);
 
   // Cross-tab: any tab that mutates broadcasts; the others resync immediately
-  // (CustomEvent — the lib/sounds.ts precedent — is same-tab only).
+  // (CustomEvent — the lib/sounds.ts precedent — is same-tab only). The same
+  // channel carries focus claims, which are NOT mutations — no refetch.
   useEffect(() => {
     if (!enabled || typeof BroadcastChannel === "undefined") return;
     const ch = new BroadcastChannel(CHANNEL);
     channelRef.current = ch;
-    ch.onmessage = () => { void loadState(); };
+    ch.onmessage = (e: MessageEvent) => {
+      const d = e?.data;
+      if (d && d.focusClaim) {
+        if (d.focusClaim !== tabIdRef.current) lastFocusedRef.current = false;
+        return;
+      }
+      void loadState();
+    };
     return () => { ch.close(); channelRef.current = null; };
   }, [enabled, loadState]);
+
+  // Track "am I the window being looked at" + claim ownership on focus.
+  useEffect(() => {
+    if (!enabled) return;
+    const sync = () =>
+      setFocusedNow(document.visibilityState === "visible" && document.hasFocus());
+    const claim = () => {
+      lastFocusedRef.current = true;
+      try { channelRef.current?.postMessage({ focusClaim: tabIdRef.current }); } catch { /* ignore */ }
+      sync();
+    };
+    sync();
+    if (document.hasFocus()) claim();
+    window.addEventListener("focus", claim);
+    window.addEventListener("blur", sync);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.removeEventListener("focus", claim);
+      window.removeEventListener("blur", sync);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [enabled]);
   const broadcast = useCallback(() => {
     try { channelRef.current?.postMessage({ t: Date.now() }); } catch { /* ignore */ }
   }, []);
@@ -407,8 +451,16 @@ export function TimeTrackerProvider() {
       sendPageView(entryId, path, true);
       return;
     }
-    sendPageView(entryId, path, false);
-    const id = setInterval(() => sendPageView(entryId, path, false), PAGE_PING_MS);
+    // Only the most-recently-focused SNAP tab attributes. Two tabs on two
+    // pages would otherwise alternate the session's dwell between their paths
+    // every ping. lastFocusedRef (not live focus) is deliberate: it stays true
+    // when QBO takes focus, so the page they worked from keeps accruing —
+    // it only yields when ANOTHER SNAP tab claims. Closes stay unconditional;
+    // closing somebody else's open view is harmless, leaving one open isn't.
+    if (lastFocusedRef.current) sendPageView(entryId, path, false);
+    const id = setInterval(() => {
+      if (lastFocusedRef.current) sendPageView(entryId, path, false);
+    }, PAGE_PING_MS);
     return () => {
       clearInterval(id);
       sendPageView(entryId, path, true);
@@ -611,7 +663,13 @@ export function TimeTrackerProvider() {
 
   const ctxClientId = context?.clientLinkId ?? null;
   useEffect(() => {
-    if (!enabled || !autoTrack || !ctxClientId) return;
+    // FOCUSED WINDOWS ONLY. Without this gate, two windows open on two
+    // different clients ping-pong the timer forever (background setTimeout
+    // still fires). With it, the semantics are exactly what a bookkeeper
+    // flipping between windows expects: the timer follows the window you've
+    // been LOOKING AT for 12s — and switching to QBO changes nothing, because
+    // QBO taking focus doesn't put any SNAP tab in charge.
+    if (!enabled || !autoTrack || !ctxClientId || !focusedNow) return;
     if (running && !running.clientLinkId) return;            // overhead — hands off
     if (running && running.clientLinkId === ctxClientId) return; // already right
     const t = setTimeout(() => {
@@ -621,6 +679,8 @@ export function TimeTrackerProvider() {
       if (s.running && !s.running.clientLinkId) return;
       // "Not now" (the X on the prompt) means not automatically either.
       if (s.dismissed.has(ctxClientId)) return;
+      // Re-verify at fire time — the 12s may have ended somewhere else.
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
       const pausedHere = s.paused.find((p) => p.clientLinkId === ctxClientId);
       // resume() pauses the running timer server-side before reopening this
       // one; start() auto-pauses it too — one call either way, no race.
@@ -628,7 +688,7 @@ export function TimeTrackerProvider() {
       else void start({ clientLinkId: ctxClientId });
     }, AUTO_TRACK_DWELL_MS);
     return () => clearTimeout(t);
-  }, [enabled, autoTrack, ctxClientId, running, resume, start]);
+  }, [enabled, autoTrack, ctxClientId, focusedNow, running, resume, start]);
 
   // ── 30-minute account check ─────────────────────────────────────────────
   // A session crossing 30 minutes (then 60, 90…) gets one question: still on
@@ -647,6 +707,9 @@ export function TimeTrackerProvider() {
     const iv = setInterval(() => {
       const s = autoTrackSnap.current;
       if (!s.running || s.running.status !== "running" || s.noteRequest || s.idlePrompt) return;
+      // Only prompt in a visible window — a hidden tab raising the question
+      // means answering it twice when both tabs are eventually seen.
+      if (document.visibilityState !== "visible") return;
       const mark = accountCheckRef.current;
       if (!mark || mark.entryId !== s.running.id) return;
       const live = elapsedSeconds(
