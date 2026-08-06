@@ -40,42 +40,83 @@ const NAVY_GRADIENT = "linear-gradient(135deg, #0F1F2E 0%, #1a3651 100%)";
 // would otherwise fire on release — so drag-the-pill doesn't also expand it.
 // Double-click a handle to snap back to the default corner.
 
+/** Movement (px) before a press counts as a drag rather than a click. Measured
+ *  as real distance, not dx+dy — the Manhattan sum turned a 4px-across,
+ *  4px-down hand tremor into an 8px "drag" and ate the click. */
+const DRAG_SLOP = 6;
+/** After a real drag, ignore the click the release generates — for this long
+ *  only. A time window, never a sticky flag: a flag left stuck true (drag
+ *  ended off-window, gesture cancelled, no click ever arrived to clear it)
+ *  silently eats the NEXT genuine click, which is the intermittent
+ *  "won't expand" the team hit. */
+const CLICK_SUPPRESS_MS = 300;
+
 function Floating({ z, children }: { z: number; children: React.ReactNode }) {
   const t = useTimeTracker()!;
   const { pos, setPos } = t;
   const ref = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
-  const moved = useRef(false);
+  const drag = useRef<{ px: number; py: number; ox: number; oy: number; moved: boolean } | null>(null);
+  const suppressClickUntil = useRef(0);
+
+  // Move/up live on WINDOW, not on the element, and there is deliberately no
+  // setPointerCapture: capturing retargets the subsequent click to this
+  // container, so the pill's own onClick never fired and the timer wouldn't
+  // expand. Window listeners give the same "keep tracking outside the box"
+  // benefit with none of that, and pointercancel/button-released always end
+  // the drag — otherwise a cancelled gesture left it armed and the widget
+  // followed the bare cursor around.
+  useEffect(() => {
+    const end = () => {
+      const d = drag.current;
+      if (!d) return;
+      if (d.moved) suppressClickUntil.current = Date.now() + CLICK_SUPPRESS_MS;
+      drag.current = null;
+    };
+    const onMove = (e: PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      if (e.buttons === 0) { end(); return; } // released somewhere we didn't see
+      const dx = e.clientX - d.px;
+      const dy = e.clientY - d.py;
+      if (!d.moved && Math.hypot(dx, dy) < DRAG_SLOP) return;
+      d.moved = true;
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPos({
+        x: Math.min(Math.max(8, d.ox + dx), Math.max(8, window.innerWidth - r.width - 8)),
+        y: Math.min(Math.max(8, d.oy + dy), Math.max(8, window.innerHeight - 40)),
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [setPos]);
 
   return (
     <div
       ref={ref}
       onPointerDown={(e) => {
+        if (e.button !== 0) return; // left button / primary touch only
         const el = e.target as HTMLElement;
         if (!el.closest("[data-drag-handle]") || !ref.current) return;
-        const tag = el.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        // Never hijack a control the user is trying to operate.
+        if (el.closest("input, textarea, select, a")) return;
         const r = ref.current.getBoundingClientRect();
-        drag.current = { px: e.clientX, py: e.clientY, ox: r.left, oy: r.top };
-        moved.current = false;
-        try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ok */ }
+        drag.current = { px: e.clientX, py: e.clientY, ox: r.left, oy: r.top, moved: false };
       }}
-      onPointerMove={(e) => {
-        if (!drag.current || !ref.current) return;
-        const dx = e.clientX - drag.current.px;
-        const dy = e.clientY - drag.current.py;
-        if (!moved.current && Math.abs(dx) + Math.abs(dy) < 5) return;
-        moved.current = true;
-        const r = ref.current.getBoundingClientRect();
-        setPos({
-          x: Math.min(Math.max(8, drag.current.ox + dx), window.innerWidth - r.width - 8),
-          y: Math.min(Math.max(8, drag.current.oy + dy), window.innerHeight - 40),
-        });
-      }}
-      onPointerUp={() => { drag.current = null; }}
       onClickCapture={(e) => {
-        // A drag is not a click — swallow it or releasing over the pill expands.
-        if (moved.current) { e.preventDefault(); e.stopPropagation(); moved.current = false; }
+        // A drag is not a click. Window-scoped and time-bounded, so this can
+        // never get stuck and block a real click.
+        if (Date.now() < suppressClickUntil.current) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
       }}
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).closest("[data-drag-handle]")) setPos(null);
