@@ -23,8 +23,19 @@ export interface ClientAnswerRow {
   answer_account: string | null;
   answer_note: string | null;
   answered_at: string;
-  /** Last apply error, if a previous attempt failed. */
+  /** Last apply error, if a previous attempt failed OR was blocked. */
   error: string | null;
+  /**
+   * QBO refused the write for a reason the bookkeeper must clear by hand —
+   * the transaction is matched to a bank-feed download, or it's in a closed
+   * period. Approving again changes nothing until they do.
+   */
+  blocked: boolean;
+}
+
+/** The apply route writes these with a "Blocked — " prefix. */
+export function isBlockedMessage(msg: string | null | undefined): boolean {
+  return /^blocked\s*[—-]/i.test((msg || "").trim());
 }
 
 export async function getClientAnswers(
@@ -68,7 +79,14 @@ export async function getClientAnswers(
       answer_account: r.client_response_account || null,
       answer_note: r.client_response_note || null,
       answered_at: r.client_responded_at,
-      error: r.status === "failed" ? r.error_message || "Previous apply failed" : null,
+      // Was `status === "failed" ? ... : null`, which silently dropped every
+      // BLOCKED row: the apply route deliberately does NOT mark a blocked row
+      // failed (it stays approvable once the bookkeeper unmatches it in QBO),
+      // so those rows kept status 'pending' and their reason never reached the
+      // UI. Measured 2026-08-07: 19 of 21 blocked rows were displaying as
+      // completely ordinary — approve, nothing happens, no explanation.
+      error: r.error_message || (r.status === "failed" ? "Previous apply failed" : null),
+      blocked: isBlockedMessage(r.error_message),
     });
   }
   return rows;

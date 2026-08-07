@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChevronDown, Loader2, MessageCircleQuestion, Sparkles, X, ListChecks } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, MessageCircleQuestion, RotateCcw, Sparkles, X, ListChecks } from "lucide-react";
 import type { ClientAnswerRow } from "@/lib/client-answers";
 
 /**
@@ -31,19 +31,23 @@ export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[]
   const [rows, setRows] = useState(initial);
   // Home shows the first 5 client groups; toggle for the rest.
   const [showAll, setShowAll] = useState(false);
+  const [blockedOnly, setBlockedOnly] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<{ label: string; done: number; total: number } | null>(null);
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
 
+  const blockedTotal = useMemo(() => rows.filter((r) => r.blocked).length, [rows]);
+
   const byClient = useMemo(() => {
     const m = new Map<string, ClientAnswerRow[]>();
     for (const r of rows) {
+      if (blockedOnly && !r.blocked) continue;
       const arr = m.get(r.client_name) || [];
       arr.push(r);
       m.set(r.client_name, arr);
     }
     return m;
-  }, [rows]);
+  }, [rows, blockedOnly]);
 
   function dropRows(ids: string[]) {
     const idSet = new Set(ids);
@@ -159,6 +163,36 @@ export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[]
           the client answered a transaction question — tick to bulk-approve, or confirm one at a time
         </span>
       </div>
+      {blockedTotal > 0 && (
+        <div className="px-5 py-3 bg-[#954E44]/[0.07] border-b-2 border-[#954E44]/30">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={15} className="text-[#954E44] mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-[#7A3F37]">
+                {blockedTotal} answer{blockedTotal === 1 ? " is" : "s are"} blocked in QuickBooks
+              </div>
+              <div className="text-xs text-[#7A3F37] mt-0.5 leading-relaxed">
+                QuickBooks won&apos;t let us re-categorise a transaction that&apos;s matched to a
+                downloaded bank-feed item. Approving {blockedTotal === 1 ? "it" : "them"} changes
+                nothing until the match is undone. In QuickBooks: <strong>Transactions → Bank
+                transactions</strong>, find the matched item, <strong>Undo</strong> — then hit
+                &ldquo;Unmatched it — retry&rdquo; on the row.
+              </div>
+            </div>
+            <button
+              onClick={() => setBlockedOnly((v) => !v)}
+              className={`ml-auto shrink-0 text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 transition-colors ${
+                blockedOnly
+                  ? "bg-[#954E44] border-[#954E44] text-white"
+                  : "border-[#954E44]/40 text-[#954E44] hover:bg-[#954E44]/10"
+              }`}
+            >
+              {blockedOnly ? "Show all" : "Show blocked only"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="divide-y divide-gray-50">
         {bulkErrors.length > 0 && (
           <div className="px-5 py-2 text-xs text-red-800 bg-red-50 border-b border-red-100">
@@ -168,6 +202,10 @@ export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[]
         )}
         {(showAll ? [...byClient.entries()] : [...byClient.entries()].slice(0, 5)).map(([client, list]) => {
           const selectedRows = list.filter((r) => selected.has(r.id));
+          // Every QBO-writing bulk action drops blocked rows. Reject is the
+          // exception — it never touches QuickBooks, so a blocked row can
+          // still be rejected.
+          const writable = selectedRows.filter((r) => !r.blocked);
           return (
             <ClientGroup
               key={client}
@@ -179,14 +217,14 @@ export function ClientAnswersWidget({ rows: initial }: { rows: ClientAnswerRow[]
               onToggleRow={(r) => toggleRow(r, list)}
               onSelectAll={(on) => setClientSelection(list, on)}
               onApprove={() =>
-                runBulk("Approving", selectedRows.filter((r) => r.answer_account), () => ({ action: "approve" }))
+                runBulk("Approving", writable.filter((r) => r.answer_account), () => ({ action: "approve" }))
               }
-              onApproveAddRule={() => approveAndAddRule(selectedRows)}
+              onApproveAddRule={() => approveAndAddRule(writable)}
               onReject={() => runBulk("Rejecting", selectedRows, () => ({ action: "reject" }))}
               onApplyAccount={(acc, alsoRule) =>
                 alsoRule
-                  ? approveAndAddRule(selectedRows, acc)
-                  : runBulk("Applying account", selectedRows, () => ({ action: "approve_as", account_id: acc.id, account_name: acc.name }))
+                  ? approveAndAddRule(writable, acc)
+                  : runBulk("Applying account", writable, () => ({ action: "approve_as", account_id: acc.id, account_name: acc.name }))
               }
               onRowDone={(id) => dropRows([id])}
             />
@@ -224,7 +262,11 @@ function ClientGroup({
 }) {
   const allSelected = list.length > 0 && list.every((r) => selectedIds.has(r.id));
   const n = selectedRows.length;
-  const approvable = selectedRows.filter((r) => r.answer_account).length;
+  // Blocked rows are excluded from every bulk action — a bulk run that
+  // includes them reports "12 approved" while some silently did nothing.
+  const approvable = selectedRows.filter((r) => r.answer_account && !r.blocked).length;
+  const blockedSelected = selectedRows.filter((r) => r.blocked).length;
+  const blockedInClient = list.filter((r) => r.blocked).length;
   const [picker, setPicker] = useState(false);
 
   return (
@@ -239,12 +281,25 @@ function ClientGroup({
           />
           <span className="text-xs font-bold text-ink-slate">{client}</span>
         </label>
+        {blockedInClient > 0 && (
+          <span
+            title="Matched to a bank-feed download in QuickBooks — approving does nothing until they're unmatched"
+            className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-[#954E44]/10 text-[#954E44] border border-[#954E44]/30 rounded-full px-2 py-0.5"
+          >
+            <AlertTriangle size={9} /> {blockedInClient} blocked
+          </span>
+        )}
 
         {n > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-semibold text-navy bg-teal-lighter border border-teal-light rounded-full px-2 py-0.5">
               {n} selected
             </span>
+            {blockedSelected > 0 && (
+              <span className="text-[11px] font-semibold text-[#954E44]">
+                {blockedSelected} blocked — skipped
+              </span>
+            )}
             {bulk ? (
               <span className="text-[11px] text-ink-slate inline-flex items-center gap-1">
                 <Loader2 size={11} className="animate-spin" /> {bulk.label} {bulk.done}/{bulk.total}…
@@ -410,7 +465,10 @@ function AnswerRow({ row, checked, onToggle, onDone }: {
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState(row.error || "");
-  const [blocked, setBlocked] = useState(false);
+  // Seeded from the row, not just from a response in THIS session — a block
+  // set on a previous visit has to be visible on load or the bookkeeper just
+  // clicks Approve into the void again.
+  const [blocked, setBlocked] = useState(!!row.blocked);
   const [open, setOpen] = useState(false);
   const [sugg, setSugg] = useState<Array<{ id: string; name: string; reason: string }> | null>(null);
   const [all, setAll] = useState<CoaAccount[]>([]);
@@ -459,7 +517,15 @@ function AnswerRow({ row, checked, onToggle, onDone }: {
   }
 
   return (
-    <div className={`px-5 py-3 ${checked ? "bg-teal-lighter/40" : ""}`}>
+    <div
+      className={`px-5 py-3 ${
+        blocked
+          ? "bg-[#954E44]/[0.06] border-l-4 border-[#954E44]"
+          : checked
+          ? "bg-teal-lighter/40"
+          : ""
+      }`}
+    >
       <div className="flex items-start gap-3 flex-wrap">
         <input
           type="checkbox"
@@ -471,6 +537,11 @@ function AnswerRow({ row, checked, onToggle, onDone }: {
         <div className="flex-1 min-w-[220px]">
           <div className="text-sm text-navy">
             <span className="font-semibold">{row.vendor || row.description || "Unlabeled transaction"}</span>
+            {blocked && (
+              <span className="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wide bg-[#954E44] text-white px-1.5 py-0.5 rounded">
+                Blocked in QuickBooks
+              </span>
+            )}
             <span className="text-ink-slate"> · {money(row.amount)}</span>
             {row.date && <span className="text-ink-light text-xs"> · {row.date}</span>}
           </div>
@@ -485,15 +556,55 @@ function AnswerRow({ row, checked, onToggle, onDone }: {
             {row.answer_note && <span className="italic"> — “{row.answer_note}”</span>}
           </div>
           {error && (
-            <div className={`text-xs mt-1 ${blocked ? "text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5" : "text-red-700"}`}>
-              {blocked && <span className="font-semibold">Needs a step in QuickBooks — </span>}
-              {error}
+            <div
+              className={`text-xs mt-1.5 ${
+                blocked
+                  ? "text-[#7A3F37] bg-white border border-[#954E44]/40 rounded-md px-2.5 py-2 leading-relaxed"
+                  : "text-red-700"
+              }`}
+            >
+              {blocked ? (
+                <>
+                  <span className="font-bold">Approving this does nothing yet.</span> {error}
+                  <div className="mt-1 text-[11px] text-[#8A5A50]">
+                    In QuickBooks: Transactions → Bank transactions → the matched
+                    item → Undo. Then use the button on the right.
+                  </div>
+                </>
+              ) : (
+                error
+              )}
             </div>
           )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {row.answer_account ? (
+          {/* Blocked rows lose the normal Approve entirely. Both Approve and
+              "apply as a different account" hit the same QBO write, so both
+              would fail the same way — leaving them live is how 21 rows got
+              clicked with nothing happening. The retry names its prerequisite
+              so it can't be pressed absent-mindedly. */}
+          {blocked ? (
+            <button
+              onClick={() => {
+                if (
+                  !confirm(
+                    "Have you unmatched this transaction in QuickBooks?\n\n" +
+                      "Transactions → Bank transactions → find the matched item → Undo.\n\n" +
+                      "If it's still matched, this will fail again."
+                  )
+                )
+                  return;
+                act({ action: "approve" }, "approve");
+              }}
+              disabled={!!busy}
+              title="Only works once the transaction is unmatched in QuickBooks"
+              className="inline-flex items-center gap-1.5 text-xs font-bold bg-white border-2 border-[#954E44] text-[#954E44] hover:bg-[#954E44] hover:text-white rounded-lg px-3 py-2 disabled:opacity-50"
+            >
+              {busy === "approve" ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+              Unmatched it — retry
+            </button>
+          ) : row.answer_account ? (
             <button onClick={() => act({ action: "approve" }, "approve")} disabled={!!busy}
               className="inline-flex items-center gap-1.5 text-xs font-bold bg-teal hover:bg-teal-dark text-white rounded-l-lg px-3 py-2 disabled:opacity-50">
               {busy === "approve" ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
@@ -504,10 +615,12 @@ function AnswerRow({ row, checked, onToggle, onDone }: {
               Pick account
             </button>
           )}
-          <button onClick={toggleDropdown} disabled={!!busy} title="Apply as a different account"
-            className="inline-flex items-center text-xs font-bold bg-teal/90 hover:bg-teal-dark text-white rounded-r-lg px-1.5 py-2 border-l border-white/30 disabled:opacity-50">
-            <ChevronDown size={13} className={open ? "rotate-180 transition-transform" : "transition-transform"} />
-          </button>
+          {!blocked && (
+            <button onClick={toggleDropdown} disabled={!!busy} title="Apply as a different account"
+              className="inline-flex items-center text-xs font-bold bg-teal/90 hover:bg-teal-dark text-white rounded-r-lg px-1.5 py-2 border-l border-white/30 disabled:opacity-50">
+              <ChevronDown size={13} className={open ? "rotate-180 transition-transform" : "transition-transform"} />
+            </button>
+          )}
           <button onClick={reject} disabled={!!busy}
             className="inline-flex items-center gap-1 text-xs font-semibold text-ink-slate hover:text-red-700 border border-gray-200 hover:border-red-200 rounded-lg px-2.5 py-2 disabled:opacity-50">
             {busy === "reject" ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
