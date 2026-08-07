@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle, ChevronDown, CheckCircle2, Clock, Loader2, Pause, Play, Search, Trash2, X,
+  AlertCircle, ChevronDown, CheckCircle2, Clock, GripVertical, Loader2, Pause, Pencil, Play,
+  Search, Trash2, X,
 } from "lucide-react";
 import {
   elapsedSeconds, formatClock, formatDuration, effectiveBudgetMinutes, isOverBudget,
@@ -12,21 +13,121 @@ import { useTimeTracker, type EntryView } from "./TimeTrackerProvider";
 /**
  * The floating timer. Faces, in priority order:
  *   1. note modal    — completing an over-budget client demands a reason
- *   2. work picker   — "what are you working on?": any client, or an overhead
+ *   2. account check — 30+ min on one account: "still the right one?"
+ *   3. work picker   — "what are you working on?": any client, or an overhead
  *                      bucket (so inbox/meeting time is recordable too)
- *   3. switch prompt — a timer runs on something other than this page's client
- *   4. running/paused— expanded card, or a minimized ticking pill
- *   5. start prompt  — client page, nothing running yet (client pre-filled)
- *   6. idle FAB      — anywhere else: a quiet way into the picker
+ *   4. switch prompt — a timer runs on something other than this page's client
+ *                      (hidden when auto-track is on — the switch just happens)
+ *   5. running/paused— expanded card, or a minimized ticking pill
+ *   6. start prompt  — client page, nothing running yet (client pre-filled)
+ *   7. idle FAB      — anywhere else: a quiet way into the picker
  *
  * Client entries show a budget bar; overhead entries have no budget by design
  * and never count against one.
  *
- * Positioning/z-index follow the portal SupportWidget (fixed bottom-5 right-5,
- * z-40 pill / z-50 panel), which already clears the sticky sidebar.
+ * Every floating face renders inside <Floating>, which owns position: default
+ * bottom-right, or wherever the user dragged it (persisted). It was covering
+ * page buttons — now it moves. The note modal stays centered: it's blocking on
+ * purpose.
  */
 
 const NAVY_GRADIENT = "linear-gradient(135deg, #0F1F2E 0%, #1a3651 100%)";
+
+// ── Draggable positioning shell ──────────────────────────────────────────────
+// One shell for every face so the pill, card and prompts all live at the same
+// spot. Dragging works from any element marked data-drag-handle (the pill
+// itself, the card headers). A real drag (>5px) suppresses the click that
+// would otherwise fire on release — so drag-the-pill doesn't also expand it.
+// Double-click a handle to snap back to the default corner.
+
+/** Movement (px) before a press counts as a drag rather than a click. Measured
+ *  as real distance, not dx+dy — the Manhattan sum turned a 4px-across,
+ *  4px-down hand tremor into an 8px "drag" and ate the click. */
+const DRAG_SLOP = 6;
+/** After a real drag, ignore the click the release generates — for this long
+ *  only. A time window, never a sticky flag: a flag left stuck true (drag
+ *  ended off-window, gesture cancelled, no click ever arrived to clear it)
+ *  silently eats the NEXT genuine click, which is the intermittent
+ *  "won't expand" the team hit. */
+const CLICK_SUPPRESS_MS = 300;
+
+function Floating({ z, children }: { z: number; children: React.ReactNode }) {
+  const t = useTimeTracker()!;
+  const { pos, setPos } = t;
+  const ref = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ px: number; py: number; ox: number; oy: number; moved: boolean } | null>(null);
+  const suppressClickUntil = useRef(0);
+
+  // Move/up live on WINDOW, not on the element, and there is deliberately no
+  // setPointerCapture: capturing retargets the subsequent click to this
+  // container, so the pill's own onClick never fired and the timer wouldn't
+  // expand. Window listeners give the same "keep tracking outside the box"
+  // benefit with none of that, and pointercancel/button-released always end
+  // the drag — otherwise a cancelled gesture left it armed and the widget
+  // followed the bare cursor around.
+  useEffect(() => {
+    const end = () => {
+      const d = drag.current;
+      if (!d) return;
+      if (d.moved) suppressClickUntil.current = Date.now() + CLICK_SUPPRESS_MS;
+      drag.current = null;
+    };
+    const onMove = (e: PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      if (e.buttons === 0) { end(); return; } // released somewhere we didn't see
+      const dx = e.clientX - d.px;
+      const dy = e.clientY - d.py;
+      if (!d.moved && Math.hypot(dx, dy) < DRAG_SLOP) return;
+      d.moved = true;
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPos({
+        x: Math.min(Math.max(8, d.ox + dx), Math.max(8, window.innerWidth - r.width - 8)),
+        y: Math.min(Math.max(8, d.oy + dy), Math.max(8, window.innerHeight - 40)),
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [setPos]);
+
+  return (
+    <div
+      ref={ref}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return; // left button / primary touch only
+        const el = e.target as HTMLElement;
+        if (!el.closest("[data-drag-handle]") || !ref.current) return;
+        // Never hijack a control the user is trying to operate.
+        if (el.closest("input, textarea, select, a")) return;
+        const r = ref.current.getBoundingClientRect();
+        drag.current = { px: e.clientX, py: e.clientY, ox: r.left, oy: r.top, moved: false };
+      }}
+      onClickCapture={(e) => {
+        // A drag is not a click. Window-scoped and time-bounded, so this can
+        // never get stuck and block a real click.
+        if (Date.now() < suppressClickUntil.current) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest("[data-drag-handle]")) setPos(null);
+      }}
+      className="fixed touch-none"
+      style={pos ? { left: pos.x, top: pos.y, zIndex: z } : { bottom: 20, right: 20, zIndex: z }}
+    >
+      {children}
+    </div>
+  );
+}
 
 /** Ticks once a second, recomputing elapsed from server timestamps + offset —
  *  never incrementing a counter (throttled tabs and clock skew can't drift it). */
@@ -67,53 +168,75 @@ export function TimeTrackerWidget() {
 
   // 1b. Idle: a timer is running but nobody's been at the keyboard. Ask instead
   // of silently banking it — or silently throwing it away.
-  if (t.idlePrompt && running) return <IdlePrompt entry={running} seconds={live} />;
+  if (t.idlePrompt && running) {
+    return <Floating z={50}><IdlePrompt entry={running} seconds={live} /></Floating>;
+  }
+
+  // 1c. Long session — is the timer still pointed at the right account?
+  if (t.accountCheck && running) {
+    return <Floating z={50}><AccountCheckPrompt entry={running} seconds={live} /></Floating>;
+  }
 
   // 2. The "what are you working on?" picker (any client, or overhead).
-  if (pickerOpen) return <WorkPicker />;
+  if (pickerOpen) return <Floating z={50}><WorkPicker /></Floating>;
 
-  // 3. Running on a different client than the page we're on.
-  if (running && context && running.clientLinkId !== context.clientLinkId && !t.dismissedForClient(context.clientLinkId)) {
-    return <SwitchPrompt live={live} />;
+  // 3. Running on a different client than the page we're on. With auto-track
+  // on this prompt never shows — the switch happens by itself after the dwell.
+  if (
+    !t.autoTrack &&
+    running && context && running.clientLinkId !== context.clientLinkId &&
+    !t.dismissedForClient(context.clientLinkId)
+  ) {
+    return <Floating z={50}><SwitchPrompt live={live} /></Floating>;
   }
 
   // 3. An active timer (this page's, or elsewhere → still show it).
   if (running) {
-    return minimized ? (
-      <Pill entry={running} seconds={live} onExpand={() => setMinimized(false)} />
-    ) : (
-      <Card entry={running} seconds={live} onMinimize={() => setMinimized(true)} />
+    return (
+      <Floating z={minimized ? 40 : 50}>
+        {minimized ? (
+          <Pill entry={running} seconds={live} onExpand={() => setMinimized(false)} />
+        ) : (
+          <Card entry={running} seconds={live} onMinimize={() => setMinimized(true)} />
+        )}
+      </Floating>
     );
   }
 
   // 3b. Paused entries exist — surface the one for this page, else the newest.
   const pausedShow = pausedHere ?? paused[0] ?? null;
   if (pausedShow) {
-    return minimized ? (
-      <Pill entry={pausedShow} seconds={pausedShow.accumulatedSeconds} onExpand={() => setMinimized(false)} />
-    ) : (
-      <Card entry={pausedShow} seconds={pausedShow.accumulatedSeconds} onMinimize={() => setMinimized(true)} />
+    return (
+      <Floating z={minimized ? 40 : 50}>
+        {minimized ? (
+          <Pill entry={pausedShow} seconds={pausedShow.accumulatedSeconds} onExpand={() => setMinimized(false)} />
+        ) : (
+          <Card entry={pausedShow} seconds={pausedShow.accumulatedSeconds} onMinimize={() => setMinimized(true)} />
+        )}
+      </Floating>
     );
   }
 
   // 4. On a client page with nothing tracking → offer to start, pre-filled.
   if (context && !activeOnThisPage && !t.dismissedForClient(context.clientLinkId)) {
-    return <StartPrompt />;
+    return <Floating z={50}><StartPrompt /></Floating>;
   }
 
   // Error with nothing else to show (e.g. migration pending) — say so quietly.
   if (error && context) {
     return (
-      <div className="fixed bottom-5 right-5 z-40 max-w-[320px] rounded-xl bg-amber-50 border border-amber-300 px-3 py-2 text-[11px] text-amber-900 shadow-lg">
-        {error}
-      </div>
+      <Floating z={40}>
+        <div className="max-w-[320px] rounded-xl bg-amber-50 border border-amber-300 px-3 py-2 text-[11px] text-amber-900 shadow-lg">
+          {error}
+        </div>
+      </Floating>
     );
   }
 
   // 5. Idle anywhere else (inbox, /today, admin…). A quiet way in, so time on a
   // non-client page can still be attributed — to a client, or to an overhead
   // bucket. Without this, that work is simply unrecordable.
-  return <IdleFab />;
+  return <Floating z={40}><IdleFab /></Floating>;
 }
 
 function IdleFab() {
@@ -121,9 +244,10 @@ function IdleFab() {
   return (
     <button
       onClick={() => { t.loadClients(); t.setPickerOpen(true); }}
-      title="Track time — pick a client or a category"
+      title="Track time — pick a client or a category · drag to move"
       aria-label="Track time"
-      className="fixed bottom-5 right-5 z-40 flex items-center gap-2 pl-3 pr-4 py-2.5 rounded-full text-white/90 shadow-lg hover:shadow-2xl transition-all hover:scale-105 opacity-70 hover:opacity-100"
+      data-drag-handle
+      className="flex items-center gap-2 pl-3 pr-4 py-2.5 rounded-full text-white/90 shadow-lg hover:shadow-2xl transition-all hover:scale-105 opacity-70 hover:opacity-100 cursor-grab active:cursor-grabbing"
       style={{ background: NAVY_GRADIENT }}
     >
       <Clock size={15} />
@@ -144,8 +268,8 @@ function WorkPicker() {
   const switching = !!running;
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
-      <div className="px-4 py-3 flex items-start justify-between gap-2" style={{ background: NAVY_GRADIENT }}>
+    <div className="w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+      <div data-drag-handle className="px-4 py-3 flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing" style={{ background: NAVY_GRADIENT }}>
         <div className="min-w-0">
           <div className="text-[10px] font-bold uppercase tracking-wide text-white/60">Track time</div>
           <div className="text-sm font-bold text-white">What are you working on?</div>
@@ -229,8 +353,8 @@ function StartPrompt() {
   if (!context) return null;
   const budget = effectiveBudgetMinutes(context.budgetMinutes);
   return (
-    <div className="fixed bottom-5 right-5 z-50 w-[320px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
-      <div className="px-4 py-3 flex items-start justify-between gap-2" style={{ background: NAVY_GRADIENT }}>
+    <div className="w-[320px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+      <div data-drag-handle className="px-4 py-3 flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing" style={{ background: NAVY_GRADIENT }}>
         <div className="min-w-0">
           <div className="text-[10px] font-bold uppercase tracking-wide text-white/60">Track time</div>
           <div className="text-sm font-bold text-white truncate">{context.clientName || "This client"}</div>
@@ -271,8 +395,8 @@ function SwitchPrompt({ live }: { live: number }) {
   const { context, running, busy, start, dismissPrompt } = t;
   if (!context || !running) return null;
   return (
-    <div className="fixed bottom-5 right-5 z-50 w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
-      <div className="px-4 py-3 flex items-start justify-between gap-2" style={{ background: NAVY_GRADIENT }}>
+    <div className="w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+      <div data-drag-handle className="px-4 py-3 flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing" style={{ background: NAVY_GRADIENT }}>
         <div className="min-w-0">
           <div className="text-[10px] font-bold uppercase tracking-wide text-white/60">Still timing</div>
           <div className="text-sm font-bold text-white truncate">{running.label}</div>
@@ -317,8 +441,9 @@ function Pill({ entry, seconds, onExpand }: { entry: EntryView; seconds: number;
   return (
     <button
       onClick={onExpand}
-      title={`${entry.label} — ${formatClock(seconds)} (${runningNow ? "running" : "paused"})`}
-      className="fixed bottom-5 right-5 z-40 flex items-center gap-2.5 pl-3 pr-4 py-2.5 rounded-full text-white shadow-xl hover:shadow-2xl transition-all hover:scale-105"
+      title={`${entry.label} — ${formatClock(seconds)} (${runningNow ? "running" : "paused"}) · drag to move`}
+      data-drag-handle
+      className="flex items-center gap-2.5 pl-3 pr-4 py-2.5 rounded-full text-white shadow-xl hover:shadow-2xl transition-all hover:scale-105 cursor-grab active:cursor-grabbing"
       style={{ background: NAVY_GRADIENT }}
     >
       <span className="relative flex items-center justify-center w-2.5 h-2.5 shrink-0">
@@ -335,8 +460,21 @@ function Pill({ entry, seconds, onExpand }: { entry: EntryView; seconds: number;
 
 function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: number; onMinimize: () => void }) {
   const t = useTimeTracker()!;
-  const { context, paused, busy, error, pause, resume, complete, discard } = t;
+  const { context, paused, busy, error, pause, resume, complete, discard, adjust, autoTrack, setAutoTrack } = t;
   const runningNow = entry.status === "running";
+  // 30+ minutes is real money on the line — discarding it gets a two-step
+  // confirm (armed button, self-disarms), and editing it down becomes possible.
+  const longSession = seconds >= 30 * 60;
+  const [armDiscard, setArmDiscard] = useState(false);
+  useEffect(() => {
+    if (!armDiscard) return;
+    const id = setTimeout(() => setArmDiscard(false), 6000);
+    return () => clearTimeout(id);
+  }, [armDiscard]);
+  const [editing, setEditing] = useState(false);
+  const [editMins, setEditMins] = useState("");
+  const [confirmEdit, setConfirmEdit] = useState(false);
+  const editTarget = Math.max(0, Math.round(Number(editMins) || 0));
   // Budget context is only meaningful when the page's client IS this timer's.
   // Budget context only applies to CLIENT entries whose client is this page's.
   const onThisClient = !!entry.clientLinkId && !!context && context.clientLinkId === entry.clientLinkId;
@@ -352,11 +490,12 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
   const otherPaused = paused.filter((p) => p.id !== entry.id);
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
-      <div className="px-4 py-3" style={{ background: NAVY_GRADIENT }}>
+    <div className="w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-cardline overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+      <div data-drag-handle className="px-4 py-3 cursor-grab active:cursor-grabbing" style={{ background: NAVY_GRADIENT }}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-white/60">
+              <GripVertical size={11} className="text-white/40" />
               <Clock size={11} /> {runningNow ? "Tracking" : entry.autoPaused ? "Auto-paused" : "Paused"}
             </div>
             <div className="text-sm font-bold text-white truncate">{entry.label}</div>
@@ -438,19 +577,90 @@ function Card({ entry, seconds, onMinimize }: { entry: EntryView; seconds: numbe
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} Complete
           </button>
-          <button
-            onClick={() => {
-              if (confirm(`Discard this session on ${entry.label}? The time won't be recorded.`)) {
-                void discard(entry.id);
-              }
-            }}
-            disabled={busy}
-            title="Discard — wrong client, or the time isn't real"
-            className="text-ink-slate hover:text-rust shrink-0 disabled:opacity-60"
-          >
-            <Trash2 size={14} />
-          </button>
+          {longSession && armDiscard ? (
+            <button
+              onClick={() => { setArmDiscard(false); void discard(entry.id); }}
+              disabled={busy}
+              className="shrink-0 text-[11px] font-bold text-white bg-rust hover:bg-rust/90 rounded-lg px-2 py-2 disabled:opacity-60"
+            >
+              Discard {formatDuration(seconds)}?
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (longSession) setArmDiscard(true);
+                else if (confirm(`Discard this session on ${entry.label}? The time won't be recorded.`)) {
+                  void discard(entry.id);
+                }
+              }}
+              disabled={busy}
+              title={longSession ? "Discard — asks twice, this session is 30+ minutes" : "Discard — wrong client, or the time isn't real"}
+              className="text-ink-slate hover:text-rust shrink-0 disabled:opacity-60"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
         </div>
+
+        {/* Self-correction for a long session that over-counted — wrong account
+            for a stretch, a call in the middle. Reduce-only: adding time is an
+            admin correction on the time report, not a self-serve button. */}
+        {longSession && (
+          <div className="pt-1">
+            {!editing ? (
+              <button
+                onClick={() => { setEditing(true); setEditMins(String(Math.floor(seconds / 60))); setConfirmEdit(false); }}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-slate hover:text-navy"
+              >
+                <Pencil size={10} /> Ran long? Adjust the time down
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <input
+                  autoFocus
+                  value={editMins}
+                  onChange={(e) => { setEditMins(e.target.value); setConfirmEdit(false); }}
+                  onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+                  className="w-14 border border-gray-300 rounded px-1.5 py-1 text-right font-mono"
+                />
+                <span className="text-ink-slate">min</span>
+                {!confirmEdit ? (
+                  <button
+                    onClick={() => setConfirmEdit(true)}
+                    disabled={busy || editTarget * 60 > seconds}
+                    className="font-bold text-teal hover:underline disabled:opacity-50"
+                    title={editTarget * 60 > seconds ? "Reduce-only — you can't add time here" : undefined}
+                  >
+                    Save
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { setEditing(false); setConfirmEdit(false); void adjust(entry.id, editTarget); }}
+                    disabled={busy}
+                    className="font-bold text-white bg-rust hover:bg-rust/90 rounded px-2 py-0.5 disabled:opacity-50"
+                  >
+                    Confirm — {formatDuration(seconds)} → {formatDuration(editTarget * 60)}
+                  </button>
+                )}
+                <button onClick={() => setEditing(false)} className="text-ink-slate hover:text-navy">Cancel</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Auto-track: follow me around, or wait for the button. */}
+        <label className="flex items-center gap-2 pt-1 text-[11px] text-ink-slate cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={autoTrack}
+            onChange={(e) => setAutoTrack(e.target.checked)}
+            className="accent-teal"
+          />
+          <span>
+            <span className="font-semibold text-navy">Auto-track</span> — the timer follows the client
+            page I&apos;m on (pauses the old one)
+          </span>
+        </label>
 
         {otherPaused.length > 0 && (
           <div className="pt-2 border-t border-gray-100">
@@ -563,8 +773,8 @@ function shortName(name: string): string {
 function IdlePrompt({ entry, seconds }: { entry: EntryView; seconds: number }) {
   const t = useTimeTracker()!;
   return (
-    <div className="fixed bottom-5 right-5 z-50 w-[320px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-amber-300 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
-      <div className="px-4 py-3 bg-amber-50 border-b border-amber-200">
+    <div className="w-[320px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-amber-300 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+      <div data-drag-handle className="px-4 py-3 bg-amber-50 border-b border-amber-200 cursor-grab active:cursor-grabbing">
         <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-800">
           <AlertCircle size={12} /> Still there?
         </div>
@@ -589,6 +799,60 @@ function IdlePrompt({ entry, seconds }: { entry: EntryView; seconds: number }) {
         <p className="text-[11px] text-ink-slate leading-snug pt-0.5">
           Pausing drops the idle stretch instead of billing it — the honest answer
           if you stepped away.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── 30-minute account check ─────────────────────────────────────────────────
+// Only fires when the evidence DOESN'T already say "yes, still on it" — being
+// on that client's pages with a warm keyboard re-arms silently. So when this
+// does appear, take it seriously: the clock's been running half an hour and
+// you've visibly moved elsewhere.
+
+function AccountCheckPrompt({ entry, seconds }: { entry: EntryView; seconds: number }) {
+  const t = useTimeTracker()!;
+  const { context, busy, start, pause, ackAccountCheck } = t;
+  const elsewhere =
+    !!context && !!entry.clientLinkId && context.clientLinkId !== entry.clientLinkId;
+  return (
+    <div className="w-[330px] max-w-[calc(100vw-2.5rem)] bg-white rounded-2xl shadow-2xl border border-amber-300 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200">
+      <div data-drag-handle className="px-4 py-3 bg-amber-50 border-b border-amber-200 cursor-grab active:cursor-grabbing">
+        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-800">
+          <Clock size={12} /> Right account?
+        </div>
+        <div className="mt-1 text-sm font-bold text-navy">{entry.label}</div>
+        <div className="text-[11px] text-amber-900">
+          {formatClock(seconds)} on the clock — just checking it&apos;s still this one.
+        </div>
+      </div>
+      <div className="p-3 space-y-1.5">
+        <button
+          onClick={ackAccountCheck}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-teal text-white text-xs font-bold hover:bg-teal-dark"
+        >
+          <CheckCircle2 size={13} /> Yes — still {shortName(entry.label)}
+        </button>
+        {elsewhere && (
+          <button
+            onClick={() => { ackAccountCheck(); void start({ clientLinkId: context!.clientLinkId }); }}
+            disabled={busy}
+            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-teal text-teal text-xs font-bold hover:bg-teal-light/30 disabled:opacity-60"
+          >
+            <Play size={13} /> No — switch to {shortName(context!.clientName || "this client")}
+          </button>
+        )}
+        <button
+          onClick={() => { ackAccountCheck(); void pause(entry.id); }}
+          disabled={busy}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-navy text-xs font-semibold hover:border-gray-300 disabled:opacity-60"
+        >
+          <Pause size={13} /> Pause it
+        </button>
+        <p className="text-[11px] text-ink-slate leading-snug pt-0.5">
+          Wrong account for a while? Expand the timer — a 30+ minute session can be
+          adjusted down or discarded.
         </p>
       </div>
     </div>

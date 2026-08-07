@@ -49,6 +49,7 @@ import type {
 import type { OverviewData, BalanceSheetSummary } from "@/lib/portal-data";
 import { buildPLHierarchy, formatPctOfIncome, type PLHierSection as PLHierSectionData } from "@/lib/pl-hierarchy";
 import { ClientDetailsCard } from "./client-details-card";
+import { RevenueBasisCard } from "./revenue-basis-card";
 import { ResendLoginLink } from "./resend-login-link";
 import { PortalUsersCard } from "./portal-users-card";
 import { ReclassBar, txnKeyOf, type ReclassTxn } from "./txn-reclass";
@@ -61,6 +62,8 @@ type ClientLink = {
   id: string;
   client_name: string;
   qbo_realm_id: string | null;
+  /** "standard" | "deposits_only" — see lib/revenue-recognition.ts. */
+  revenue_recognition_mode?: string | null;
   industry: string | null;
   jurisdiction: string | null;
   state_province: string | null;
@@ -860,6 +863,16 @@ function ProfileTab({
 }) {
   return (
     <div className="space-y-6">
+      {/* Revenue basis sits ABOVE the detail fields: it is the setting that
+          decides whether this client's close gets hard-blocked by the
+          duplicate-revenue red flags every month, so a reviewer shouldn't have
+          to scroll past twenty contact fields to find it. */}
+      <RevenueBasisCard
+        clientLinkId={clientLink.id}
+        clientName={clientLink.client_name || "this client"}
+        initialMode={clientLink.revenue_recognition_mode === "deposits_only" ? "deposits_only" : "standard"}
+        canEdit={actorRole === "admin" || actorRole === "lead"}
+      />
       <ClientDetailsCard
         clientLinkId={clientLink.id}
         jurisdiction={clientLink.jurisdiction ?? null}

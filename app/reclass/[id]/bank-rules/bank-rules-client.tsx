@@ -772,8 +772,19 @@ export function BankRulesFromReclassClient({
         )}
       </div>
 
+      {/* overflow-hidden on the card is what rounds the corners — but it also
+          CLIPPED the last two columns, with no way to scroll to them: an
+          unconstrained <select> sizes itself to its longest option, and some
+          master-COA paths run ~100 characters ("OTHER GENERAL AND ADMIN
+          EXPENSES:Professional Fees:Continuing Education / Professional
+          Development"), so the table grew past the card and Transactions /
+          Total simply vanished off the right edge. The scroll container is
+          nested inside the rounded card so corners still clip AND the columns
+          stay reachable; the select is capped below so it usually doesn't come
+          to that. */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[46rem] text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50">
               <th className="w-10 px-4 py-3 text-left">
@@ -789,8 +800,8 @@ export function BankRulesFromReclassClient({
               </th>
               <th className="px-4 py-3 text-left font-semibold text-navy">Vendor</th>
               <th className="px-4 py-3 text-left font-semibold text-navy">Account</th>
-              <th className="px-4 py-3 text-right font-semibold text-navy">Transactions</th>
-              <th className="px-4 py-3 text-right font-semibold text-navy">Total</th>
+              <th className="px-4 py-3 text-right font-semibold text-navy whitespace-nowrap">Transactions</th>
+              <th className="px-4 py-3 text-right font-semibold text-navy whitespace-nowrap">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -866,7 +877,7 @@ export function BankRulesFromReclassClient({
                         value={currentTargetId}
                         onChange={(e) => setOverride(rule.vendorPattern, e.target.value)}
                         onClick={(e) => e.stopPropagation()}
-                        className={`text-xs font-semibold rounded-md border px-2 py-1 outline-none focus:ring-2 focus:ring-teal/40 cursor-pointer ${
+                        className={`w-full max-w-[22rem] text-xs font-semibold rounded-md border px-2 py-1 outline-none focus:ring-2 focus:ring-teal/40 cursor-pointer ${
                           needsTarget
                             ? "bg-white text-amber-800 border-amber-300"
                             : currentTargetId
@@ -931,6 +942,7 @@ export function BankRulesFromReclassClient({
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {error && (

@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { HEARTBEAT_MS, PAGE_PING_MS, isClientShapedPath } from "@/lib/time-tracking";
+import { HEARTBEAT_MS, PAGE_PING_MS, elapsedSeconds, isClientShapedPath } from "@/lib/time-tracking";
 import { TimeTrackerWidget } from "./TimeTrackerWidget";
 
 /**
@@ -42,8 +42,20 @@ const SKIP_PREFIXES = [
 ];
 
 const MINIMIZED_KEY = "snap.timer.minimized";
+const AUTOTRACK_KEY = "snap.timer.autotrack";
+const POS_KEY = "snap.timer.pos";
 /** No input for this long with a timer running → ask if they're still working. */
 const IDLE_MS = 10 * 60_000;
+/** Dwell on a different client's page before auto-track switches the timer.
+ *  Long enough that passing through a page to check one number doesn't churn
+ *  the timer; short enough that real work is captured from near the start. */
+const AUTO_TRACK_DWELL_MS = 12_000;
+/** A session this long on one account triggers "still on the right account?" —
+ *  unless the page you're on IS that account and you've been active (then the
+ *  question would be noise; we skip it silently and re-arm). */
+const ACCOUNT_CHECK_MS = 30 * 60;
+/** "Recent input" window for that silent skip. */
+const ACCOUNT_CHECK_ACTIVE_MS = 5 * 60_000;
 const CHANNEL = "snap.timer";
 
 export interface EntryView {
@@ -104,6 +116,21 @@ interface TimerCtx {
   noteRequest: NoteRequest | null;
   minimized: boolean;
   setMinimized: (v: boolean) => void;
+  /** Auto-track: navigating to another client's page moves the timer there
+   *  (pausing the old one), and landing on a client page with nothing running
+   *  starts a timer — no button. Persisted per browser. */
+  autoTrack: boolean;
+  setAutoTrack: (v: boolean) => void;
+  /** Widget screen position, dragged by the user. null = default corner. */
+  pos: { x: number; y: number } | null;
+  setPos: (p: { x: number; y: number } | null) => void;
+  /** "Still on the right account?" — a long session needs a nod. */
+  accountCheck: boolean;
+  /** Acknowledge the check; re-asks after another 30 minutes. */
+  ackAccountCheck: () => void;
+  /** Owner self-correction: set this session's banked time DOWN to `minutes`.
+   *  Reduce-only — inflating time goes through an admin, not a self-serve UI. */
+  adjust: (entryId: string, minutes: number) => Promise<void>;
   dismissedForClient: (clientLinkId: string) => boolean;
   dismissPrompt: (clientLinkId: string) => void;
   /** Start client work (clientLinkId) or overhead (category) — exactly one. */
@@ -156,6 +183,25 @@ export function TimeTrackerProvider() {
   const [progress, setProgress] = useState<MyProgress | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [idlePrompt, setIdlePrompt] = useState(false);
+  const [autoTrack, setAutoTrackState] = useState(false);
+  // ── Multi-window coordination ────────────────────────────────────────────
+  // Two SNAP windows on two different clients would otherwise FIGHT: each
+  // background tab's auto-track timer still fires (throttled, but it fires),
+  // so A switches the timer to A, B switches it back to B, forever. The rule
+  // that fixes it: only the window the bookkeeper is actually looking at gets
+  // a vote. focusedNow gates auto-track; lastFocusedRef ("was I the most
+  // recently focused SNAP tab?") gates page-dwell pings, and stays true when
+  // focus moves OUTSIDE the app (QBO in front → the tab they left keeps
+  // attributing, which is the designed QBO behavior). It only flips false
+  // when ANOTHER SNAP tab claims focus over the BroadcastChannel.
+  const tabIdRef = useRef<string | null>(null);
+  if (tabIdRef.current === null) tabIdRef.current = Math.random().toString(36).slice(2);
+  const lastFocusedRef = useRef(true);
+  const [focusedNow, setFocusedNow] = useState(true);
+  const [pos, setPosState] = useState<{ x: number; y: number } | null>(null);
+  const [accountCheck, setAccountCheck] = useState(false);
+  // Session-elapsed threshold (seconds) for the next account check, per entry.
+  const accountCheckRef = useRef<{ entryId: string; at: number } | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
   const abortRef = useRef<AbortController | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
@@ -184,6 +230,46 @@ export function TimeTrackerProvider() {
   const setMinimized = useCallback((v: boolean) => {
     setMinimizedState(v);
     try { window.localStorage.setItem(MINIMIZED_KEY, v ? "1" : "0"); } catch { /* ignore */ }
+  }, []);
+
+  // Auto-track preference. Unset → default ON for bookkeepers (the "forgot to
+  // click start" problem is theirs), OFF for seniors — an admin spot-checking
+  // ten clients in ten minutes doesn't want ten timers.
+  useEffect(() => {
+    if (!me) return;
+    try {
+      const stored = window.localStorage.getItem(AUTOTRACK_KEY);
+      if (stored === "1") setAutoTrackState(true);
+      else if (stored === "0") setAutoTrackState(false);
+      else setAutoTrackState(me.role === "bookkeeper");
+    } catch { setAutoTrackState(me.role === "bookkeeper"); }
+  }, [me]);
+  const setAutoTrack = useCallback((v: boolean) => {
+    setAutoTrackState(v);
+    try { window.localStorage.setItem(AUTOTRACK_KEY, v ? "1" : "0"); } catch { /* ignore */ }
+  }, []);
+
+  // Dragged widget position — hydrated after mount (SSR convention), clamped so
+  // an old saved position on a smaller window can't strand the widget offscreen.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(POS_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (typeof p?.x === "number" && typeof p?.y === "number") {
+        setPosState({
+          x: Math.min(Math.max(0, p.x), window.innerWidth - 60),
+          y: Math.min(Math.max(0, p.y), window.innerHeight - 40),
+        });
+      }
+    } catch { /* ignore */ }
+  }, []);
+  const setPos = useCallback((p: { x: number; y: number } | null) => {
+    setPosState(p);
+    try {
+      if (p) window.localStorage.setItem(POS_KEY, JSON.stringify(p));
+      else window.localStorage.removeItem(POS_KEY);
+    } catch { /* ignore */ }
   }, []);
 
   const applyState = useCallback((d: any) => {
@@ -245,14 +331,44 @@ export function TimeTrackerProvider() {
   }, [enabled, loadState]);
 
   // Cross-tab: any tab that mutates broadcasts; the others resync immediately
-  // (CustomEvent — the lib/sounds.ts precedent — is same-tab only).
+  // (CustomEvent — the lib/sounds.ts precedent — is same-tab only). The same
+  // channel carries focus claims, which are NOT mutations — no refetch.
   useEffect(() => {
     if (!enabled || typeof BroadcastChannel === "undefined") return;
     const ch = new BroadcastChannel(CHANNEL);
     channelRef.current = ch;
-    ch.onmessage = () => { void loadState(); };
+    ch.onmessage = (e: MessageEvent) => {
+      const d = e?.data;
+      if (d && d.focusClaim) {
+        if (d.focusClaim !== tabIdRef.current) lastFocusedRef.current = false;
+        return;
+      }
+      void loadState();
+    };
     return () => { ch.close(); channelRef.current = null; };
   }, [enabled, loadState]);
+
+  // Track "am I the window being looked at" + claim ownership on focus.
+  useEffect(() => {
+    if (!enabled) return;
+    const sync = () =>
+      setFocusedNow(document.visibilityState === "visible" && document.hasFocus());
+    const claim = () => {
+      lastFocusedRef.current = true;
+      try { channelRef.current?.postMessage({ focusClaim: tabIdRef.current }); } catch { /* ignore */ }
+      sync();
+    };
+    sync();
+    if (document.hasFocus()) claim();
+    window.addEventListener("focus", claim);
+    window.addEventListener("blur", sync);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.removeEventListener("focus", claim);
+      window.removeEventListener("blur", sync);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [enabled]);
   const broadcast = useCallback(() => {
     try { channelRef.current?.postMessage({ t: Date.now() }); } catch { /* ignore */ }
   }, []);
@@ -335,8 +451,16 @@ export function TimeTrackerProvider() {
       sendPageView(entryId, path, true);
       return;
     }
-    sendPageView(entryId, path, false);
-    const id = setInterval(() => sendPageView(entryId, path, false), PAGE_PING_MS);
+    // Only the most-recently-focused SNAP tab attributes. Two tabs on two
+    // pages would otherwise alternate the session's dwell between their paths
+    // every ping. lastFocusedRef (not live focus) is deliberate: it stays true
+    // when QBO takes focus, so the page they worked from keeps accruing —
+    // it only yields when ANOTHER SNAP tab claims. Closes stay unconditional;
+    // closing somebody else's open view is harmless, leaving one open isn't.
+    if (lastFocusedRef.current) sendPageView(entryId, path, false);
+    const id = setInterval(() => {
+      if (lastFocusedRef.current) sendPageView(entryId, path, false);
+    }, PAGE_PING_MS);
     return () => {
       clearInterval(id);
       sendPageView(entryId, path, true);
@@ -416,10 +540,13 @@ export function TimeTrackerProvider() {
       }
       setNoteRequest(null);
       setPickerOpen(false);
+      // The moment tracking starts, get out of the way — the widget's job is
+      // to record, not to sit over the buttons someone is trying to click.
+      setMinimized(true);
       await loadState();
       broadcast();
     },
-    [act, pathname, loadState, broadcast]
+    [act, pathname, loadState, broadcast, setMinimized]
   );
 
   const pause: TimerCtx["pause"] = useCallback(
@@ -427,7 +554,22 @@ export function TimeTrackerProvider() {
     [act, loadState, broadcast]
   );
   const resume: TimerCtx["resume"] = useCallback(
-    async (entryId) => { if (await act(`/api/time-tracking/${entryId}/resume`)) { await loadState(); broadcast(); } },
+    async (entryId) => {
+      if (await act(`/api/time-tracking/${entryId}/resume`)) {
+        setMinimized(true);
+        await loadState();
+        broadcast();
+      }
+    },
+    [act, loadState, broadcast, setMinimized]
+  );
+  const adjust: TimerCtx["adjust"] = useCallback(
+    async (entryId, minutes) => {
+      if (await act(`/api/time-tracking/${entryId}/adjust`, { minutes })) {
+        await loadState();
+        broadcast();
+      }
+    },
     [act, loadState, broadcast]
   );
   const discard: TimerCtx["discard"] = useCallback(
@@ -499,6 +641,105 @@ export function TimeTrackerProvider() {
     if (d) { await loadState(); broadcast(); }
   }, [runningId, act, loadState, broadcast]);
 
+  // ── Auto-track ──────────────────────────────────────────────────────────
+  // The forget-to-click-start fix. When the page you're on resolves to a
+  // client and the timer disagrees, the timer follows you — after a 12s dwell,
+  // so passing through a page to check one number doesn't churn anything.
+  //
+  //   nothing running            → start a timer for this page's client
+  //   running on another client  → PAUSE it (never silently complete — the
+  //     over-budget note is owed at completion, and an auto-switch must not
+  //     become a way around it), then resume this client's paused entry if
+  //     one exists, else start fresh. Back-and-forth therefore reopens the
+  //     same sessions instead of littering new ones.
+  //   running on overhead        → left alone. Fleet work legitimately walks
+  //     through client pages; hijacking it would misbill every walk-through.
+  //
+  // Fire-time state is read from a ref so the dwell timer isn't reset by
+  // unrelated re-renders, and so a note modal or idle prompt opening after the
+  // timer was armed still vetoes the switch.
+  const autoTrackSnap = useRef({ running, paused, noteRequest, idlePrompt, busy, dismissed });
+  autoTrackSnap.current = { running, paused, noteRequest, idlePrompt, busy, dismissed };
+
+  const ctxClientId = context?.clientLinkId ?? null;
+  useEffect(() => {
+    // FOCUSED WINDOWS ONLY. Without this gate, two windows open on two
+    // different clients ping-pong the timer forever (background setTimeout
+    // still fires). With it, the semantics are exactly what a bookkeeper
+    // flipping between windows expects: the timer follows the window you've
+    // been LOOKING AT for 12s — and switching to QBO changes nothing, because
+    // QBO taking focus doesn't put any SNAP tab in charge.
+    if (!enabled || !autoTrack || !ctxClientId || !focusedNow) return;
+    if (running && !running.clientLinkId) return;            // overhead — hands off
+    if (running && running.clientLinkId === ctxClientId) return; // already right
+    const t = setTimeout(() => {
+      const s = autoTrackSnap.current;
+      if (s.noteRequest || s.idlePrompt || s.busy) return;
+      if (s.running && s.running.clientLinkId === ctxClientId) return;
+      if (s.running && !s.running.clientLinkId) return;
+      // "Not now" (the X on the prompt) means not automatically either.
+      if (s.dismissed.has(ctxClientId)) return;
+      // Re-verify at fire time — the 12s may have ended somewhere else.
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      const pausedHere = s.paused.find((p) => p.clientLinkId === ctxClientId);
+      // resume() pauses the running timer server-side before reopening this
+      // one; start() auto-pauses it too — one call either way, no race.
+      if (pausedHere) void resume(pausedHere.id);
+      else void start({ clientLinkId: ctxClientId });
+    }, AUTO_TRACK_DWELL_MS);
+    return () => clearTimeout(t);
+  }, [enabled, autoTrack, ctxClientId, focusedNow, running, resume, start]);
+
+  // ── 30-minute account check ─────────────────────────────────────────────
+  // A session crossing 30 minutes (then 60, 90…) gets one question: still on
+  // the right account? EXCEPT when the evidence says yes — you're on that
+  // client's pages and the keyboard is warm — in which case asking is noise
+  // and the check re-arms silently. The prompt is exactly for the other case:
+  // half an hour on the clock while you've visibly moved on.
+  useEffect(() => {
+    if (!enabled || !running || running.status !== "running") {
+      setAccountCheck(false);
+      return;
+    }
+    if (accountCheckRef.current?.entryId !== running.id) {
+      accountCheckRef.current = { entryId: running.id, at: ACCOUNT_CHECK_MS };
+    }
+    const iv = setInterval(() => {
+      const s = autoTrackSnap.current;
+      if (!s.running || s.running.status !== "running" || s.noteRequest || s.idlePrompt) return;
+      // Only prompt in a visible window — a hidden tab raising the question
+      // means answering it twice when both tabs are eventually seen.
+      if (document.visibilityState !== "visible") return;
+      const mark = accountCheckRef.current;
+      if (!mark || mark.entryId !== s.running.id) return;
+      const live = elapsedSeconds(
+        {
+          status: s.running.status,
+          last_resumed_at: s.running.lastResumedAt,
+          accumulated_seconds: s.running.accumulatedSeconds,
+          last_heartbeat_at: null,
+        },
+        Date.now() + offsetMs
+      );
+      if (live < mark.at) return;
+      const onThatClient =
+        !!s.running.clientLinkId && ctxClientId === s.running.clientLinkId;
+      const recentlyActive = Date.now() - lastActivityRef.current < ACCOUNT_CHECK_ACTIVE_MS;
+      if (onThatClient && recentlyActive) {
+        mark.at += ACCOUNT_CHECK_MS; // clearly still on it — don't ask
+      } else {
+        setAccountCheck(true);
+      }
+    }, 30_000);
+    return () => clearInterval(iv);
+  }, [enabled, running, ctxClientId, offsetMs]);
+
+  const ackAccountCheck = useCallback(() => {
+    const mark = accountCheckRef.current;
+    if (mark) mark.at += ACCOUNT_CHECK_MS;
+    setAccountCheck(false);
+  }, []);
+
   // ── Keyboard shortcuts ──────────────────────────────────────────────────
   // Alt-chords only, and never while typing — the whole point is saving a trip
   // to the mouse, not stealing keystrokes from a memo field.
@@ -530,7 +771,9 @@ export function TimeTrackerProvider() {
   const value = useMemo<TimerCtx>(
     () => ({
       me, context, running, paused, offsetMs, busy, error, noteRequest, minimized,
-      setMinimized, dismissedForClient, dismissPrompt,
+      setMinimized, autoTrack, setAutoTrack, pos, setPos,
+      accountCheck, ackAccountCheck, adjust,
+      dismissedForClient, dismissPrompt,
       start, pause, resume, complete, discard,
       categories, clients, loadClients, pickerOpen, setPickerOpen,
       progress, suggestions, idlePrompt, dismissIdle,
@@ -539,7 +782,9 @@ export function TimeTrackerProvider() {
       refresh: () => { void loadState(); },
     }),
     [me, context, running, paused, offsetMs, busy, error, noteRequest, minimized,
-     setMinimized, dismissedForClient, dismissPrompt, start, pause, resume, complete, discard,
+     setMinimized, autoTrack, setAutoTrack, pos, setPos,
+     accountCheck, ackAccountCheck, adjust,
+     dismissedForClient, dismissPrompt, start, pause, resume, complete, discard,
      categories, clients, loadClients, pickerOpen, loadState,
      progress, suggestions, idlePrompt, dismissIdle, pauseAtLastActivity]
   );

@@ -53,6 +53,11 @@ import { consolidateBankRulesForExport } from "@/lib/rules-eligibility";
 // parents) — budget beyond Vercel's default cap the same as apply-master-coa.
 export const maxDuration = 300;
 
+/** A BIFF8 (.xls) text cell holds 255 chars. SheetJS truncates silently past
+ *  it — no error, just a chopped string — so anything bound for a cell must be
+ *  measured against this BEFORE writing, or the file ships corrupt. */
+const BIFF_CELL_LIMIT = 255;
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ client_link_id: string }> }
@@ -230,6 +235,8 @@ export async function GET(
 
   // Build the rows in QBO's exact format. One row per (consolidated) rule.
   const rows: Array<Record<string, string>> = [];
+  /** Rules dropped because their JSON exceeded the BIFF8 cell limit. */
+  const oversized: Array<{ vendor: string; account: string; chars: number }> = [];
   for (const r of exportRules) {
     const vendor = (r.vendor_pattern || "").trim();
     // Canonicalize to the exact live QBO account name (parent:sub) so QBO's
@@ -264,19 +271,41 @@ export async function GET(
     // import. Payee similarly requires matching an existing QBO vendor
     // by exact name; we'd need a fuzzy match per-client to be safe.
     // Leaving both blank lets QBO apply its default behavior.
+    // NO actionType 1 (memo). It only echoed the vendor pattern back for
+    // eyeballing in QBO's transaction list, and it doubled the size of this
+    // payload — which matters because of BIFF_CELL_LIMIT below. Not worth
+    // corrupting an export for.
     const outputs = {
       ruleActions: [
         { actionType: 0, value: account },
-        { actionType: 1, value: vendor },
         { actionType: 11, value: [] as unknown[] },
         { actionType: 8, value: true },
       ],
     };
 
+    const condJson = JSON.stringify(conditions);
+    const outJson = JSON.stringify(outputs);
+
+    // A BIFF8 text cell holds 255 characters, and SheetJS TRUNCATES silently
+    // at that boundary — it does not throw. A rule whose JSON ran past 255
+    // therefore shipped as a chopped-off string like
+    // `...,{"actionType":11,"v` , which is not valid JSON, and QBO rejects the
+    // WHOLE file with a flat "Could not upload file" naming no row. INTAC lost
+    // all 109 rules to 3 bad ones. Skip the offender, keep the export, and
+    // tell the caller exactly which rules didn't make it.
+    if (condJson.length > BIFF_CELL_LIMIT || outJson.length > BIFF_CELL_LIMIT) {
+      oversized.push({
+        vendor,
+        account,
+        chars: Math.max(condJson.length, outJson.length),
+      });
+      continue;
+    }
+
     rows.push({
       "Rule Name": vendor,
-      "Rule Conditions": JSON.stringify(conditions),
-      "Rule Outputs": JSON.stringify(outputs),
+      "Rule Conditions": condJson,
+      "Rule Outputs": outJson,
     });
   }
 
@@ -350,6 +379,10 @@ export async function GET(
     headers: {
       "Content-Type": "application/vnd.ms-excel",
       "Content-Disposition": `attachment; filename="${filename}"`,
+      // The body is a binary file, so there is no JSON to carry warnings —
+      // these are how a caller learns the export dropped anything.
+      "X-Rules-Exported": String(rows.length),
+      "X-Rules-Skipped-Oversized": String(oversized.length),
       "Content-Length": String(buffer.length),
       // Header values must stay ASCII/newline-free — encode the account
       // name lists so the client component can surface exactly which
