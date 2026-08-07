@@ -14,6 +14,7 @@ import { OnboardingNagBanner } from "./onboarding-nag-banner";
 import { SupportWidget } from "./support-widget";
 import { tryResolvePortalContext } from "@/lib/portal-context";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase";
+import { PORTAL_PAGES } from "@/lib/portal-pages";
 
 /**
  * Real client portal shell. Auth-gated via resolvePortalContext, which
@@ -199,6 +200,33 @@ export default async function PortalLayout({ children }: { children: React.React
     }
   }
 
+  // Per-user page permissions (client_users.allowed_pages) drive which nav
+  // links render. NULL = full access. Middleware enforces the same list
+  // server-side for real clients; here we ALSO apply it when an admin is
+  // impersonating, so "view portal as client" previews exactly what that
+  // portal user sees. Effective user = the impersonation target when
+  // impersonating, otherwise the signed-in client. In degraded (no-QBO)
+  // mode ctx.userId is "", so fall back to the real signed-in user.
+  let allowedPages: string[] | null = null;
+  try {
+    const effectiveUserId = ctx.userId || (!isInternal ? user.id : "");
+    if (effectiveUserId) {
+      const { data: permRow } = await (service as any)
+        .from("client_users")
+        .select("allowed_pages")
+        .eq("user_id", effectiveUserId)
+        .eq("active", true)
+        .maybeSingle();
+      const pages = (permRow as any)?.allowed_pages;
+      allowedPages = Array.isArray(pages) ? pages : null;
+    }
+  } catch {
+    allowedPages = null; // pre-migration environment → full menu
+  }
+  const can = (key: string) => !allowedPages || allowedPages.includes(key);
+  const sectionVisible = (section: string) =>
+    PORTAL_PAGES.some((p) => p.section === section && can(p.key));
+
   // Onboarding nag — persistent "finish setup" strip until the new client
   // completes the required steps (form + docs). Self-hides on the wizard page.
   let needsOnboarding = false;
@@ -258,36 +286,46 @@ export default async function PortalLayout({ children }: { children: React.React
           {/* Grouped so the portal reads as a few clear sections instead of a
               flat wall of links: Overview on top, then Finances / Your books /
               Help, with account actions (Billing, Settings) in the footer. */}
+          {/* Every link below is gated by can(<page key>) — the per-user page
+              permissions set on the client's profile (Portal users card).
+              Overview + Settings always render. Middleware enforces the same
+              rules server-side, so hiding here is UX, not the security layer. */}
           <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
             <NavLink href="/portal" icon={Home} label="Overview" />
 
-            <NavSection label="Finances" />
-            <FinancialStatementsNav />
-            <NavLink href="/portal/whos-paying" icon={Wallet} label="Who owes you" />
-            <NavLink href="/portal/whats-due" icon={Receipt} label="What you owe" />
+            {sectionVisible("Finances") && <NavSection label="Finances" />}
+            {can("financial_statements") && <FinancialStatementsNav />}
+            {can("whos_paying") && <NavLink href="/portal/whos-paying" icon={Wallet} label="Who owes you" />}
+            {can("whats_due") && <NavLink href="/portal/whats-due" icon={Receipt} label="What you owe" />}
 
-            <NavSection label="Your books" />
-            <NavLink
-              href="/portal/categorize"
-              icon={Tags}
-              label="Categorize"
-              badge={openCategorize > 0 ? String(openCategorize) : undefined}
-              badgeTone="alert"
-            />
-            <NavLink href="/portal/cleanup-reports" icon={FileCheck2} label="Cleanup Reports" />
+            {sectionVisible("Your books") && <NavSection label="Your books" />}
+            {can("categorize") && (
+              <NavLink
+                href="/portal/categorize"
+                icon={Tags}
+                label="Categorize"
+                badge={openCategorize > 0 ? String(openCategorize) : undefined}
+                badgeTone="alert"
+              />
+            )}
+            {can("cleanup_reports") && (
+              <NavLink href="/portal/cleanup-reports" icon={FileCheck2} label="Cleanup Reports" />
+            )}
 
-            <NavSection label="Help &amp; learning" />
+            {sectionVisible("Help & learning") && <NavSection label="Help &amp; learning" />}
             {/* Live: polls unread count, red pill + chime on new messages */}
-            <MessagesNavLink initialCount={unreadMessages} />
-            <NavLink href="/portal/ask-ai" icon={Sparkles} label="Ask the AI" badge="NEW" ai />
-            <NavLink href="/portal/knowledge-base" icon={BookOpen} label="Knowledge Base" />
-            <NavLink href="/portal/learn" icon={GraduationCap} label="Learn" />
-            <NavLink href="/portal/coaching-call" icon={Phone} label="Book a coaching call" />
+            {can("messages") && <MessagesNavLink initialCount={unreadMessages} />}
+            {can("ask_ai") && <NavLink href="/portal/ask-ai" icon={Sparkles} label="Ask the AI" badge="NEW" ai />}
+            {can("knowledge_base") && <NavLink href="/portal/knowledge-base" icon={BookOpen} label="Knowledge Base" />}
+            {can("learn") && <NavLink href="/portal/learn" icon={GraduationCap} label="Learn" />}
+            {can("coaching_call") && (
+              <NavLink href="/portal/coaching-call" icon={Phone} label="Book a coaching call" />
+            )}
 
             {/* Account actions sit right under Help so they're reachable without
-                scrolling to the footer. */}
+                scrolling to the footer. Settings is always accessible. */}
             <NavSection label="Account" />
-            <NavLink href="/portal/billing" icon={CreditCard} label="Billing &amp; Plan" />
+            {can("billing") && <NavLink href="/portal/billing" icon={CreditCard} label="Billing &amp; Plan" />}
             <NavLink href="/portal/settings" icon={Settings} label="Settings" />
           </nav>
 
